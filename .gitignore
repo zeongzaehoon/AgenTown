@@ -1,0 +1,9 @@
+.idea/
+.DS_Store
+.harness/
+target/
+__pycache__/
+*.pyc
+.env
+.env.*
+!.env.example
