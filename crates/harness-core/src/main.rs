@@ -333,9 +333,32 @@ mod integration_tests {
     fn config() -> Config {
         serde_json::from_str(include_str!("../../../harness/config.json")).unwrap()
     }
+    fn isolate_test(name: &str) -> bool {
+        // Other parallel tests spawn children and would intentionally inherit
+        // an open lease. Exercise its lifecycle in a separate test process.
+        if std::env::var_os("HARNESS_LEASE_TEST_CHILD").is_some() {
+            return false;
+        }
+        let test = format!("integration_tests::{name}");
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", &test, "--nocapture"])
+            .env("HARNESS_LEASE_TEST_CHILD", "1")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        true
+    }
     #[cfg(unix)]
     #[test]
     fn supervisor_lease_survives_in_child() {
+        if isolate_test("supervisor_lease_survives_in_child") {
+            return;
+        }
         let d = tempfile::tempdir().unwrap();
         let _db = Store::open(d.path()).unwrap();
         let lease = acquire(d.path()).unwrap();
@@ -400,6 +423,10 @@ mod integration_tests {
     }
     #[test]
     fn duplicate_runner_rejected() {
+        if isolate_test("duplicate_runner_rejected") {
+            return;
+        }
+
         let d = tempfile::tempdir().unwrap();
         let _db = Store::open(d.path()).unwrap();
         let lease = acquire(d.path()).unwrap();
