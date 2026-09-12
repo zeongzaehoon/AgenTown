@@ -7,3 +7,8 @@ __pycache__/
 .env
 .env.*
 !.env.example
+
+# Local development agents and harness (not product deliverables)
+/.agents/
+/AGENTS.md
+/CLAUDE.md
