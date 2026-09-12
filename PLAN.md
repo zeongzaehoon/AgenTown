@@ -45,7 +45,7 @@ LLM 에이전트를 활용해 업무 자동화부터 프로젝트 생성과 구�
 | 영역 | 기술 및 원칙 |
 | --- | --- |
 | 아키텍처 | Hexagonal Architecture를 적용한다. |
-| 인터페이스 계층 | Python으로 구현한다. |
+| 인터페이스 계층 | Python 3.13으로 구현한다. |
 | 시스템 동작 | Rust로 구현한다. 데이터 생성·수정·삭제, 모든 CPU 바운드 처리와 멀티스레드 작업을 담당한다. |
 | LLM 연동 | OpenAI, Anthropic, Google, AWS Bedrock의 SDK를 각각 사용한다. Local LLM도 지원하며, 원안은 OpenAI SDK를 통한 연동을 전제로 한다. |
 | MCP 서버 | FastMCP로 구현한다. 인터페이스는 Python, 시스템 동작은 Rust로 분리하는 동일한 원칙을 적용한다. |
