@@ -822,3 +822,42 @@ installed and frontend dependencies are absent in this isolated workspace, so
 frontend behavior/API tests and visible browser behavior remain **pending
 supervisor verification**, not observed passes. Live provider calls were skipped.
 See [the invocation record](evidence/c20-t3/implementation.md).
+
+### Company overview (C21-T1)
+
+With prepared frontend assets and the product installed, launch
+`agentown-web --database PATH` (use an existing writable parent directory) and
+open http://127.0.0.1:8765. No credentials or model are needed for this exercise.
+
+1. Create two employees, including two with the same name if desired. The
+   **Company overview** identifies each by its full employee ID and initially
+   shows **No assigned work**. Missing execution setup is a separate message.
+2. Save a request assigned to each employee without executing it. The pending
+   counts update from the same workspace refresh used by saved history. Counts
+   represent recorded requests, not estimated progress. Results remain unverified;
+   caller-reported active attempts do not imply provider execution.
+3. For existing shared assignments, count each request once for each assigned
+   employee, even if the assignment ID is repeated. Employee totals can therefore
+   exceed company request totals. Existing blocked/cancelled work appears in
+   **Other recorded work**. Unassigned work and assignments only to unavailable
+   employees appear under **Work without a current employee**. Choose **Open
+   work** there to inspect its saved detail; this resets history filters without
+   changing an unsaved draft. Shared/unassigned fixtures are covered deterministically
+   in component tests; the save form continues to assign one employee.
+4. Type an unsaved draft, stop the server and wait for disconnection. The overview
+   retains counts with an explicit stale-data warning. Restart the same database
+   and refresh the connection: recorded counts recover without automatic execution.
+   An initial unavailable response instead shows no invented empty employee state.
+5. Resize to a narrow viewport and use Tab/Enter to open unassigned work. Cards
+   wrap, labels remain textual, and existing visible focus styling applies. The
+   overview has no animation; the existing reduced-motion rule remains in effect.
+
+`CompanyOverview.test.tsx` covers mixed categories, empty output, duplicate names,
+shared and repeated assignments, unavailable employees, loading/empty/stale data,
+unassigned navigation, the existing 800ms App polling, disconnect/reconnect and
+retained drafts. Frontend dependencies are absent in this isolated workspace;
+these tests and TypeScript/build remain pending supervisor verification, together
+with supervisor-selected consolidated and browser checks. No browser execution
+or visual artifact is claimed here. Live provider calls are skipped, not passed.
+Existing WCAG guidance recorded in this document is reused; no new research
+uncertainty or API/schema change was introduced.

@@ -97,7 +97,7 @@ test('configuration and interrupted history remain actionable without automatic 
   expect(document.querySelector('#connection')!.textContent).toContain('Interrupted');
   expect(screen.getByText(/No automatic resend occurred/)).toBeTruthy();
   expect((screen.getByRole('button', {name: 'Retry explicitly'}) as HTMLButtonElement).disabled).toBe(true);
-  expect(screen.getByText(/Set ANTHROPIC_API_KEY/)).toBeTruthy();
+  expect(screen.getByText(/Set ANTHROPIC_API_KEY/, {selector: '#configuration'})).toBeTruthy();
   expect(f.calls.every(c => c.path === '/api/state')).toBe(true);
 });
 

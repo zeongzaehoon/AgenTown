@@ -1,3 +1,4 @@
+import { CompanyOverview } from './CompanyOverview';
 import { Connections } from './Connections';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { HistoryExport } from './history-export';
@@ -237,6 +238,9 @@ export function App() {
       <p id="connection" role="status" aria-live="polite">{connected ? `Connected · ${work ? workStatus(work) : 'Ready for your first work'}` : connectionError ? `Disconnected — displayed history may be out of date. ${connectionError}` : 'Connecting to your workspace…'}</p>
       <p id="configuration">{state && (state.configuration || `Provider: ${state.provider} · Model: ${state.model} · ${['anthropic', 'openai', 'bedrock', 'xai'].includes(state.provider) ? 'Real provider requests' : 'Test responses — not live validation'}`)}</p>
       <p id="notice" role="alert">{notice}</p><button id="refresh" type="button" onClick={() => void refresh()}>Refresh connection</button>
+      <CompanyOverview workspace={state} connected={connected} error={connectionError} onOpenWork={id => {
+        setSearch(''); setOutcome('all'); setSelected(id); historyRef.current?.focus();
+      }} />
       <div className="workspace"><aside><section><h2>1. Your employees</h2>
         <p id="employees-empty" hidden={!!state?.employees.length}>No employees yet. Create your first one.</p>
         <ul id="employees">{state?.employees.map(e => <li key={e.id}>{e.name}</li>)}</ul>
