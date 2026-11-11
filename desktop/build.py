@@ -86,6 +86,11 @@ def main():
     else:
         run("cargo", "tauri", "build", "--bundles", "app", cwd=DESKTOP)
         print("Unsigned desktop build: desktop/target/release/bundle/")
+    # Tauri has copied the service into the assembled artifact. Remove staging
+    # inputs and generated schemas so a successful build leaves the source
+    # fingerprint unchanged; the retained bundle remains independently usable.
+    shutil.rmtree(RESOURCES / "python")
+    shutil.rmtree(DESKTOP / "gen", ignore_errors=True)
 
 
 if __name__ == "__main__":
