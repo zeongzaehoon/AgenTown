@@ -126,6 +126,34 @@ python3.13 desktop/check_runtime.py desktop/target/release/bundle/macos/AgenTown
 
 For the assembled macOS app, use this acceptance sequence and record each result:
 
+The supervisor can prepare and launch the copied bundle with the following
+commands from the checkout root. Run them in one terminal session in a graphical
+macOS login, after the build succeeds. These commands launch the actual Tauri
+executable, rather than the staging service or a browser pointed at it:
+
+```sh
+desktop_acceptance_dir=$(mktemp -d /private/tmp/agentown-desktop-XXXXXX)
+mkdir "$desktop_acceptance_dir/empty-path"
+ditto desktop/target/release/bundle/macos/AgenTown.app "$desktop_acceptance_dir/AgenTown.app"
+cd "$desktop_acceptance_dir"
+env PATH="$desktop_acceptance_dir/empty-path" ./AgenTown.app/Contents/MacOS/agentown-desktop &
+desktop_shell_pid=$!
+ps -p "$desktop_shell_pid" -o pid=,ppid=,comm=
+pgrep -P "$desktop_shell_pid"
+```
+
+Record the child PID once readiness completes; `pgrep` before service spawn can
+return no result. Use `ps -p <child-pid> -o pid=,ppid=,comm=` to confirm the child
+belongs to the copied runtime. Avoid dumping process environments, which can
+contain inherited credentials. Retain a screenshot of the visible workspace
+and the process observations with the supervisor's verification artifact.
+For each relaunch or duplicate launch, repeat the `env PATH=...` command above
+from this temporary directory. For the service-death check, send `kill -TERM`
+only to the recorded owned service PID while its shell is still running. After
+normal quit, wait for the shell and confirm both recorded PIDs have exited.
+Remove the temporary bundle only after every app instance has closed; retain
+the platform data directory for the restart check.
+
 1. Copy `desktop/target/release/bundle/macos/AgenTown.app` to a temporary directory
    outside the checkout. From that directory, launch its
    `Contents/MacOS/agentown-desktop` executable with `PATH` pointing to an empty
