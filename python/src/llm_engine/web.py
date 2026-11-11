@@ -101,6 +101,10 @@ def create_app(database, model=None, *, port=8765, provider=None, provider_name=
             return JSONResponse({"error": "Frontend assets are missing. Run npm ci and npm run build before the native build, then restart."}, 503)
         return FileResponse(ASSETS / "index.html")
 
+    async def connections(request):
+        from .connections import connection_setup
+        return response(connection_setup())
+
     async def state(request):
         try:
             agents, tasks, executions = _native.history_snapshot(database)
@@ -168,6 +172,7 @@ def create_app(database, model=None, *, port=8765, provider=None, provider_name=
             return response({"error": "The response could not be saved or the attempt expired. Refresh history before deciding to retry."}, 409)
 
     app = Starlette(routes=[Route("/", home), Route("/api/state", state, methods=["POST"]),
+        Route("/api/connections/v1", connections, methods=["POST"]),
         Route("/api/employees", employee, methods=["POST"]),
         Route("/api/work", work, methods=["POST"]),
         Route("/api/work/{task}/execute", execute, methods=["POST"]),

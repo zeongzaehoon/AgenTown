@@ -352,3 +352,19 @@ def test_output_limit_sdk_api_restart(monkeypatch, tmp_path, partial_text):
     with TestClient(create_app(db, 'model', provider=provider), base_url=ORIGIN) as client:
         assert client.post('/api/state', json={}, headers=HEADERS).json() == retried
         assert len(calls) == 2
+
+
+def test_connections_presentation_boundary_and_no_storage_access(tmp_path, monkeypatch):
+    from llm_engine.connections import connection_setup
+    with TestClient(create_app(str(tmp_path / 'company.db')), base_url=ORIGIN) as client:
+        def forbidden(*args, **kwargs):
+            raise AssertionError('Setup must not inspect storage')
+        monkeypatch.setattr(_native, 'history_snapshot', forbidden)
+        path = '/api/connections/v1'
+        assert client.get(path).status_code == 405
+        assert client.post(path, json={}).status_code == 403
+        assert client.post(path, json={}, headers={'Origin': 'http://evil.example'}).status_code == 403
+        response = client.post(path, json={}, headers=HEADERS)
+        assert response.status_code == 200
+        assert response.json() == connection_setup()
+        assert 'no-store' in response.headers['cache-control']

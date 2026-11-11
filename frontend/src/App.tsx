@@ -1,3 +1,4 @@
+import { Connections } from './Connections';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { HistoryExport } from './history-export';
 import { advice, api, classifyWork, type WorkOutcome, workStatus, workInputError, WorkInputError, type Attempt, type Work, type Workspace } from './api';
@@ -315,6 +316,7 @@ export function App() {
           </>}</div>
         </section></div>
       <footer>Responses are unverified. Read and check the full result before using it.</footer>
+      <Connections workspaceConnected={connected} />
     </main>
   </>;
 }

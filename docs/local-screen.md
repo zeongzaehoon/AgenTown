@@ -782,3 +782,43 @@ The browser fixture needs repair under its own file ownership before those
 branches can verify execution. The saved-history export retains the existing
 resend consent behavior. Browser validation remains pending; no passing browser
 result is claimed.
+
+### Connections (C20-T3)
+
+In a prepared checkout, build/package the frontend using the installation steps
+above, then launch the product with an explicit database:
+
+```sh
+uv run --directory python --locked agentown-web --database /absolute/company.sqlite
+```
+
+Open `http://127.0.0.1:8765`. Tab to **Open connections** and press Enter.
+Choose **Client** (Codex or Claude Code) and **Platform** (macOS or Windows)
+using the native keyboard-accessible selects. **Copy setup instructions** copies
+the selected configuration, preparation, inspection, supported actions, consent
+and recovery steps. Replace both example paths before merging the configuration.
+The read-only **Setup instructions** text area also supports manual selection and
+copying when clipboard permission is denied. Copy success explicitly leaves
+client readiness unknown; neither configuration nor connection verification is
+inferred. No installed client settings, credential stores or harness data are read.
+
+The visible workspace connection is separate from external client readiness.
+Stop the local web server and choose **Refresh setup**: loaded instructions and
+selection remain visible with a stale/unavailable message. Restart the same web
+server and refresh setup again to recover. Use **Refresh connection** to recover
+workspace history. Hiding Connections leaves employee, draft, assignment and work
+history mounted and preserves the existing execution/resend consent flow.
+Connections only calls the versioned presentation endpoint; it never executes work.
+
+The same-origin, no-store `POST /api/connections/v1` presents the published stdio
+workflow v1 and four C20-T2 configuration variants without runtime documentation
+reads or probing clients. The static setup response defaults all clients to
+unknown. There is no persisted connection registry or client verification in this
+Task. Windows setup availability does not establish Windows launch validation.
+
+Implementation observations: Python compilation and direct parsing/comparison of
+all four generated configurations against C20-T2 artifacts passed. Pytest is not
+installed and frontend dependencies are absent in this isolated workspace, so
+frontend behavior/API tests and visible browser behavior remain **pending
+supervisor verification**, not observed passes. Live provider calls were skipped.
+See [the invocation record](evidence/c20-t3/implementation.md).
