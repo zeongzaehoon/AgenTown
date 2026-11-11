@@ -10,3 +10,5 @@
 .workload-counts dd { margin: 0; font-weight: 700; }
 .employee-card:has(button[aria-pressed="true"]) { border: 3px solid #234f3b; padding: 14px; }
 .employee-card button[aria-pressed="true"]::after { content: ' · Selected'; }
+#teams-panel input[type="checkbox"] { width: auto; min-width: 24px; min-height: 24px; margin-right: 12px; vertical-align: middle; }
+#teams-panel fieldset { margin-top: 20px; min-width: 0; border: 1px solid #6c7d73; }

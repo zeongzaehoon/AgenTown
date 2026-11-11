@@ -25,7 +25,7 @@ export function workInputError(input: string, employee: string): string {
 export const REQUEST_DEADLINE_MS = 15_000;
 export const EXECUTION_DEADLINE_MS = 75_000;
 export class RequestTimeoutError extends Error {}
-export async function api<T>(path: string, data: object, signal?: AbortSignal): Promise<T> {
+export async function api<T>(path: string, data: object, signal?: AbortSignal, method: 'POST' | 'GET' = 'POST'): Promise<T> {
   const controller = new AbortController();
   const execution = path.endsWith('/execute');
   const timeout = execution ? EXECUTION_DEADLINE_MS : REQUEST_DEADLINE_MS;
@@ -51,8 +51,8 @@ export async function api<T>(path: string, data: object, signal?: AbortSignal): 
       if (controller.signal.aborted) throw controller.signal.reason;
       let response: Response;
       try {
-        response = await fetch(path, {method: 'POST', headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify(data), cache: 'no-store', signal: controller.signal});
+        response = await fetch(path, {method, headers: {'Content-Type': 'application/json'},
+          body: method === 'GET' ? undefined : JSON.stringify(data), cache: 'no-store', signal: controller.signal});
       } catch {
         throw new Error('Disconnected. Reconnect and inspect history before retrying; your request may have been saved or sent.');
       }
@@ -98,3 +98,8 @@ export const advice: Record<string, string> = {
   refusal: 'The provider declined this work. Save revised work if appropriate.',
   provider_error: 'Provider request failed. Check configuration and service availability.',
 };
+
+export interface Team { id: string; name: string; members: string[] }
+export const listTeams = (signal?: AbortSignal) => api<{teams: Team[]}>('/api/teams', {}, signal, 'GET');
+export const createTeam = (name: string, signal?: AbortSignal) => api<Team>('/api/teams', {name}, signal);
+export const addTeamMembers = (id: string, members: string[], signal?: AbortSignal) => api<Team>(`/api/teams/${encodeURIComponent(id)}/members`, {members}, signal);

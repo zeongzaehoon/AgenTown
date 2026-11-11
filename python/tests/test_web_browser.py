@@ -484,6 +484,66 @@ def test_employee_to_result_browser(tmp_path, installed_package):
             expect(page.locator('#connection')).to_contain_text('Connected')
             page.remove_listener('request', record_navigation)
             events.append({'step': 'employee-navigation', 'employee_work_ids': navigation_ids, 'navigation_mutations': navigation_requests})
+            # Team changes never execute work; persisted IDs disambiguate names.
+            page.get_by_role('button', name='Browse teams', exact=True).focus()
+            page.keyboard.press('Enter')
+            expect(page.get_by_text('Showing persisted teams.', exact=True)).to_be_visible()
+            team_ids = []
+            for index in range(2):
+                page.get_by_label('Team name', exact=True).fill('Navigation team')
+                page.get_by_role('button', name='Create team', exact=True).focus()
+                page.keyboard.press('Enter')
+                expect(page.get_by_label('Saved team', exact=True)).to_be_focused()
+                team_ids.append(page.get_by_label('Saved team', exact=True).input_value())
+            assert team_ids[0] != team_ids[1]
+            page.get_by_label('Saved team', exact=True).select_option(team_ids[0])
+            member_id, member_work_id = navigation_ids[1]
+            member_checkbox = page.get_by_label(f'Navigation Alex · Employee ID: {member_id}', exact=True)
+            member_checkbox.focus()
+            page.keyboard.press('Space')
+            page.get_by_label('Team name', exact=True).fill('Retained team draft')
+            # Failed delivery retains both team and membership drafts, then recovers.
+            page.route('**/api/teams/*/members', lambda route: route.abort())
+            page.get_by_role('button', name='Add members', exact=True).click()
+            expect(page.get_by_text('Showing stale team data.', exact=False)).to_be_visible()
+            expect(member_checkbox).to_be_checked()
+            expect(page.get_by_label('Team name', exact=True)).to_have_value('Retained team draft')
+            page.unroute('**/api/teams/*/members')
+            page.get_by_role('button', name='Refresh connection', exact=True).click()
+            expect(page.locator('#connection')).to_contain_text('Connected')
+            page.get_by_role('button', name='Refresh teams', exact=True).click()
+            expect(page.get_by_text('Showing persisted teams.', exact=True)).to_be_visible()
+            page.get_by_role('button', name='Add members', exact=True).click()
+            expect(page.get_by_text(f'Membership saved · Team ID: {team_ids[0]}', exact=True)).to_be_visible()
+            expect(page.get_by_label('Saved team', exact=True)).to_be_focused()
+            team_baseline = httpx.get(url + '/api/teams').json()
+            assert next(t for t in team_baseline['teams'] if t['id'] == team_ids[0])['members'] == [member_id]
+            page.reload()
+            expect(page.locator('#connection')).to_contain_text('Connected')
+            page.get_by_role('button', name='Browse teams', exact=True).click()
+            page.get_by_label('Saved team', exact=True).select_option(team_ids[0])
+            member_button = page.get_by_role('button', name=f'View member work: Navigation Alex · ID: {member_id}', exact=True)
+            expect(member_button).to_be_visible()
+            team_navigation_requests = []
+            def record_team_navigation(request):
+                if request.method != 'GET' and '/api/' in request.url and not request.url.endswith('/api/state'):
+                    team_navigation_requests.append(request.url)
+            page.on('request', record_team_navigation)
+            member_button.focus()
+            page.keyboard.press('Enter')
+            expect(page.get_by_label('Search saved work', exact=True)).to_be_focused()
+            page.get_by_role('button', name=f'Open request: Navigation request 1 · ID: {member_work_id}', exact=True).click()
+            expect(page.get_by_label('Saved work', exact=True)).to_have_value(member_work_id)
+            expect(page.get_by_label('Saved work', exact=True)).to_be_focused()
+            assert team_navigation_requests == []
+            assert httpx.get(url + '/api/teams').json() == team_baseline
+            assert len(gate.with_suffix('.calls').read_text().splitlines()) == 3
+            page.remove_listener('request', record_team_navigation)
+            (evidence / 'teams.json').write_text(json.dumps(team_baseline, indent=2))
+            events.append({'step': 'teams-persisted-navigation', 'team_ids': team_ids,
+                           'member_id': member_id, 'work_id': member_work_id,
+                           'navigation_mutations': team_navigation_requests, 'submissions': 3})
+            snapshot(page, '14-teams-persisted-navigation')
             page.set_viewport_size({'width': 390, 'height': 844})
             snapshot(page, '09-mobile')
             assert page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')

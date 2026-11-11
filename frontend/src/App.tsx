@@ -1,3 +1,4 @@
+import { Teams } from './Teams';
 import { CompanyOverview } from './CompanyOverview';
 import { Connections } from './Connections';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
@@ -241,6 +242,9 @@ export function App() {
       <p id="notice" role="alert">{notice}</p><button id="refresh" type="button" onClick={() => void refresh()}>Refresh connection</button>
       <CompanyOverview workspace={state} connected={connected} error={connectionError} selectedEmployee={viewEmployee} onSelectEmployee={setViewEmployee} onOpenWork={id => {
         setViewEmployee(''); setSearch(''); setOutcome('all'); setSelected(id); historyRef.current?.focus();
+      }} />
+      <Teams workspace={state} connected={connected} onSelectEmployee={id => {
+        setViewEmployee(id); setSearch(''); setOutcome('all'); searchRef.current?.focus();
       }} />
       <div className="workspace"><aside><section><h2>1. Your employees</h2>
         <p id="employees-empty" hidden={!!state?.employees.length}>No employees yet. Create your first one.</p>

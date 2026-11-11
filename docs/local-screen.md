@@ -943,3 +943,44 @@ keyboard focus, opening, reset and disconnected navigation, recording
 `13-employee-navigation-offline.png` and the employee/request IDs in
 `interactions.json`. These browser checks are pending supervisor execution for
 this Task; live provider calls remain skipped under the user policy.
+
+## Teams: creation, membership and assigned work (C22-T2)
+
+Use the launch command above and open the local product URL. Team management
+requires no provider key or model. The team API prerequisite is C22-T1.
+
+1. Create two employees with the same name and save a different request for each;
+   do not choose Execute work. Note the full employee and work IDs.
+2. Choose **Browse teams**. While fetching, the screen announces loading; an empty
+   database shows **No teams yet**. Create a team by entering **Team name** and
+   pressing Enter. Focus moves to **Saved team**, whose options include full IDs.
+   Create another team with the same name and distinguish the two by ID.
+3. Select the first team. Tab to the intended employee checkbox, press Space,
+   then activate **Add members**. Membership is saved only by that action. Focus
+   returns to Saved team and the persisted member appears with their full ID.
+   Team membership does not assign work or start collaboration.
+4. Enter another team-name draft and select a prospective member. Switch teams
+   and back: the membership draft remains. Disconnect the browser from the local
+   server and attempt Add members. The failure retains drafts and marks loaded
+   data stale. Reconnect, choose Refresh connection and Refresh teams, inspect
+   persisted membership, and explicitly save any remaining selections. No
+   mutation is automatically retried. Refreshing alone does not save drafts.
+5. Reload the page, choose Browse teams and the same team ID. Its saved members
+   remain; unsaved team drafts are session-only and are not persisted on reload.
+   Activate **View member work** with Enter: focus moves to Search saved work,
+   and existing assigned requests are filtered by employee ID. Activate the
+   matching **Open request** to focus Saved work and inspect the recorded work.
+   Loaded member navigation also works while disconnected, using stale data.
+6. Confirm the original work draft/assignment remain during team navigation and
+   pending result retry consent is preserved unless the underlying work or
+   execution availability changes. Browsing and team saves make no execute calls.
+
+Deterministic coverage: `frontend/src/Teams.test.tsx` covers loading, empty,
+failed/stale/recovered states, duplicate team/employee names, per-team drafts,
+creation, persisted membership on remount and ID-based navigation. The installed
+browser scenario in `python/tests/test_web_browser.py` adds keyboard/focus,
+offline recovery, reload persistence and navigation with a mutation journal;
+it writes `teams.json` and `14-teams-persisted-navigation.png` alongside its
+existing trace and interaction journal. Browser execution and visual inspection
+are pending supervisor verification for this implementation snapshot. Live LLM
+validation is skipped, not passed, under the current user policy.

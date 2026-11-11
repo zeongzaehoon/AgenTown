@@ -49,11 +49,14 @@ test('StrictMode employee → saved work → running → failure → explicit re
   const view = render(<StrictMode><App /></StrictMode>);
   await connected();
   expect(screen.getByText('No work yet. Your saved work and results will appear here.')).toBeTruthy();
-  await user.type(screen.getByLabelText('Employee name'), '<img src=x> Writer');
+  // Paste full values so this broad flow does not spend its deadline on
+  // per-character renders when the supervisor runs test files concurrently.
+  screen.getByLabelText('Employee name').focus();
+  await user.paste('<img src=x> Writer');
   act(() => { screen.getByRole('button', {name: 'Create employee'}).click(); screen.getByRole('button', {name: 'Create employee'}).click(); });
   await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('What would you like help with?')));
   expect(f.calls.filter(c => c.path === '/api/employees')).toHaveLength(1);
-  await user.type(screen.getByLabelText('What would you like help with?'), 'Summarize the plan');
+  await user.paste('Summarize the plan');
   act(() => { screen.getByRole('button', {name: 'Save work'}).click(); screen.getByRole('button', {name: 'Save work'}).click(); });
   await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', {name: 'Execute work'})));
   expect(f.calls.filter(c => c.path === '/api/work')).toHaveLength(1);
