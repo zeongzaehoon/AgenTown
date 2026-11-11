@@ -14,6 +14,83 @@ ORIGIN = 'http://127.0.0.1:8765'
 HEADERS = {'Origin': ORIGIN}
 
 
+def test_team_api_persistence_and_atomic_membership(tmp_path):
+    import uuid
+    db = str(tmp_path / 'teams.db')
+    provider = TestProvider()
+    with TestClient(create_app(db, provider=provider), base_url=ORIGIN) as client:
+        assert client.get('/api/teams').json() == {'teams': []}
+        result = client.post('/api/teams', json={'name': '  Delivery 한글  '}, headers=HEADERS)
+        assert result.status_code == 201
+        team = result.json()
+        assert team == {'id': team['id'], 'name': 'Delivery 한글', 'members': []}
+        a, b, c = [_native.create_agent(db, name)[0] for name in ('A', 'B', 'C')]
+        path = f'/api/teams/{team["id"]}/members'
+
+        def unchanged(members, expected, route=path):
+            assert client.post(route, json={'members': members}, headers=HEADERS).status_code == 400
+            assert client.get('/api/teams').json() == {'teams': [{**team, 'members': expected}]}
+
+        for invalid in ('invalid', str(uuid.uuid4())):
+            unchanged([a, invalid], [])
+            unchanged([a], [], f'/api/teams/{invalid}/members')
+        unchanged([a, a], [])
+        added = client.post(path, json={'members': [a, b]}, headers=HEADERS)
+        assert added.status_code == 200
+        saved = {**team, 'members': sorted([a, b])}
+        assert added.json() == saved
+        unchanged([c, a], saved['members'])
+        unchanged([c, str(uuid.uuid4())], saved['members'])
+        assert provider.calls == 0
+    with TestClient(create_app(db, provider=provider), base_url=ORIGIN) as client:
+        assert client.get('/api/teams').json() == {'teams': [saved]}
+        assert provider.calls == 0
+
+
+def test_team_api_input_bounds_and_origin(tmp_path):
+    db = str(tmp_path / 'teams.db')
+    with TestClient(create_app(db, provider=TestProvider()), base_url=ORIGIN) as client:
+        team = client.post('/api/teams', json={'name': 'T' * 200}, headers=HEADERS).json()
+        path = f'/api/teams/{team["id"]}/members'
+        for name in ('', ' \t', 'x' * 201, None, [], 123, '\ud800'):
+            assert client.post('/api/teams', content=json.dumps({'name': name}), headers={**HEADERS, 'Content-Type': 'application/json'}).status_code == 400
+        for members in ([], ['x'] * 101, 'x', None, [123], ['x' * 101], [''], ['\ud800']):
+            assert client.post(path, content=json.dumps({'members': members}), headers={**HEADERS, 'Content-Type': 'application/json'}).status_code == 400
+        for route in ('/api/teams', path):
+            for payload in ({}, [], None):
+                assert client.post(route, content=json.dumps(payload), headers={**HEADERS, 'Content-Type': 'application/json'}).status_code == 400
+            for payload, status in ((b'{', 400), (b'\xff', 400), (b'x' * 120001, 413)):
+                assert client.post(route, content=payload, headers={**HEADERS, 'Content-Type': 'application/json'}).status_code == status
+            for headers in ({}, {'Origin': 'http://evil.example'}, {**HEADERS, 'Sec-Fetch-Site': 'cross-site'}):
+                assert client.post(route, json={'name': 'Blocked', 'members': ['x']}, headers=headers).status_code == 403
+            assert client.post(route, data={'name': 'Blocked'}, headers=HEADERS).status_code == 403
+        assert client.get('/api/teams', headers={'Host': 'evil.example'}).status_code == 403
+        listing = client.get('/api/teams')
+        assert listing.json() == {'teams': [team]}
+        assert listing.headers['cache-control'] == 'no-store'
+
+
+def test_team_api_safe_errors_and_redaction(tmp_path, monkeypatch):
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'team-secret-never-return')
+    db = str(tmp_path / 'teams.db')
+    _native.create_team(db, 'legacy team-secret-never-return')
+    with TestClient(create_app(db, provider=TestProvider()), base_url=ORIGIN) as client:
+        assert 'team-secret-never-return' not in client.get('/api/teams').text
+        assert client.post('/api/teams', json={'name': 'team-secret-never-return'}, headers=HEADERS).status_code == 400
+        def fail(*args):
+            raise ValueError('private database path team-secret-never-return')
+        for binding in ('list_teams', 'create_team', 'add_team_members'):
+            monkeypatch.setattr(_native, binding, fail)
+        for result, status in (
+            (client.get('/api/teams'), 503),
+            (client.post('/api/teams', json={'name': 'Valid'}, headers=HEADERS), 400),
+            (client.post('/api/teams/invalid/members', json={'members': ['valid']}, headers=HEADERS), 400),
+        ):
+            assert result.status_code == status
+            assert 'private database path' not in result.text
+            assert 'team-secret-never-return' not in result.text
+
+
 class TestProvider:
     __test__ = False
     name = 'deterministic-test'

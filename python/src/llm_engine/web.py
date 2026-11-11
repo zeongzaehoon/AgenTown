@@ -138,6 +138,46 @@ def create_app(database, model=None, *, port=8765, provider=None, provider_name=
         except (ValueError, KeyError, TypeError):
             return response({"error": "Employee could not be saved. Enter a name (1–200 characters) and check database access."}, 400)
 
+    def team_record(row):
+        return dict(zip(("id", "name", "members"), row))
+
+    async def teams(request):
+        if request.method == "GET":
+            try:
+                return response({"teams": [team_record(row) for row in _native.list_teams(database)]})
+            except (ValueError, OSError):
+                return response({"error": "Cannot read teams. Check database access and compatibility."}, 503)
+        try:
+            data = await body(request)
+            name = data["name"]
+            if not isinstance(name, str) or not 1 <= len(name) <= 200:
+                raise ValueError("name")
+            return response(team_record(_native.create_team(database, name)), 201)
+        except RequestTooLarge:
+            return response({"error": "Team request exceeds 120,000 bytes."}, 413)
+        except (ValueError, KeyError, TypeError, UnicodeError):
+            return response({"error": "Team could not be saved. Enter a nonblank name (1–200 characters) and check database access."}, 400)
+        except OSError:
+            return response({"error": "Team could not be saved. Check database access."}, 503)
+
+    async def team_members(request):
+        try:
+            data = await body(request)
+            members = data["members"]
+            if (not isinstance(members, list) or not 1 <= len(members) <= 100
+                    or any(not isinstance(member, str) or not 1 <= len(member) <= 100 for member in members)
+                    or len(request.path_params["team"]) > 100):
+                raise ValueError("members")
+            # Rust validates identity, duplicates and existence in one transaction.
+            row = _native.add_team_members(database, request.path_params["team"], members)
+            return response(team_record(row))
+        except RequestTooLarge:
+            return response({"error": "Team request exceeds 120,000 bytes."}, 413)
+        except (ValueError, KeyError, TypeError, UnicodeError):
+            return response({"error": "Members could not be added. Select an existing team and 1–100 distinct existing employee IDs, excluding current members. Check database access."}, 400)
+        except OSError:
+            return response({"error": "Members could not be added. Check database access."}, 503)
+
     async def work(request):
         try:
             data = await body(request)
@@ -174,6 +214,8 @@ def create_app(database, model=None, *, port=8765, provider=None, provider_name=
     app = Starlette(routes=[Route("/", home), Route("/api/state", state, methods=["POST"]),
         Route("/api/connections/v1", connections, methods=["POST"]),
         Route("/api/employees", employee, methods=["POST"]),
+        Route("/api/teams", teams, methods=["GET", "POST"]),
+        Route("/api/teams/{team}/members", team_members, methods=["POST"]),
         Route("/api/work", work, methods=["POST"]),
         Route("/api/work/{task}/execute", execute, methods=["POST"]),
         Mount("/static", StaticFiles(directory=ASSETS, check_dir=False))])

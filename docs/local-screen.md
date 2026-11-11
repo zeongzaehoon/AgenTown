@@ -62,6 +62,53 @@ from admission; history polling recovers expired attempts as interrupted. Before
 expiry an attempt remains **Running** (waiting/uncertain), with recovery guidance.
 No scheduler resumes or resends it. Explicit retry must wait for terminal recovery.
 
+## Team HTTP API (C22-T1)
+
+After the checkout installation steps above, launch with an existing writable
+database parent. No model or provider credentials are needed for team operations:
+
+```sh
+uv run --directory python --locked agentown-web --database /tmp/agentown-teams.sqlite3
+```
+
+From another terminal, create an employee and a team, then substitute the returned
+IDs in the membership request:
+
+```sh
+curl http://127.0.0.1:8765/api/teams
+curl -H 'Origin: http://127.0.0.1:8765' -H 'Content-Type: application/json' \
+  -d '{"name":"Writer"}' http://127.0.0.1:8765/api/employees
+curl -H 'Origin: http://127.0.0.1:8765' -H 'Content-Type: application/json' \
+  -d '{"name":"Delivery"}' http://127.0.0.1:8765/api/teams
+curl -H 'Origin: http://127.0.0.1:8765' -H 'Content-Type: application/json' \
+  -d '{"members":["EMPLOYEE_ID"]}' http://127.0.0.1:8765/api/teams/TEAM_ID/members
+curl http://127.0.0.1:8765/api/teams
+```
+
+`GET /api/teams` returns `{"teams":[{"id":"…","name":"Delivery","members":["…"]}]}`
+(initially an empty list). `POST /api/teams` returns the created team with status
+201; adding members returns the updated team with status 200. Names accept 1–200
+characters and must be nonblank; Rust trims them. Member requests accept 1–100
+employee ID strings, each at most 100 characters. The shared serialized JSON body
+limit is 120,000 bytes (413 on overflow). Invalid input returns 400 with safe
+guidance; list/storage access failures return safe errors without raw database
+details. Native storage failures represented as validation errors return 400;
+OS errors and list failures return 503. Mutation requests require the exact
+loopback Origin and JSON content type. Responses retain redaction and no-store.
+
+Add an invalid ID alongside an existing employee, repeat a member in one batch,
+or add a current member alongside a new employee: each request must fail and the
+list must retain its previous membership. Rust validates and commits the whole
+batch atomically. Stop the server and restart with the same database path; GET
+must return the same team ID and membership. Team operations never invoke a
+provider, assign work or start a scheduler. The team screen is a separate Task.
+
+`python/tests/test_web.py` includes deterministic API persistence, atomicity,
+input-boundary, origin, redaction and safe-error cases. This implementation
+workspace lacks product test dependencies and native bindings, so runtime API
+tests, server launch and supervisor-selected consolidated/browser checks remain
+pending verification. Live provider calls are skipped, not passed.
+
 ## Implementation decisions and boundaries
 
 - Typed React components build with Vite into `python/src/llm_engine/static/`;
