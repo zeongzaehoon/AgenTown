@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "agentown": {
+      "type": "stdio",
+      "command": "/absolute/venv/bin/agentown-mcp",
+      "args": ["--database", "/absolute/company.sqlite"]
+    }
+  }
+}

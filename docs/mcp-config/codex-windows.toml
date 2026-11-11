@@ -1,0 +1,4 @@
+# Merge this table into %USERPROFILE%\.codex\config.toml; replace both paths.
+[mcp_servers.agentown]
+command = 'C:\Company\venv\Scripts\agentown-mcp.exe'
+args = ['--database', 'C:\Company\company.sqlite']

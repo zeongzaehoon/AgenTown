@@ -56,6 +56,7 @@ test('keyboard download contains complete Unicode loaded history while disconnec
   const calls = f.fetcher.mock.calls.length;
   download().focus();
   await user.keyboard('{Enter}');
+  expect(f.fetcher.mock.calls.length).toBe(calls);
   expect(document.activeElement).toBe(download());
   const feedback = screen.getByText('History download requested. Check your browser’s downloads.');
   expect(feedback.getAttribute('role')).toBe('status');
@@ -80,7 +81,6 @@ test('keyboard download contains complete Unicode loaded history while disconnec
   expect((screen.getByLabelText('What would you like help with?') as HTMLTextAreaElement).value).toBe('UNSAVED unrelated draft');
   expect((screen.getByLabelText('Assign to') as HTMLSelectElement).value).toBe('other');
   expect((screen.getByLabelText('Saved work') as HTMLSelectElement).value).toBe('work/한글');
-  expect(f.fetcher.mock.calls.length).toBe(calls);
   expect(JSON.stringify(f.state)).toBe(before);
   // Existing per-result download still exports only that result.
   fireEvent.click(screen.getAllByRole('button', {name: 'Download text', hidden: true}).at(-1)!);

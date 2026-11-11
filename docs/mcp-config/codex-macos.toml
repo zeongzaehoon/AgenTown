@@ -1,0 +1,4 @@
+# Merge this table into ~/.codex/config.toml after replacing both absolute paths.
+[mcp_servers.agentown]
+command = "/absolute/venv/bin/agentown-mcp"
+args = ["--database", "/absolute/company.sqlite"]
