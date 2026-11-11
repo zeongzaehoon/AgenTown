@@ -584,7 +584,8 @@ mod tests {
         let mut store = SqliteStore::open(&path).unwrap();
         let (a, t) = seed(&mut store);
         let old = store.read().unwrap();
-        store.connection.execute_batch("DROP TABLE execution_sources; DROP TRIGGER execution_immutable; DROP TRIGGER execution_retained; DROP TABLE executions; PRAGMA user_version=3; CREATE TRIGGER execution_immutable BEFORE UPDATE ON runs BEGIN SELECT 1; END;").unwrap();
+        // Reconstruct v3, including removal of tables introduced after v5.
+        store.connection.execute_batch("DROP TABLE hooks; DROP TABLE loop_policies; DROP TABLE skills; DROP TABLE execution_sources; DROP TRIGGER execution_immutable; DROP TRIGGER execution_retained; DROP TABLE executions; PRAGMA user_version=3; CREATE TRIGGER execution_immutable BEFORE UPDATE ON runs BEGIN SELECT 1; END;").unwrap();
         drop(store);
         let sql = Connection::open(&path).unwrap();
         assert!(SqliteStore::open(&path).is_err());
@@ -902,7 +903,8 @@ mod mcp_tests {
             .unwrap();
         store
             .connection
-            .execute_batch("DROP TABLE execution_sources; PRAGMA user_version=4;")
+            // A v4 fixture must not retain the v6 configuration tables.
+            .execute_batch("DROP TABLE hooks; DROP TABLE loop_policies; DROP TABLE skills; DROP TABLE execution_sources; PRAGMA user_version=4;")
             .unwrap();
         drop(store);
         let mut store = SqliteStore::open(&path).unwrap();

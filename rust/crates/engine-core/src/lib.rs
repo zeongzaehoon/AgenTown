@@ -21,9 +21,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::{error::Error, fmt, str::FromStr};
 use uuid::Uuid;
 
+mod configuration;
 pub mod persistence;
 mod provenance;
 mod runs;
+pub use configuration::*;
 pub use provenance::{Artifact, Evidence, ReportedOutcome};
 pub use runs::{Run, RunOutcome, RunState, RunTimestamp};
 
@@ -54,6 +56,9 @@ identity!(TeamId);
 identity!(RunId);
 identity!(ArtifactId);
 identity!(EvidenceId);
+identity!(SkillId);
+identity!(HookId);
+identity!(LoopPolicyId);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Agent {
@@ -121,6 +126,10 @@ impl Task {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DomainError {
+    InvalidConfiguration(&'static str),
+    UnknownSkill(SkillId),
+    UnknownHook(HookId),
+    UnknownLoopPolicy(LoopPolicyId),
     EmptyArtifactLocator,
     InvalidReportedSha256,
     EmptyEvidenceCriterion,
@@ -171,6 +180,10 @@ pub enum DomainError {
 impl fmt::Display for DomainError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::InvalidConfiguration(field) => write!(f, "invalid configuration: {field}"),
+            Self::UnknownSkill(id) => write!(f, "unknown skill: {id}"),
+            Self::UnknownHook(id) => write!(f, "unknown hook: {id}"),
+            Self::UnknownLoopPolicy(id) => write!(f, "unknown loop policy: {id}"),
             Self::EmptyArtifactLocator => write!(f, "artifact locator must not be empty"),
             Self::InvalidReportedSha256 => write!(
                 f,
@@ -225,6 +238,9 @@ impl Error for DomainError {}
 /// Owns domain state; returned entities are read-only. Lists are ordered by ID.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Core {
+    skills: BTreeMap<SkillId, Skill>,
+    hooks: BTreeMap<HookId, Hook>,
+    loop_policies: BTreeMap<LoopPolicyId, LoopPolicy>,
     agents: BTreeMap<AgentId, Agent>,
     teams: BTreeMap<TeamId, Team>,
     tasks: BTreeMap<TaskId, Task>,

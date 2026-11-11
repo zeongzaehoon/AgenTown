@@ -211,7 +211,9 @@ def create_app(database, model=None, *, port=8765, provider=None, provider_name=
         except (ValueError, OSError):
             return response({"error": "The response could not be saved or the attempt expired. Refresh history before deciding to retry."}, 409)
 
-    app = Starlette(routes=[Route("/", home), Route("/api/state", state, methods=["POST"]),
+    from .configuration import routes as configuration_routes
+
+    app = Starlette(routes=configuration_routes(database, body, response) + [Route("/", home), Route("/api/state", state, methods=["POST"]),
         Route("/api/connections/v1", connections, methods=["POST"]),
         Route("/api/employees", employee, methods=["POST"]),
         Route("/api/teams", teams, methods=["GET", "POST"]),

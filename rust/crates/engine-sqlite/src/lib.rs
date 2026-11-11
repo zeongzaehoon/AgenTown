@@ -7,7 +7,8 @@ use rusqlite::{Connection, OpenFlags, TransactionBehavior, params};
 use std::{collections::BTreeSet, error::Error, fmt, path::Path, time::Duration};
 
 const APPLICATION_ID: i32 = 0x4c4c4d45; // LLME
-const SCHEMA_VERSION: i32 = 5;
+const SCHEMA_VERSION: i32 = 6;
+mod configuration;
 mod execution;
 pub use execution::Execution;
 
@@ -28,7 +29,7 @@ impl fmt::Display for StorageError {
             Self::InvalidData(e) => write!(f, "invalid stored data: {e}"),
             Self::UnsupportedVersion(v) => write!(f, "unsupported product schema version: {v}"),
             Self::UnsupportedProvenance => {
-                write!(f, "schema v5 cannot persist Artifact or Evidence records")
+                write!(f, "schema v6 cannot persist Artifact or Evidence records")
             }
             Self::ForeignDatabase => write!(f, "database is not an AgenTown product database"),
         }
@@ -109,7 +110,7 @@ impl SqliteStore {
         let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let version: i32 = tx.pragma_query_value(None, "user_version", |r| r.get(0))?;
         let application: i32 = tx.pragma_query_value(None, "application_id", |r| r.get(0))?;
-        if !matches!(version, 0 | 1 | 2 | 3 | 4 | SCHEMA_VERSION) {
+        if !matches!(version, 0 | 1 | 2 | 3 | 4 | 5 | SCHEMA_VERSION) {
             return Err(StorageError::UnsupportedVersion(version));
         }
         if version == 0 {
@@ -145,6 +146,11 @@ impl SqliteStore {
         }
         if version < 5 {
             tx.execute_batch(include_str!("migration-v5.sql"))?;
+            tx.pragma_update(None, "user_version", 5)?;
+            load(&tx)?;
+        }
+        if version < 6 {
+            tx.execute_batch(include_str!("migration-v6.sql"))?;
             tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
             load(&tx)?;
         }
@@ -337,6 +343,7 @@ fn persist_execution_changes(
             params![task.to_string(), agent.to_string()],
         )?;
     }
+    configuration::persist(tx, before, after)?;
     // Finalize retained active Runs before inserting retries (the partial index is immediate).
     for run in after.runs() {
         if let Ok(old) = before.run(run.id()) {
@@ -381,7 +388,7 @@ fn terminal_columns(state: RunState) -> (Option<&'static str>, Option<i64>) {
 
 fn check_version(connection: &Connection) -> Result<(), StorageError> {
     let version: i32 = connection.pragma_query_value(None, "user_version", |r| r.get(0))?;
-    if !matches!(version, 1 | 2 | 3 | 4 | SCHEMA_VERSION) {
+    if !matches!(version, 1 | 2 | 3 | 4 | 5 | SCHEMA_VERSION) {
         return Err(StorageError::UnsupportedVersion(version));
     }
     let application: i32 = connection.pragma_query_value(None, "application_id", |r| r.get(0))?;
@@ -506,6 +513,9 @@ fn load(connection: &Connection) -> Result<Core, StorageError> {
                 .ok_or_else(|| StorageError::InvalidData("unknown participant Run".into()))?;
             snapshot.runs[*index].participants.push(parse_id(agent)?);
         }
+    }
+    if version >= 6 {
+        configuration::load(connection, &mut snapshot)?;
     }
     let core = Core::restore(snapshot)?;
     if version >= 4 {
@@ -660,6 +670,29 @@ mod tests {
         drop(store);
         assert_eq!(SqliteStore::open(&path).unwrap().read().unwrap(), before);
         assert_eq!(ReadOnlyStore::open(&path).unwrap().read().unwrap(), before);
+    }
+
+    #[test]
+    fn configuration_sql_failure_rolls_back_after_reopen() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.db");
+        let mut db = SqliteStore::open(&path).unwrap();
+        let before = db.read().unwrap();
+        let result = db.transact_before_commit(
+            |c| c.create_skill("Skill", "instructions"),
+            |tx| {
+                assert_eq!(
+                    tx.query_row("SELECT count(*) FROM skills", [], |r| r.get::<_, i64>(0))?,
+                    1
+                );
+                Err(StorageError::InvalidData(
+                    "injected configuration failure".into(),
+                ))
+            },
+        );
+        assert!(result.is_err());
+        drop(db);
+        assert_eq!(SqliteStore::open(&path).unwrap().read().unwrap(), before);
     }
 
     #[test]

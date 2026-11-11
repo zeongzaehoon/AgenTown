@@ -196,6 +196,9 @@ fn all_task_transitions_and_cancellation_remain_explicit() {
 }
 fn snapshot(c: &Core) -> Snapshot {
     Snapshot {
+        skills: vec![],
+        hooks: vec![],
+        loop_policies: vec![],
         artifacts: vec![],
         evidence: vec![],
         agents: c.agents().map(|a| (a.id(), a.name().into())).collect(),

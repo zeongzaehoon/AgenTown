@@ -23,6 +23,9 @@ fn seed(store: &mut SqliteStore) -> (AgentId, TaskId, RunId) {
 }
 fn snapshot(c: &Core) -> Snapshot {
     Snapshot {
+        skills: vec![],
+        hooks: vec![],
+        loop_policies: vec![],
         artifacts: Vec::new(),
         evidence: Vec::new(),
         agents: c.agents().map(|a| (a.id(), a.name().into())).collect(),
@@ -315,7 +318,7 @@ fn v2_migration_and_failure_after_run_ddl_preserve_every_existing_record() {
         assert_eq!(
             sql.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
                 .unwrap(),
-            5
+            6
         );
     }
 }
