@@ -211,6 +211,85 @@ impl SqliteStore {
         tx.commit()?;
         Ok(result)
     }
+    /// Explicit MCP admission. Saved input, assignment and attempt count are
+    /// resolved under the same writer lock. Caller source is only a declaration.
+    pub fn start_mcp_execution(
+        &mut self,
+        task: TaskId,
+        provider: &str,
+        model: &str,
+        expected_runs: usize,
+        resubmission_consent: bool,
+        declared_source: &str,
+    ) -> Result<Execution, StorageError> {
+        for (value, limit) in [(provider, 80), (model, 200), (declared_source, 80)] {
+            if value.trim().is_empty() || value.len() > limit || value.chars().any(char::is_control)
+            {
+                return Err(StorageError::InvalidData(
+                    "invalid execution configuration".into(),
+                ));
+            }
+        }
+        let tx = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let timestamp = now()?;
+        recover(&tx, timestamp)?;
+        let before = load(&tx)?;
+        let work = before.task(task)?;
+        let assignees: Vec<_> = work.assignees().collect();
+        if assignees.len() != 1 {
+            return Err(StorageError::InvalidData(
+                "work must have exactly one assigned employee".into(),
+            ));
+        }
+        let count = before.runs_for_task(task)?.count();
+        if count != expected_runs {
+            return Err(StorageError::InvalidData(
+                "work changed; refresh before explicit retry".into(),
+            ));
+        }
+        if count > 0 && !resubmission_consent {
+            return Err(StorageError::InvalidData(
+                "explicit resubmission consent required".into(),
+            ));
+        }
+        let input = work.title();
+        if input.trim().is_empty() || input.len() > 100_000 {
+            return Err(StorageError::InvalidData("invalid saved work text".into()));
+        }
+        let mut after = before.clone();
+        let id = after.start_run(task, "text_execution", provider, timestamp, &assignees)?;
+        persist_execution_changes(&tx, &before, &after, true)?;
+        tx.execute(
+            "INSERT INTO executions(run_id,input,provider,model,deadline) VALUES (?1,?2,?3,?4,?5)",
+            params![
+                id.to_string(),
+                input,
+                provider,
+                model,
+                timestamp.unix_millis() + 120_000
+            ],
+        )?;
+        tx.execute(
+            "INSERT INTO execution_sources(run_id,declared_source) VALUES (?1,?2)",
+            params![id.to_string(), declared_source],
+        )?;
+        let result = get(&tx, id)?;
+        tx.commit()?;
+        Ok(result)
+    }
+
+    /// Metadata for history consumers; absence means legacy/non-MCP, not identity.
+    pub fn execution_sources(&self) -> Result<Vec<(String, String)>, StorageError> {
+        let mut statement = self
+            .connection
+            .prepare("SELECT run_id, declared_source FROM execution_sources ORDER BY run_id")?;
+        Ok(statement
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<Result<Vec<_>, _>>()?)
+    }
+
     pub fn finish_execution(
         &mut self,
         id: RunId,
@@ -505,7 +584,7 @@ mod tests {
         let mut store = SqliteStore::open(&path).unwrap();
         let (a, t) = seed(&mut store);
         let old = store.read().unwrap();
-        store.connection.execute_batch("DROP TRIGGER execution_immutable; DROP TRIGGER execution_retained; DROP TABLE executions; PRAGMA user_version=3; CREATE TRIGGER execution_immutable BEFORE UPDATE ON runs BEGIN SELECT 1; END;").unwrap();
+        store.connection.execute_batch("DROP TABLE execution_sources; DROP TRIGGER execution_immutable; DROP TRIGGER execution_retained; DROP TABLE executions; PRAGMA user_version=3; CREATE TRIGGER execution_immutable BEFORE UPDATE ON runs BEGIN SELECT 1; END;").unwrap();
         drop(store);
         let sql = Connection::open(&path).unwrap();
         assert!(SqliteStore::open(&path).is_err());
@@ -666,5 +745,168 @@ mod web_admission_tests {
             reopened.execution(first.run).unwrap().output.as_deref(),
             Some("response")
         );
+    }
+}
+
+#[cfg(test)]
+mod mcp_tests {
+    use super::*;
+    #[test]
+    fn rejected_mcp_admission_preserves_saved_work() {
+        let mut store = SqliteStore::open(":memory:").unwrap();
+        let (task, agent) = store
+            .transact(|c| {
+                let agent = c.create_agent("Writer")?;
+                let task = c.create_text_work("Saved input")?;
+                Ok((task, agent))
+            })
+            .unwrap();
+        // Missing assignment must not create an attempt or source record.
+        assert!(
+            store
+                .start_mcp_execution(task, "test", "model", 0, false, "codex")
+                .is_err()
+        );
+        store.transact(|c| c.assign(task, agent)).unwrap();
+        for (provider, model, source, expected) in [
+            ("", "model", "codex", 0),
+            ("test", "", "codex", 0),
+            ("test", "model", "", 0),
+            ("test", "model", "codex\n", 0),
+            ("test", "model", "codex", 1),
+        ] {
+            assert!(
+                store
+                    .start_mcp_execution(task, provider, model, expected, false, source)
+                    .is_err()
+            );
+            let (core, executions) = store.execution_snapshot().unwrap();
+            assert_eq!(core.task(task).unwrap().title(), "Saved input");
+            assert_eq!(
+                core.task(task).unwrap().assignees().collect::<Vec<_>>(),
+                vec![agent]
+            );
+            assert_eq!(core.runs_for_task(task).unwrap().count(), 0);
+            assert!(executions.is_empty());
+            assert!(store.execution_sources().unwrap().is_empty());
+        }
+        assert!(
+            store
+                .start_mcp_execution(task, "test", "model", 0, false, "codex")
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn mcp_consent_atomic_provenance_and_reopen() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("mcp.db");
+        let mut store = SqliteStore::open(&path).unwrap();
+        let task = store
+            .transact(|c| {
+                let a = c.create_agent("Writer")?;
+                let t = c.create_text_work("Saved input")?;
+                c.assign(t, a)?;
+                Ok(t)
+            })
+            .unwrap();
+        store.connection.execute_batch("CREATE TRIGGER fail_source BEFORE INSERT ON execution_sources BEGIN SELECT RAISE(ABORT,'injected'); END;").unwrap();
+        assert!(
+            store
+                .start_mcp_execution(task, "test", "model", 0, false, "codex")
+                .is_err()
+        );
+        drop(store);
+        let mut store = SqliteStore::open(&path).unwrap();
+        assert_eq!(store.read().unwrap().runs().len(), 0);
+        assert!(store.execution_sources().unwrap().is_empty());
+        store
+            .connection
+            .execute_batch("DROP TRIGGER fail_source")
+            .unwrap();
+        let first = store
+            .start_mcp_execution(task, "test", "model", 0, false, "codex")
+            .unwrap();
+        assert_eq!(first.input, "Saved input");
+        let mut other = SqliteStore::open(&path).unwrap();
+        assert!(
+            other
+                .start_mcp_execution(task, "test", "model", 0, false, "codex")
+                .is_err()
+        );
+        assert!(
+            other
+                .start_mcp_execution(task, "test", "model", 1, true, "codex")
+                .is_err()
+        );
+        store
+            .finish_execution(first.run, None, Some("provider_error"))
+            .unwrap();
+        assert!(
+            other
+                .start_mcp_execution(task, "test", "model", 0, true, "codex")
+                .is_err()
+        );
+        assert!(
+            other
+                .start_mcp_execution(task, "test", "model", 1, false, "codex")
+                .is_err()
+        );
+        let retry = other
+            .start_mcp_execution(task, "test", "model", 1, true, "claude-code")
+            .unwrap();
+        assert_ne!(first.run, retry.run);
+        other
+            .finish_execution(retry.run, Some("result"), None)
+            .unwrap();
+        drop(other);
+        drop(store);
+        let mut store = SqliteStore::open(&path).unwrap();
+        assert_eq!(
+            store.read().unwrap().runs_for_task(task).unwrap().count(),
+            2
+        );
+        assert_eq!(
+            store.execution(retry.run).unwrap().output.as_deref(),
+            Some("result")
+        );
+        let sources = store.execution_sources().unwrap();
+        assert!(sources.contains(&(first.run.to_string(), "codex".into())));
+        assert!(sources.contains(&(retry.run.to_string(), "claude-code".into())));
+        assert_eq!(
+            store
+                .read()
+                .unwrap()
+                .run(first.run)
+                .unwrap()
+                .reporting_source(),
+            "test"
+        );
+    }
+
+    #[test]
+    fn v4_migration_keeps_legacy_source_unknown() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("legacy.db");
+        let mut store = SqliteStore::open(&path).unwrap();
+        let (agent, task) = store
+            .transact(|c| {
+                let a = c.create_agent("Writer")?;
+                let t = c.create_text_work("Saved")?;
+                c.assign(t, a)?;
+                Ok((a, t))
+            })
+            .unwrap();
+        let first = store
+            .start_execution(task, agent, "Saved", "test", "model")
+            .unwrap();
+        store
+            .connection
+            .execute_batch("DROP TABLE execution_sources; PRAGMA user_version=4;")
+            .unwrap();
+        drop(store);
+        let mut store = SqliteStore::open(&path).unwrap();
+        assert_eq!(store.execution(first.run).unwrap(), first);
+        assert!(store.execution_sources().unwrap().is_empty());
     }
 }

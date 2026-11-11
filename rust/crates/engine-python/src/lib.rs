@@ -111,6 +111,34 @@ fn start_web_execution(
         .map(execution_record)
         .map_err(error)
 }
+/// Versioned MCP adapter: errors intentionally exclude paths and caller input.
+#[pyfunction]
+fn start_mcp_execution(
+    database: &str,
+    task_id: &str,
+    provider: &str,
+    model: &str,
+    expected_runs: usize,
+    resubmission_consent: bool,
+    declared_source: &str,
+) -> PyResult<ExecutionRecord> {
+    let task = task_id
+        .parse::<TaskId>()
+        .map_err(|_| error("invalid task ID"))?;
+    SqliteStore::open(database).map_err(|_| error("database unavailable"))?
+        .start_mcp_execution(task, provider, model, expected_runs, resubmission_consent, declared_source)
+        .map(execution_record).map_err(|_| error("execution rejected; refresh work and check assignment, active attempts and retry consent"))
+}
+
+/// Untrusted declared integration metadata, keyed by Run ID; missing is unknown.
+#[pyfunction]
+fn execution_sources(database: &str) -> PyResult<Vec<(String, String)>> {
+    SqliteStore::open(database)
+        .map_err(|_| error("database unavailable"))?
+        .execution_sources()
+        .map_err(|_| error("history unavailable"))
+}
+
 #[pyfunction]
 fn list_tasks(database: &str) -> PyResult<Vec<TaskRecord>> {
     Ok(SqliteStore::open(database)
@@ -463,6 +491,8 @@ fn recover_executions(database: &str) -> PyResult<()> {
 #[pymodule]
 fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(history_snapshot, m)?)?;
+    m.add_function(wrap_pyfunction!(start_mcp_execution, m)?)?;
+    m.add_function(wrap_pyfunction!(execution_sources, m)?)?;
     m.add_function(wrap_pyfunction!(create_assigned_work, m)?)?;
     m.add_function(wrap_pyfunction!(start_web_execution, m)?)?;
     m.add_function(wrap_pyfunction!(start_execution, m)?)?;

@@ -8,6 +8,11 @@ Schema v4 adds only execution records; writable v1/v2/v3 migration preserves row
 read-only legacy inspection remains supported. Partial Artifact/Evidence work is
 preserved and still rejected by persistence.
 
+The MCP workflow adds schema v5 for declared integration provenance, preserving
+the v4 execution records and seven-field execution adapter result. See the
+[versioned MCP workflow](mcp.md) for explicit retry consent and attempt-count
+admission; declared source is metadata, never authenticated identity.
+
 Rust serializes admission with BEGIN IMMEDIATE and the existing active-Run guard.
 Attempts expire after 120 seconds. Inspection through `work show` and explicit
 `work recover` terminalize expired executions, never resend. Opening the generic

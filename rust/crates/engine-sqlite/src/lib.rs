@@ -7,7 +7,7 @@ use rusqlite::{Connection, OpenFlags, TransactionBehavior, params};
 use std::{collections::BTreeSet, error::Error, fmt, path::Path, time::Duration};
 
 const APPLICATION_ID: i32 = 0x4c4c4d45; // LLME
-const SCHEMA_VERSION: i32 = 4;
+const SCHEMA_VERSION: i32 = 5;
 mod execution;
 pub use execution::Execution;
 
@@ -28,7 +28,7 @@ impl fmt::Display for StorageError {
             Self::InvalidData(e) => write!(f, "invalid stored data: {e}"),
             Self::UnsupportedVersion(v) => write!(f, "unsupported product schema version: {v}"),
             Self::UnsupportedProvenance => {
-                write!(f, "schema v4 cannot persist Artifact or Evidence records")
+                write!(f, "schema v5 cannot persist Artifact or Evidence records")
             }
             Self::ForeignDatabase => write!(f, "database is not an AgenTown product database"),
         }
@@ -109,7 +109,7 @@ impl SqliteStore {
         let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let version: i32 = tx.pragma_query_value(None, "user_version", |r| r.get(0))?;
         let application: i32 = tx.pragma_query_value(None, "application_id", |r| r.get(0))?;
-        if !matches!(version, 0 | 1 | 2 | 3 | SCHEMA_VERSION) {
+        if !matches!(version, 0 | 1 | 2 | 3 | 4 | SCHEMA_VERSION) {
             return Err(StorageError::UnsupportedVersion(version));
         }
         if version == 0 {
@@ -141,7 +141,12 @@ impl SqliteStore {
         }
         if version < 4 {
             tx.execute_batch(include_str!("migration-v4.sql"))?;
+            tx.pragma_update(None, "user_version", 4)?;
+        }
+        if version < 5 {
+            tx.execute_batch(include_str!("migration-v5.sql"))?;
             tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+            load(&tx)?;
         }
         tx.commit()?;
         Ok(Self { connection })
@@ -376,7 +381,7 @@ fn terminal_columns(state: RunState) -> (Option<&'static str>, Option<i64>) {
 
 fn check_version(connection: &Connection) -> Result<(), StorageError> {
     let version: i32 = connection.pragma_query_value(None, "user_version", |r| r.get(0))?;
-    if !matches!(version, 1 | 2 | 3 | SCHEMA_VERSION) {
+    if !matches!(version, 1 | 2 | 3 | 4 | SCHEMA_VERSION) {
         return Err(StorageError::UnsupportedVersion(version));
     }
     let application: i32 = connection.pragma_query_value(None, "application_id", |r| r.get(0))?;
@@ -505,6 +510,15 @@ fn load(connection: &Connection) -> Result<Core, StorageError> {
     let core = Core::restore(snapshot)?;
     if version >= 4 {
         execution::validate(connection, &core)?;
+    }
+    if version >= 5 {
+        let invalid: bool = connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM execution_sources s LEFT JOIN executions e ON e.run_id=s.run_id WHERE e.run_id IS NULL OR length(trim(s.declared_source))=0 OR length(CAST(s.declared_source AS BLOB))>80)", [], |r| r.get(0))?;
+        if invalid {
+            return Err(StorageError::InvalidData(
+                "invalid declared execution source".into(),
+            ));
+        }
     }
     Ok(core)
 }

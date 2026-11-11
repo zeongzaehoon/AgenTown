@@ -160,6 +160,7 @@ def test_employee_to_result_browser(tmp_path, installed_package):
                 # Kill an actual process while its provider is waiting; never edit leases.
                 gate.unlink()
                 page.get_by_role('button', name='Retry explicitly').click()
+                page.get_by_role('button', name='Confirm resend').click()
                 expect(page.locator('#detail .badge')).to_contain_text('Running')
                 snapshot(page, '08-outstanding-before-kill')
                 # Running is persisted before SDK I/O starts. Wait for the provider
@@ -184,6 +185,7 @@ def test_employee_to_result_browser(tmp_path, installed_package):
                 # the full execution/storage/packaging gate, never shortened there.
                 gate.write_text('success')
                 page.get_by_role('button', name='Retry explicitly').click()
+                page.get_by_role('button', name='Confirm resend').click()
                 expect(page.locator('#detail .badge')).to_contain_text('Result available')
                 assert len(gate.with_suffix('.calls').read_text().splitlines()) == 3
                 # Match the full branch's fresh document, including removal of

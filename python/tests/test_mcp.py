@@ -76,11 +76,16 @@ async def session(database):
 
 async def discover(client):
     tools = {tool.name: tool for tool in (await client.list_tools()).tools}
-    assert set(tools) == {"list_agents", "get_agent", "list_tasks", "get_task"}
+    assert set(tools) == {"list_agents", "get_agent", "list_tasks", "get_task",
+                          "create_employee_v1", "save_text_work_v1",
+                          "execute_text_work_v1", "get_work_history_v1"}
     for name, tool in tools.items():
-        assert tool.annotations.readOnlyHint
+        assert tool.annotations.readOnlyHint == (name in {
+            "list_agents", "get_agent", "list_tasks", "get_task"})
         assert tool.outputSchema
         jsonschema.Draft202012Validator.check_schema(tool.outputSchema)
+        if name.endswith("_v1"):
+            continue
         expected = {} if name.startswith("list_") else {
             "agent_id" if name == "get_agent" else "task_id": "string"}
         assert {k: v["type"] for k, v in tool.inputSchema["properties"].items()} == expected
@@ -199,3 +204,120 @@ async def test_team_assignment_inspection(cli, tmp_path, server_processes):
 
     assert cli('run', 'list', task) == history
     assert cli('run', 'show', active['id']) == active
+
+
+@asynccontextmanager
+async def fixture_session(database):
+    with anyio.fail_after(30):
+        async with stdio.stdio_client(StdioServerParameters(
+            command=sys.executable,
+            args=[str(Path(__file__).with_name("mcp_fixture_server.py")), str(database)],
+            cwd=str(database.parent),
+        )) as streams:
+            async with ClientSession(*streams) as client:
+                await client.initialize()
+                yield client
+
+
+@pytest.mark.anyio
+async def test_explicit_workflow_retry_failure_and_reopen(cli, tmp_path, server_processes):
+    cli("agent", "list")
+    database = tmp_path / "product.sqlite"
+    async with fixture_session(database) as client:
+        tools = await discover(client)
+        execute = tools["execute_text_work_v1"]
+        assert not execute.annotations.idempotentHint
+        assert execute.annotations.openWorldHint
+        assert "COSTLY" in execute.description
+        schema = execute.inputSchema
+        assert set(schema["required"]) == {
+            "task_id", "provider", "model", "declared_source", "expected_runs"}
+        assert schema["properties"]["declared_source"]["minLength"] == 1
+        assert schema["properties"]["declared_source"]["maxLength"] == 80
+        assert schema["properties"]["expected_runs"]["minimum"] == 0
+        assert schema["properties"]["resubmission_consent"]["default"] is False
+        assert not any("key" in key or "credential" in key
+                       for key in execute.inputSchema["properties"])
+        employee = (await call(client, tools, "create_employee_v1", {"name": "Writer"}))["employee"]
+        work = (await call(client, tools, "save_text_work_v1", {
+            "employee_id": employee["id"], "text": "Draft a greeting"}))["task"]
+        args = {"task_id": work["id"], "provider": "anthropic", "model": "fixture",
+                "expected_runs": 0, "declared_source": "test-client"}
+        for invalid in (
+            {key: value for key, value in args.items() if key != "declared_source"},
+            {key: value for key, value in args.items() if key != "expected_runs"},
+            {**args, "declared_source": ""},
+            {**args, "expected_runs": -1},
+        ):
+            assert (await client.call_tool("execute_text_work_v1", invalid)).isError
+        # Pydantic counts characters; native provenance is bounded in UTF-8 bytes.
+        oversized_source = await client.call_tool("execute_text_work_v1", {
+            **args, "declared_source": "한" * 27})
+        assert oversized_source.isError
+        assert (await call(client, tools, "get_work_history_v1", {
+            "task_id": work["id"]}))["attempts"] == []
+        initial = await call(client, tools, "execute_text_work_v1", args)
+        assert initial["output"] == "Fixture result: Draft a greeting"
+        assert initial["quality"] == "unverified" and initial["error"] is None
+        # Replay of the original admission cannot create another Run.
+        assert (await client.call_tool("execute_text_work_v1", args)).isError
+        stale = {**args, "expected_runs": 99, "resubmission_consent": True}
+        assert (await client.call_tool("execute_text_work_v1", stale)).isError
+        args["expected_runs"] = 1
+        assert (await client.call_tool("execute_text_work_v1", args)).isError
+        rejected_history = await call(client, tools, "get_work_history_v1", {
+            "task_id": work["id"]})
+        assert [run["id"] for run in rejected_history["attempts"]] == [initial["run_id"]]
+        args.update(resubmission_consent=True, model="failure")
+        failure = await call(client, tools, "execute_text_work_v1", args)
+        assert failure["error"] == "provider_error" and failure["output"] is None
+        assert failure["run_id"] != initial["run_id"]
+        args.update(expected_runs=2, model="fixture")
+        recovered = await call(client, tools, "execute_text_work_v1", args)
+        assert recovered["output"] and recovered["run_id"] != failure["run_id"]
+        history = await call(client, tools, "get_work_history_v1", {"task_id": work["id"]})
+        assert len(history["attempts"]) == 3
+        assert {r["declared_source"] for r in history["attempts"]} == {"test-client"}
+        assert {r["reporting_source"] for r in history["attempts"]} == {"anthropic"}
+        assert {r["task_id"] for r in history["attempts"]} == {work["id"]}
+        assert {r["execution"]["run_id"] for r in history["attempts"]} == {
+            initial["run_id"], failure["run_id"], recovered["run_id"]}
+    async with fixture_session(database) as client:
+        tools = await discover(client)
+        assert await call(client, tools, "get_work_history_v1", {"task_id": work["id"]}) == history
+
+
+@pytest.mark.anyio
+async def test_concurrent_admission_rejected(cli, tmp_path, server_processes):
+    cli("agent", "list")
+    database = tmp_path / "product.sqlite"
+    async with fixture_session(database) as first, fixture_session(database) as second:
+        tools = await discover(first)
+        employee = (await call(first, tools, "create_employee_v1", {"name": "Writer"}))["employee"]
+        work = (await call(first, tools, "save_text_work_v1", {
+            "employee_id": employee["id"], "text": "Draft"}))["task"]
+        args = {"task_id": work["id"], "provider": "anthropic", "model": "slow",
+                "expected_runs": 0, "declared_source": "test-client"}
+        results = []
+
+        async def execute(client):
+            results.append(await client.call_tool("execute_text_work_v1", args))
+
+        async with anyio.create_task_group() as group:
+            group.start_soon(execute, first)
+            group.start_soon(execute, second)
+        assert sorted(result.isError for result in results) == [False, True]
+        history = await call(first, tools, "get_work_history_v1", {"task_id": work["id"]})
+        assert len(history["attempts"]) == 1
+
+
+@pytest.mark.anyio
+async def test_workflow_errors_do_not_echo_input(cli, tmp_path, server_processes):
+    cli("agent", "list")
+    async with fixture_session(tmp_path / "product.sqlite") as client:
+        tools = await discover(client)
+        result = await client.call_tool("save_text_work_v1", {
+            "employee_id": "private-invalid-value", "text": "Draft"})
+        assert result.isError
+        assert "private-invalid-value" not in str(result)
+        assert "Traceback" not in str(result)
