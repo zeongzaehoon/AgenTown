@@ -126,6 +126,12 @@ python3.13 desktop/check_runtime.py desktop/target/release/bundle/macos/AgenTown
 
 For the assembled macOS app, use this acceptance sequence and record each result:
 
+`desktop/check_app.py` is only a copied-bundle process ownership/cleanup smoke
+check. Its child observation does not establish authenticated readiness, window
+creation, React rendering, or saved records after restart. Even when it exits
+successfully, the graphical acceptance sequence below remains required; do not
+use its output as workspace acceptance evidence.
+
 The supervisor can prepare and launch the copied bundle with the following
 commands from the checkout root. Run them in one terminal session in a graphical
 macOS login, after the build succeeds. These commands launch the actual Tauri

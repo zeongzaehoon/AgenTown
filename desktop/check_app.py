@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Launch the assembled macOS app outside the checkout and verify ownership."""
+"""Check copied macOS bundle process ownership, not workspace acceptance.
+
+This deliberately does not claim service readiness or rendered React content.
+Follow docs/desktop.md for the required graphical workspace/restart acceptance.
+"""
 
 from pathlib import Path
 import os
@@ -59,10 +63,18 @@ def main() -> None:
         try:
             owned = wait_until(
                 lambda: children(process.pid) if process.poll() is None else [],
-                30, "Assembled app did not reach owned-service readiness",
+                30, "Assembled app did not spawn a child process",
             )
             if process.poll() is not None:
-                raise RuntimeError("Assembled app exited before opening its workspace")
+                raise RuntimeError("Assembled app exited during the process ownership check")
+            swift = subprocess.run(
+                ["/usr/bin/xcrun", "--find", "swift"], check=True,
+                capture_output=True, text=True,
+            ).stdout.strip()
+            subprocess.run(
+                [swift, str(Path(__file__).with_name("check_window.swift")),
+                 str(process.pid)], check=True,
+            )
             print(f"assembled-app-ready shell={process.pid} owned-service={owned[0]}")
         finally:
             if process.poll() is None:
