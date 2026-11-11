@@ -29,6 +29,11 @@ def test_identity_requires_private_token_and_exact_host(tmp_path):
         assert response.json() == {'ready': True, 'identity': IDENTITY}
         assert response.headers['cache-control'] == 'no-store'
         assert TOKEN not in response.text
+        assert client.get('/_desktop/rendered').json() == {'rendered': False}
+        assert client.post('/_desktop/rendered', json={}).status_code == 403
+        assert client.post('/_desktop/rendered', json={}, headers={'Origin': 'http://evil.test'}).status_code == 403
+        assert client.post('/_desktop/rendered', json={}, headers={'Origin': ORIGIN}).json() == {'rendered': True}
+        assert client.get('/_desktop/rendered').json() == {'rendered': True}
         assert client.post('/api/employees', json={'name': 'Blocked'}).status_code == 403
         assert client.post('/api/employees', json={'name': 'Blocked'}, headers={'Origin': 'http://evil.test'}).status_code == 403
 

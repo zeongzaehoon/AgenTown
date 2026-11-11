@@ -15,6 +15,7 @@ from .web import ASSETS, LocalBoundary, create_app
 from .providers import PROVIDERS
 
 READY_PATH = "/_desktop/ready"
+RENDERED_PATH = "/_desktop/rendered"
 
 
 class DesktopReadiness:
@@ -22,9 +23,21 @@ class DesktopReadiness:
         self.app = app
         self.authorization = token.encode("ascii")
         self.identity = identity
+        self.rendered = False
 
     async def __call__(self, scope, receive, send):
-        if scope["type"] != "http" or scope["path"] != READY_PATH:
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+        if scope["path"] == RENDERED_PATH:
+            if scope["method"] == "POST":
+                self.rendered = True
+                response = JSONResponse({"rendered": True})
+            elif scope["method"] == "GET":
+                response = JSONResponse({"rendered": self.rendered})
+            else:
+                response = JSONResponse({"error": "Method not allowed."}, 405)
+            return await response(scope, receive, send)
+        if scope["path"] != READY_PATH:
             return await self.app(scope, receive, send)
         headers = dict(scope["headers"])
         if (scope["method"] != "GET" or

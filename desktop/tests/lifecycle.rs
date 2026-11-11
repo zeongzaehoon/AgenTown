@@ -34,7 +34,10 @@ fn readiness(body: &'static str) -> bool {
         // TCP reads may stop anywhere, including before the authentication header.
         // Read one byte at a time to exercise assembly across partial reads.
         while !request.ends_with(b"\r\n\r\n") {
-            assert!(request.len() < 2048, "request headers exceeded fixture limit");
+            assert!(
+                request.len() < 2048,
+                "request headers exceeded fixture limit"
+            );
             let mut byte = [0];
             stream.read_exact(&mut byte).unwrap();
             request.extend_from_slice(&byte);

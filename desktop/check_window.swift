@@ -17,4 +17,7 @@ let windows = raw.filter { window in
   ((window[kCGWindowBounds as String] as? [String: CGFloat])?["Height"] ?? 0) >= 480
 }
 print("native-workspace-windows=\(windows.count)")
+if let identifier = windows.first?[kCGWindowNumber as String] as? Int {
+  print("native-workspace-window-id=\(identifier)")
+}
 exit(windows.isEmpty ? 1 : 0)

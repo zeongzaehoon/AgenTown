@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
-"""Check copied macOS bundle process ownership, not workspace acceptance.
-
-This deliberately does not claim service readiness or rendered React content.
-Follow docs/desktop.md for the required graphical workspace/restart acceptance.
-"""
+"""Exercise the copied macOS app, rendered workspace, and restart persistence."""
 
 from pathlib import Path
+import http.client
+import json
 import os
 import signal
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -33,6 +32,81 @@ def wait_until(predicate, timeout: float, message: str):
     raise RuntimeError(message)
 
 
+def child_port(pid: int) -> int:
+    command = subprocess.run(
+        ["/bin/ps", "-p", str(pid), "-o", "command="],
+        check=True, capture_output=True, text=True,
+    ).stdout.strip()
+    arguments = shlex.split(command)
+    return int(arguments[arguments.index("--port") + 1])
+
+
+def api(port: int, method: str, path: str, payload=None):
+    body = None if payload is None else json.dumps(payload).encode()
+    headers = {"Origin": f"http://127.0.0.1:{port}"}
+    if body is not None:
+        headers["Content-Type"] = "application/json"
+    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+    connection.request(method, path, body=body, headers=headers)
+    response = connection.getresponse()
+    content = response.read()
+    connection.close()
+    if response.status >= 300:
+        raise RuntimeError(f"Desktop API {method} {path} returned {response.status}")
+    return json.loads(content) if content else None
+
+
+def ready_state(port: int):
+    try:
+        return api(port, "POST", "/api/state", {})
+    except (ConnectionError, OSError, RuntimeError):
+        return None
+
+
+def stop(process: subprocess.Popen, owned: list[int]) -> None:
+    if process.poll() is None:
+        process.send_signal(signal.SIGTERM)
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=5)
+
+    def surviving() -> list[int]:
+        return [pid for pid in owned if subprocess.run(
+            ["/bin/kill", "-0", str(pid)], capture_output=True
+        ).returncode == 0]
+
+    deadline = time.monotonic() + 10
+    survivors = surviving()
+    while survivors and time.monotonic() < deadline:
+        time.sleep(0.1)
+        survivors = surviving()
+    if survivors:
+        raise RuntimeError(f"Owned service survived native app shutdown: {survivors}")
+
+
+def launch(executable: Path, root: Path, environment: dict[str, str]):
+    process = subprocess.Popen(
+        [str(executable)], cwd=root, env=environment, stdin=subprocess.DEVNULL,
+    )
+    owned = wait_until(
+        lambda: children(process.pid) if process.poll() is None else [],
+        30, "Assembled app did not spawn its owned service",
+    )
+    if process.poll() is not None:
+        raise RuntimeError("Assembled app exited during startup")
+    port = wait_until(
+        lambda: child_port(owned[0]), 10,
+        "Assembled service did not publish its loopback port",
+    )
+    wait_until(
+        lambda: ready_state(port), 20,
+        "Assembled workspace API did not become ready",
+    )
+    return process, owned, port
+
+
 def main() -> None:
     if sys.platform != "darwin":
         raise SystemExit("The assembled .app smoke check must run on macOS")
@@ -55,47 +129,50 @@ def main() -> None:
         # while proving no developer executable can be resolved from PATH.
         environment = os.environ.copy()
         environment["PATH"] = str(empty_path)
-        process = subprocess.Popen(
-            [str(executable)], cwd=root, env=environment,
-            stdin=subprocess.DEVNULL,
-        )
-        owned: list[int] = []
+        fixed_home = root / "home"
+        fixed_home.mkdir()
+        environment["CFFIXED_USER_HOME"] = str(fixed_home)
+
+        process, owned, port = launch(executable, root, environment)
         try:
-            owned = wait_until(
-                lambda: children(process.pid) if process.poll() is None else [],
-                30, "Assembled app did not spawn a child process",
-            )
-            if process.poll() is not None:
-                raise RuntimeError("Assembled app exited during the process ownership check")
             swift = subprocess.run(
                 ["/usr/bin/xcrun", "--find", "swift"], check=True,
                 capture_output=True, text=True,
             ).stdout.strip()
-            subprocess.run(
-                [swift, str(Path(__file__).with_name("check_window.swift")),
-                 str(process.pid)], check=True,
+            window = None
+            for _ in range(30):
+                observed = subprocess.run(
+                    [swift, str(Path(__file__).with_name("check_window.swift")),
+                     str(process.pid)], capture_output=True, text=True,
+                )
+                if observed.returncode == 0:
+                    window = observed.stdout
+                    break
+                time.sleep(0.1)
+            if window is None:
+                raise RuntimeError("Native workspace window was not observed")
+            print(window, end="")
+            rendered = wait_until(
+                lambda: (api(port, "GET", "/_desktop/rendered") or {}).get("rendered"),
+                20, "React workspace did not publish its rendered DOM signal",
             )
+            print(f"rendered-react-workspace={str(bool(rendered)).lower()}")
+            saved = api(port, "POST", "/api/employees",
+                        {"name": "Desktop restart evidence"})
+            employee_id = saved["id"]
             print(f"assembled-app-ready shell={process.pid} owned-service={owned[0]}")
         finally:
-            if process.poll() is None:
-                process.send_signal(signal.SIGTERM)
-                try:
-                    process.wait(timeout=10)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    process.wait(timeout=5)
-        def surviving() -> list[int]:
-            return [pid for pid in owned if subprocess.run(
-                ["/bin/kill", "-0", str(pid)], capture_output=True
-            ).returncode == 0]
+            stop(process, owned)
 
-        deadline = time.monotonic() + 10
-        survivors = surviving()
-        while survivors and time.monotonic() < deadline:
-            time.sleep(0.1)
-            survivors = surviving()
-        if survivors:
-            raise RuntimeError(f"Owned service survived native app shutdown: {survivors}")
+        process, owned, port = launch(executable, root, environment)
+        try:
+            state = api(port, "POST", "/api/state", {})
+            employees = state.get("employees", [])
+            if not any(employee.get("id") == employee_id for employee in employees):
+                raise RuntimeError("Saved desktop record was not retained after app restart")
+            print(f"assembled-app-restart-persistence=true employee-id={employee_id}")
+        finally:
+            stop(process, owned)
         print("assembled-app-clean-shutdown=true copied-outside-checkout=true empty-path=true")
 
 

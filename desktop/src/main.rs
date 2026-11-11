@@ -24,6 +24,20 @@ fn main() {
             let url = format!("http://127.0.0.1:{port}/").parse()?;
             tauri::WebviewWindowBuilder::new(app, "workspace", tauri::WebviewUrl::External(url))
                 .title("AgenTown").inner_size(1200.0, 820.0).min_inner_size(800.0, 600.0)
+                .initialization_script(r#"
+                    (() => {
+                      const timer = setInterval(() => {
+                        if (document.body?.innerText.toLowerCase().includes('agentown')) {
+                          clearInterval(timer);
+                          fetch('/_desktop/rendered', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: '{}'
+                          }).catch(() => {});
+                        }
+                      }, 100);
+                    })();
+                "#)
                 .on_navigation(move |url| url.scheme() == "http" && url.host_str() == Some("127.0.0.1") && url.port() == Some(port))
                 .build()?;
             Ok((service, admission))
