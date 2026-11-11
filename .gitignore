@@ -24,3 +24,9 @@ dist/
 # Generated frontend dependencies and production assets
 node_modules/
 /python/src/llm_engine/static/
+
+# Assembled desktop runtime and native build intermediates
+/desktop/resources/*
+!/desktop/resources/README.md
+/desktop/build/
+/desktop/gen/

@@ -63,3 +63,5 @@ uv run --directory python --locked agentown-web --help
 ```
 
 Build frontend assets before building or testing installed Python packages. Historical files in `docs/evidence/` retain the paths that existed when they were recorded.
+
+Desktop source build and owned-service lifecycle: see [desktop instructions](docs/desktop.md).

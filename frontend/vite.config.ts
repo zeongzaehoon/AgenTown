@@ -6,6 +6,8 @@ export default defineConfig({
     environment: 'jsdom',
     include: ['src/**/*.test.tsx'],
     restoreMocks: true,
+    // Keep DOM-heavy suites from competing for CPU in desktop build verification.
+    fileParallelism: false,
     testTimeout: 10_000,
   },
 });

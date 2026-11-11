@@ -62,11 +62,13 @@ function ConfigurationPanel({workspace}: {workspace: Workspace | null}) {
   }
   useEffect(() => { void perform(); return () => { controller.current?.abort(); lock.current = false; }; }, []);
   useEffect(() => {
+    // Fast saves can batch busy=true and busy=false into one render. Check the
+    // pending request after every commit, even when busy did not change.
     if (!busy && focusSelection.current) {
       focusSelection.current = false;
       selector.current?.focus();
     }
-  }, [busy]);
+  });
   function remember(saved: ConfigurationRecord) {
     setRecords(previous => previous && ({...previous, [kind]: [...previous[kind].filter(item => item.id !== saved.id), saved]}));
     setNotice(`${labels[kind]} saved · ID: ${saved.id}`);

@@ -31,14 +31,19 @@ function setup() {
   vi.stubGlobal('fetch', fetcher);
   const blobs: Blob[] = [];
   const create = vi.fn((blob: Blob) => { blobs.push(blob); return 'blob:history'; });
-  vi.stubGlobal('URL', {createObjectURL: create, revokeObjectURL: vi.fn()});
+  // Keep URL parsing available to Response/fetch while replacing download APIs.
+  vi.stubGlobal('URL', class extends URL {
+    static createObjectURL = create;
+    static revokeObjectURL = vi.fn();
+  });
   const filenames: string[] = [];
   const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) { filenames.push(this.download); });
   render(<App />);
   return {state, fetcher, blobs, filenames, create, click, disconnect: () => { disconnected = true; }};
 }
 async function selectSaved(id = 'work/한글') {
-  await screen.findByRole('button', {name: 'Download saved history'});
+  // Parallel product checks can delay the initial history render beyond 1s.
+  await screen.findByRole('button', {name: 'Download saved history'}, {timeout: 5_000});
   fireEvent.change(screen.getByLabelText('Saved work'), {target: {value: id}});
 }
 const download = () => screen.getByRole('button', {name: 'Download saved history'});
