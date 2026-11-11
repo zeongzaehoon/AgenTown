@@ -984,3 +984,57 @@ it writes `teams.json` and `14-teams-persisted-navigation.png` alongside its
 existing trace and interaction journal. Browser execution and visual inspection
 are pending supervisor verification for this implementation snapshot. Live LLM
 validation is skipped, not passed, under the current user policy.
+
+## Skills, Hooks and Loop configuration (C24-T2)
+
+Prerequisite: C24-T1's [configuration API](configuration-api.md). After the normal
+frontend build/product install above, launch the local product server:
+
+```sh
+agentown-web --database /tmp/configuration-workspace.sqlite3 --port 8765
+```
+
+Open <http://127.0.0.1:8765>. No credentials or model are required. Create an
+employee and save a pending work request without executing it; optionally create
+a team. These provide Hook targets and Loop work references.
+
+1. Tab to **Open configuration**, press Enter, and wait for **Showing saved
+   configuration**. Select **Skill** in **Record type**, enter Name and
+   Instructions, then **Create Skill**. Focus moves to **Saved record**. Note
+   its stable ID and inspect **Saved values**, which shows persisted fields.
+2. Edit Name/Instructions and choose **Save changes**. Choose **Enable
+   configuration**, then **Disable configuration**. Inspect the saved boolean.
+   Configuration does not execute work; runtime execution of Skills, Hooks and
+   Loops is unavailable even when enabled.
+3. Select **Hook**, choose a saved Skill, Employee or Team target type, target
+   and event. Create, edit fields, save and toggle it. Select **Loop**, choose
+   saved work, enter 1–100 maximum iterations and 60–86400 interval seconds,
+   create, edit, save and toggle it. All selectors show stable IDs, including
+   duplicate names. Empty lists require creating references first. The server
+   remains authoritative if a reference becomes unavailable.
+4. Choose **Create new** in Saved record to create another record. Switch
+   between types/records with an unsaved draft: drafts remain within the session.
+   Enter invalid/blank values and observe validation and disabled save controls.
+5. Stop the server and attempt a save or **Refresh configuration**. Loading and
+   saving are announced; failure retains drafts and loaded saved values, marks
+   data stale/disconnected and disables mutations. Restart using the same command
+   and database. Choose Refresh configuration and inspect Saved values and the
+   record list (a failed create may already have persisted). Refresh never resends
+   mutations. Explicitly choose Save/Create only after checking; an uncertain
+   create retried blindly could create another record. Drafts remain for comparison.
+6. Reload the page, reopen Configuration and select the same IDs. Edited fields
+   and enabled/disabled values must persist. Stop/restart the server with the same
+   database and repeat. Unsaved drafts are session-only and discarded by reload.
+   Use Tab/Shift+Tab, Enter and native select keys throughout; focus is visible
+   using the existing focus outline. Inspect status/error announcements.
+
+`frontend/src/Configuration.test.tsx` provides deterministic interaction fixtures
+for all three kinds, edits, explicit toggles, validation, ID-based selection,
+remount persistence, loading/empty/disconnected/error recovery, retained drafts,
+and requests restricted to configuration/reference endpoints (no execution).
+These fixtures do not prove server restart persistence. Supervisor frontend
+checks/build and the applicable consolidated verification profile remain pending;
+real browser exercise/screenshots are pending only if that profile requires them.
+This implementation invocation did not run browser or installed-product checks.
+Live provider calls remain skipped, not passed. Existing WCAG research and the
+C24-T1 API documentation were reused; no new research uncertainty arose.

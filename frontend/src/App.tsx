@@ -1,3 +1,4 @@
+import { Configuration } from './Configuration';
 import { Teams } from './Teams';
 import { CompanyOverview } from './CompanyOverview';
 import { Connections } from './Connections';
@@ -329,6 +330,7 @@ export function App() {
           </>}</div>
         </section></div>
       <footer>Responses are unverified. Read and check the full result before using it.</footer>
+      <Configuration workspace={state} />
       <Connections workspaceConnected={connected} />
     </main>
   </>;
