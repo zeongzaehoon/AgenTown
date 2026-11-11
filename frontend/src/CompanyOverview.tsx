@@ -6,8 +6,8 @@ const categories: {key: WorkOutcome; label: string}[] = [
   {key: 'other', label: 'Other recorded work'},
 ];
 
-export function CompanyOverview({workspace, connected, error, onOpenWork}: {
-  workspace: Workspace | null; connected: boolean; error: string; onOpenWork: (id: string) => void;
+export function CompanyOverview({workspace, connected, error, onOpenWork, selectedEmployee = '', onSelectEmployee}: {
+  workspace: Workspace | null; connected: boolean; error: string; onOpenWork: (id: string) => void; selectedEmployee?: string; onSelectEmployee?: (id: string) => void;
 }) {
   const employees = workspace?.employees ?? [];
   const employeeIds = new Set(employees.map(employee => employee.id));
@@ -29,7 +29,8 @@ export function CompanyOverview({workspace, connected, error, onOpenWork}: {
           assigned.forEach(work => { counts[classifyWork(work).outcome]++; });
           const callerActive = assigned.filter(work => classifyWork(work).outcome === 'active' && !work.attempts.at(-1)?.provider).length;
           return <li key={employee.id} className="employee-card">
-            <h3>{employee.name}</h3><p className="employee-id">Employee ID: {employee.id}</p>
+            <h3>{onSelectEmployee ? <button type="button" aria-pressed={selectedEmployee === employee.id} aria-controls="employee-work"
+              onClick={() => onSelectEmployee(employee.id)} aria-label={`View assigned work: ${employee.name} · ID: ${employee.id}`}>{employee.name}</button> : employee.name}</h3><p className="employee-id">Employee ID: {employee.id}</p>
             <p>{assigned.length ? `${assigned.length} assigned requests` : 'No assigned work.'}</p>
             <dl className="workload-counts">{categories.map(category => <div key={category.key}>
               <dt>{category.label}</dt><dd>{counts[category.key]}</dd>

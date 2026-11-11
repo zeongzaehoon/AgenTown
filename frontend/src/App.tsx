@@ -77,6 +77,7 @@ export function App() {
   const [notice, setNotice] = useState('');
   const [selected, setSelected] = useState('');
   const [search, setSearch] = useState('');
+  const [viewEmployee, setViewEmployee] = useState('');
   const [outcome, setOutcome] = useState<WorkOutcome | 'all'>('all');
   const searchRef = useRef<HTMLInputElement>(null);
   const [employee, setEmployee] = useState<string | null>(null);
@@ -102,7 +103,7 @@ export function App() {
   const poll = useRef<AbortController | null>(null);
   const mutations = useRef(new Set<AbortController>());
   const work = state?.work.find(w => w.id === selected);
-  const matches = state?.work.filter(w => w.input.toLowerCase().includes(search.toLowerCase()) && (outcome === 'all' || classifyWork(w).outcome === outcome)) ?? [];
+  const matches = state?.work.filter(w => (!viewEmployee || w.assignees.includes(viewEmployee)) && w.input.toLowerCase().includes(search.toLowerCase()) && (outcome === 'all' || classifyWork(w).outcome === outcome)) ?? [];
   const selectedExcluded = !!work && !matches.some(w => w.id === work.id);
   const assignee = employee === null ? state?.employees[0]?.id ?? '' : state?.employees.some(e => e.id === employee) ? employee : '';
 
@@ -238,8 +239,8 @@ export function App() {
       <p id="connection" role="status" aria-live="polite">{connected ? `Connected · ${work ? workStatus(work) : 'Ready for your first work'}` : connectionError ? `Disconnected — displayed history may be out of date. ${connectionError}` : 'Connecting to your workspace…'}</p>
       <p id="configuration">{state && (state.configuration || `Provider: ${state.provider} · Model: ${state.model} · ${['anthropic', 'openai', 'bedrock', 'xai'].includes(state.provider) ? 'Real provider requests' : 'Test responses — not live validation'}`)}</p>
       <p id="notice" role="alert">{notice}</p><button id="refresh" type="button" onClick={() => void refresh()}>Refresh connection</button>
-      <CompanyOverview workspace={state} connected={connected} error={connectionError} onOpenWork={id => {
-        setSearch(''); setOutcome('all'); setSelected(id); historyRef.current?.focus();
+      <CompanyOverview workspace={state} connected={connected} error={connectionError} selectedEmployee={viewEmployee} onSelectEmployee={setViewEmployee} onOpenWork={id => {
+        setViewEmployee(''); setSearch(''); setOutcome('all'); setSelected(id); historyRef.current?.focus();
       }} />
       <div className="workspace"><aside><section><h2>1. Your employees</h2>
         <p id="employees-empty" hidden={!!state?.employees.length}>No employees yet. Create your first one.</p>
@@ -265,7 +266,7 @@ export function App() {
           <p id="input-error" role="status" aria-live="polite">{inputError}</p>
           <button disabled={!connected || busy.has('work') || !!replacement || !assignee}>Save work</button>
         </form><p role="status" aria-live="polite" aria-atomic="true">{draftNotice}</p></section></aside>
-        <section className="history"><h2>3. Work &amp; results</h2>
+        <section id="employee-work" className="history"><h2>3. Work &amp; results</h2>
           <p id="empty" hidden={!!state?.work.length}>No work yet. Your saved work and results will appear here.</p>
           <label htmlFor="search">Search saved work</label>
           <input id="search" type="search" ref={searchRef} value={search} aria-describedby="search-help" onChange={e => setSearch(e.target.value)} />
@@ -280,9 +281,13 @@ export function App() {
             <option value="failed">Failed or interrupted work</option>
           </select>
           <p id="outcome-help">Combines with search using the latest recorded attempt. Results remain unverified; active attempts may be caller-reported. All outcomes also includes other recorded states. When disconnected, filters use the last loaded history.</p>
-          <button type="button" onClick={() => { setSearch(''); setOutcome('all'); searchRef.current?.focus(); }}>Show all loaded work</button>
+          <button type="button" onClick={() => { setViewEmployee(''); setSearch(''); setOutcome('all'); searchRef.current?.focus(); }}>Show all loaded work</button>
+          <p role="status">{viewEmployee ? `Assigned work for ${state?.employees.find(e => e.id === viewEmployee)?.name ?? 'an unavailable employee'} · Employee ID: ${viewEmployee}. ${connected ? '' : 'Using stale assignments from the last successful refresh.'}` : 'Showing work for all employees.'}</p>
+          {!!viewEmployee && <button type="button" onClick={() => { setViewEmployee(''); searchRef.current?.focus(); }}>Return to all employees</button>}
+          <p>Employee navigation only changes this view. It does not save, assign or execute work.</p>
+          <ul aria-label="Matching requests">{matches.map(w => <li key={w.id}><button type="button" onClick={() => { setSelected(w.id); historyRef.current?.focus(); }}>Open request: {w.input.slice(0, 55)} · ID: {w.id}</button></li>)}</ul>
           <p id="search-count" role="status" aria-live="polite" aria-atomic="true">{state ? `${matches.length} of ${state.work.length} saved requests match.` : 'Saved history has not loaded yet.'}</p>
-          {!!state?.work.length && !matches.length && <p>No saved work matches your search and outcome filter. Change either filter or choose Show all loaded work to reset both.</p>}
+          {!!state?.work.length && !matches.length && <p>No saved work matches your employee, search and outcome filters. This employee may have no assigned work. Change either filter, change the employee selection, return to all employees or choose Show all loaded work to reset all filters.</p>}
           {selectedExcluded && <p id="selection-help">The selected work is outside these matches. Its detail remains selected below. Select a match to change it.</p>}
           <label htmlFor="history">Saved work</label><select id="history" ref={historyRef} aria-describedby={selectedExcluded ? 'selection-help' : undefined} value={selectedExcluded ? '' : work?.id ?? ''} onChange={e => setSelected(e.target.value)}>
             {(selectedExcluded || !work) && <option value="" disabled>Select a matching request</option>}

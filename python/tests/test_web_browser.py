@@ -439,6 +439,51 @@ def test_employee_to_result_browser(tmp_path, installed_package):
             events.append({'step': 'output-limit-correction-restart', 'limited_task': limited_work['id'],
                            'limited_run': limited_attempt['id'], 'corrected_task': corrected_work['id'],
                            'history': finished_limit, 'scenario_submissions': 2, 'original_submissions': 3})
+            # Real installed UI: duplicate names must still navigate by employee ID.
+            navigation_ids = []
+            for index in range(2):
+                page.get_by_label('Employee name').fill('Navigation Alex')
+                page.get_by_role('button', name='Create employee', exact=True).click()
+                expect(page.get_by_label('What would you like help with?')).to_be_focused()
+                employee_id = page.get_by_label('Assign to', exact=True).input_value()
+                page.get_by_label('What would you like help with?').fill(f'Navigation request {index}')
+                page.get_by_role('button', name='Save work', exact=True).click()
+                expect(page.get_by_role('button', name='Execute work', exact=True)).to_be_focused()
+                navigation_ids.append((employee_id, page.get_by_label('Saved work', exact=True).input_value()))
+            page.get_by_label('What would you like help with?').fill('Retain navigation draft')
+            draft_assignment = page.get_by_label('Assign to', exact=True).input_value()
+            navigation_requests = []
+            def record_navigation(request):
+                if '/api/' in request.url and not request.url.endswith('/api/state'):
+                    navigation_requests.append(request.url)
+            page.on('request', record_navigation)
+            for index, (employee_id, work_id) in enumerate(navigation_ids):
+                card = page.get_by_role('button', name=f'View assigned work: Navigation Alex · ID: {employee_id}', exact=True)
+                card.focus()
+                page.keyboard.press('Enter' if index == 0 else 'Space')
+                expect(card).to_be_focused()
+                expect(card).to_have_attribute('aria-pressed', 'true')
+                expect(page.locator('#history option:not([value=""])')).to_have_count(1)
+                page.get_by_role('button', name=f'Open request: Navigation request {index} · ID: {work_id}', exact=True).click()
+                expect(page.get_by_label('Saved work', exact=True)).to_be_focused()
+                expect(page.get_by_label('Saved work', exact=True)).to_have_value(work_id)
+                page.get_by_role('button', name='Return to all employees', exact=True).click()
+                expect(page.get_by_label('Search saved work', exact=True)).to_be_focused()
+            context.set_offline(True)
+            page.get_by_role('button', name='Refresh connection', exact=True).click()
+            expect(page.locator('#connection')).to_contain_text('Disconnected')
+            page.get_by_role('button', name=f'View assigned work: Navigation Alex · ID: {navigation_ids[0][0]}', exact=True).click()
+            expect(page.get_by_text('Using stale assignments', exact=False)).to_be_visible()
+            page.get_by_role('button', name='Show all loaded work', exact=True).click()
+            expect(page.get_by_label('What would you like help with?')).to_have_value('Retain navigation draft')
+            expect(page.get_by_label('Assign to', exact=True)).to_have_value(draft_assignment)
+            assert navigation_requests == []
+            snapshot(page, '13-employee-navigation-offline')
+            context.set_offline(False)
+            page.get_by_role('button', name='Refresh connection', exact=True).click()
+            expect(page.locator('#connection')).to_contain_text('Connected')
+            page.remove_listener('request', record_navigation)
+            events.append({'step': 'employee-navigation', 'employee_work_ids': navigation_ids, 'navigation_mutations': navigation_requests})
             page.set_viewport_size({'width': 390, 'height': 844})
             snapshot(page, '09-mobile')
             assert page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')

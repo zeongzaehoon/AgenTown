@@ -861,3 +861,38 @@ with supervisor-selected consolidated and browser checks. No browser execution
 or visual artifact is claimed here. Live provider calls are skipped, not passed.
 Existing WCAG guidance recorded in this document is reused; no new research
 uncertainty or API/schema change was introduced.
+
+### Open an employee's assigned requests
+
+Launch `agentown-web --database PATH` and open <http://127.0.0.1:8765>.
+Create two employees (duplicate names are supported), choose each employee in
+**Assign to**, enter separate text and **Save work**. No provider credentials
+are needed to save or navigate; do not execute for this walkthrough.
+
+Activate an employee's name button in Company overview with a pointer, Enter or
+Space. The button exposes its selected state and its accessible name includes
+the employee ID. Work & results shows only requests assigned to that ID,
+intersected with the existing text and outcome filters. Choose **Open request**
+to open the existing saved-work detail; keyboard focus moves to Saved work.
+An excluded detail stays visible, with an explanation. **Return to all employees**
+removes only the employee filter; **Show all loaded work** resets all filters.
+Both return keyboard focus to search.
+
+Keep unsaved text and a different draft assignment while navigating. Filtering
+and reset preserve those values and expanded results for the selected request.
+Opening different work uses the existing retry-consent invalidation safeguards.
+Polling updates assignment matches without selecting another detail. If the
+selected employee disappears, their ID remains visible as unavailable. Empty
+matches explain the filters; a disconnected view labels its last loaded
+assignments as stale and still permits local navigation. Navigation never saves,
+reassigns or executes requests.
+
+Deterministic App interaction coverage exercises duplicate IDs/names, Enter and
+Space, composed filters, detail focus, retained drafts/results, polling,
+unavailable employees, stale data, consent and zero navigation mutation calls.
+The installed Chromium flow in `python/tests/test_web_browser.py` additionally
+creates two same-name employees with separate saved requests and exercises real
+keyboard focus, opening, reset and disconnected navigation, recording
+`13-employee-navigation-offline.png` and the employee/request IDs in
+`interactions.json`. These browser checks are pending supervisor execution for
+this Task; live provider calls remain skipped under the user policy.

@@ -812,3 +812,71 @@ test('polling changes outcome matches while retaining selected details, expanded
   expect((screen.getByLabelText('Assign to') as HTMLSelectElement).value).toBe('other');
   expect(f.calls.every(c => c.path === '/api/state')).toBe(true);
 });
+
+test('employee navigation uses IDs, composes filters and preserves drafts, results and consent', async () => {
+  const f = savedResults();
+  f.state.employees = [{id: 'e', name: 'Alex'}, {id: 'other', name: 'Alex'}, {id: 'idle', name: 'Idle'}];
+  f.state.work.push({id: 'other-work', input: 'Text for other Alex', status: 'pending', assignees: ['other'], attempts: []});
+  const before = JSON.stringify(f.state);
+  const user = userEvent.setup(); render(<App />); await connected();
+  fireEvent.change(draftInput(), {target: {value: 'Keep unsaved request'}});
+  await user.selectOptions(screen.getByLabelText('Assign to'), 'other');
+  await user.click(screen.getByText('Attempt 1 · Result available · Unverified'));
+  const expanded = [...document.querySelectorAll<HTMLDetailsElement>('#detail details')];
+  await waitFor(() => expect(expanded.every(d => d.open)).toBe(true));
+  await user.click(retry());
+  const card = screen.getByRole('button', {name: 'View assigned work: Alex · ID: other'});
+  card.focus(); await user.keyboard('{Enter}');
+  expect(document.activeElement).toBe(card);
+  expect(card.getAttribute('aria-pressed')).toBe('true');
+  expect(matchingIds()).toEqual(['other-work']);
+  expect(screen.getByText(/Its detail remains selected/)).toBeTruthy();
+  for (const detail of expanded) { expect(detail.isConnected).toBe(true); expect(detail.open).toBe(true); }
+  expect(resendRegion()).toBeTruthy(); // Filtering alone does not change saved work consent.
+  fireEvent.change(searchInput(), {target: {value: 'Text'}});
+  await user.selectOptions(outcomeFilter(), 'results');
+  expect(matchingIds()).toEqual([]);
+  expect(screen.getByText(/No saved work matches your employee/)).toBeTruthy();
+  await user.selectOptions(outcomeFilter(), 'all');
+  const staleConsent = resend();
+  await user.click(screen.getByRole('button', {name: /Open request: Text for other Alex/}));
+  expect(history().value).toBe('other-work'); expect(document.activeElement).toBe(history());
+  expect(resendRegion()).toBeNull();
+  act(() => staleConsent.click());
+  await user.click(screen.getByRole('button', {name: 'Return to all employees'}));
+  expect(matchingIds()).toEqual(['w', 'other-work']);
+  const first = screen.getByRole('button', {name: 'View assigned work: Alex · ID: e'});
+  first.focus(); await user.keyboard(' ');
+  expect(matchingIds()).toEqual(['w']);
+  await user.click(screen.getByRole('button', {name: /^Open request: Text ·/}));
+  await user.click(screen.getByRole('button', {name: 'View assigned work: Idle · ID: idle'}));
+  expect(matchingIds()).toEqual([]);
+  await user.click(screen.getByRole('button', {name: 'Show all loaded work'}));
+  expect(document.activeElement).toBe(searchInput());
+  expect(draftInput().value).toBe('Keep unsaved request');
+  expect((screen.getByLabelText('Assign to') as HTMLSelectElement).value).toBe('other');
+  expect(JSON.stringify(f.state)).toBe(before);
+  expect(f.calls.every(c => c.path === '/api/state')).toBe(true);
+});
+
+test('employee assignment polling and disconnected navigation retain selected history and expanded results', async () => {
+  const f = savedResults();
+  const user = userEvent.setup(); render(<App />); await connected();
+  fireEvent.change(draftInput(), {target: {value: 'Keep draft offline'}});
+  await user.click(screen.getByText('Attempt 1 · Result available · Unverified'));
+  const expanded = [...document.querySelectorAll<HTMLDetailsElement>('#detail details')];
+  await waitFor(() => expect(expanded.every(d => d.open)).toBe(true));
+  await user.click(screen.getByRole('button', {name: /View assigned work: .* · ID: e$/}));
+  expect(matchingIds()).toEqual(['w']);
+  f.state.work[0].assignees = ['unavailable'];
+  await waitFor(() => expect(matchingIds()).toEqual([]), {timeout: 2000});
+  f.state.employees = [];
+  refresh(); await screen.findByText(/Assigned work for an unavailable employee/);
+  f.disconnect(); refresh();
+  await screen.findByText(/Using stale assignments/);
+  await user.click(screen.getByRole('button', {name: 'Return to all employees'}));
+  expect(matchingIds()).toEqual(['w']); expect(history().value).toBe('w');
+  expect(draftInput().value).toBe('Keep draft offline');
+  for (const detail of expanded) { expect(detail.isConnected).toBe(true); expect(detail.open).toBe(true); }
+  expect(f.calls.every(c => c.path === '/api/state')).toBe(true);
+});
