@@ -1,0 +1,31 @@
+{
+  "validation": "DETERMINISTIC TEST ONLY; live validation outstanding",
+  "database": "/var/folders/dx/ny9cjsmd1bb3r42zbp694xkh0000gn/T/llm-engine-c7-28g_qk_n/work.sqlite3",
+  "agent_id": "5c041f6c-cf24-4188-a077-101411c5865b",
+  "task_id": "d8004313-927b-4018-8257-9d1302c01a61",
+  "failed": {
+    "run_id": "315a8148-026d-47e7-a4a6-3958f0c49f21",
+    "input": "Summarize in one sentence: The team agreed to ship the draft on Friday.",
+    "provider": "test-fixture",
+    "model": "fixture-model",
+    "deadline_unix_ms": 1789271335375,
+    "output": null,
+    "error": "rate_limit",
+    "schema_version": 1,
+    "quality": "unverified"
+  },
+  "success": {
+    "run_id": "ff1e7249-6af7-48b8-9fb1-bbe9fb5fd264",
+    "input": "Summarize in one sentence: The team agreed to ship the draft on Friday.",
+    "provider": "test-fixture",
+    "model": "fixture-model",
+    "deadline_unix_ms": 1789271335393,
+    "output": "TEST RESPONSE: The team agreed to ship the draft on Friday.",
+    "error": null,
+    "schema_version": 1,
+    "quality": "unverified"
+  }
+}
+{"command": ["/Users/hoon/Portfolio/llm-engine/.venv/bin/python3", "-m", "llm_engine", "--database", "/var/folders/dx/ny9cjsmd1bb3r42zbp694xkh0000gn/T/llm-engine-c7-28g_qk_n/work.sqlite3", "--json", "work", "show", "ff1e7249-6af7-48b8-9fb1-bbe9fb5fd264"], "exit": 0, "stdout": {"run_id": "ff1e7249-6af7-48b8-9fb1-bbe9fb5fd264", "input": "Summarize in one sentence: The team agreed to ship the draft on Friday.", "provider": "test-fixture", "model": "fixture-model", "deadline_unix_ms": 1789271335393, "output": "TEST RESPONSE: The team agreed to ship the draft on Friday.", "error": null, "schema_version": 1, "quality": "unverified", "run": {"id": "ff1e7249-6af7-48b8-9fb1-bbe9fb5fd264", "task_id": "d8004313-927b-4018-8257-9d1302c01a61", "stage": "text_execution", "reporting_source": "test-fixture", "started_at_unix_ms": 1789271215393, "ended_at_unix_ms": 1789271215401, "state": "finished", "outcome": "reported_success", "participants": ["5c041f6c-cf24-4188-a077-101411c5865b"]}}}
+{"command": ["/Users/hoon/Portfolio/llm-engine/.venv/bin/python3", "-m", "llm_engine", "--database", "/var/folders/dx/ny9cjsmd1bb3r42zbp694xkh0000gn/T/llm-engine-c7-28g_qk_n/work.sqlite3", "--json", "run", "list", "d8004313-927b-4018-8257-9d1302c01a61"], "exit": 0, "stdout": [{"id": "315a8148-026d-47e7-a4a6-3958f0c49f21", "task_id": "d8004313-927b-4018-8257-9d1302c01a61", "stage": "text_execution", "reporting_source": "test-fixture", "started_at_unix_ms": 1789271215375, "ended_at_unix_ms": 1789271215384, "state": "finished", "outcome": "failure", "participants": ["5c041f6c-cf24-4188-a077-101411c5865b"]}, {"id": "ff1e7249-6af7-48b8-9fb1-bbe9fb5fd264", "task_id": "d8004313-927b-4018-8257-9d1302c01a61", "stage": "text_execution", "reporting_source": "test-fixture", "started_at_unix_ms": 1789271215393, "ended_at_unix_ms": 1789271215401, "state": "finished", "outcome": "reported_success", "participants": ["5c041f6c-cf24-4188-a077-101411c5865b"]}]}
+{"command": ["/Users/hoon/Portfolio/llm-engine/.venv/bin/python3", "-m", "llm_engine", "--database", "/var/folders/dx/ny9cjsmd1bb3r42zbp694xkh0000gn/T/llm-engine-c7-28g_qk_n/work.sqlite3", "--json", "task", "show", "d8004313-927b-4018-8257-9d1302c01a61"], "exit": 0, "stdout": {"id": "d8004313-927b-4018-8257-9d1302c01a61", "title": "Meeting summary", "status": "pending", "assignees": ["5c041f6c-cf24-4188-a077-101411c5865b"]}}

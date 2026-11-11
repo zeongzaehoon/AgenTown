@@ -1,0 +1,47 @@
+[
+  {
+    "step": "01-empty",
+    "status": "Connected \u00b7 Ready for your first work",
+    "detail": ""
+  },
+  {
+    "step": "02-pending-reloaded",
+    "status": "Connected \u00b7 Pending \u2014 ready to execute",
+    "detail": "Saved work\n\nPending \u2014 ready to execute\n\nSummarize: We agreed to ship the draft on Friday. <script>window.injected=true</script>\n\nAssigned to: <img src=x onerror=\"window.injected=true\"> Writer\n\nExecute work"
+  },
+  {
+    "step": "03-running",
+    "status": "Connected \u00b7 Running \u2014 waiting for response",
+    "detail": "Saved work\n\nRunning \u2014 waiting for response\n\nSummarize: We agreed to ship the draft on Friday. <script>window.injected=true</script>\n\nAssigned to: <img src=x onerror=\"window.injected=true\"> Writer\n\nRetry explicitly\n\nA retry sends the saved text again and creates a separate attempt. Previous results stay in history.\n\nAttempt 1 \u00b7 active\n\nTest response \u2014 not live validation \u00b7 test-model\n\nWaiting for the provider. After an unexpected stop, recovery can take up to 120 seconds. No work is automatically resent.\n\nWork ID: 49266045-38a6-4b14-b3f2-4b1540643b0e \u00b7 Attempt ID: 0cd81204-2a71-4940-9584-831f9b4ec8d7"
+  },
+  {
+    "step": "04-failure",
+    "status": "Connected \u00b7 Failed \u2014 retry available",
+    "detail": "Saved work\n\nFailed \u2014 retry available\n\nSummarize: We agreed to ship the draft on Friday. <script>window.injected=true</script>\n\nAssigned to: <img src=x onerror=\"window.injected=true\"> Writer\n\nRetry explicitly\n\nA retry sends the saved text again and creates a separate attempt. Previous results stay in history.\n\nAttempt 1 \u00b7 rate_limit\n\nTest response \u2014 not live validation \u00b7 test-model\n\nWait for provider capacity, then retry explicitly.\n\nWork ID: 49266045-38a6-4b14-b3f2-4b1540643b0e \u00b7 Attempt ID: 0cd81204-2a71-4940-9584-831f9b4ec8d7"
+  },
+  {
+    "step": "05-result",
+    "status": "Connected \u00b7 Result available \u00b7 Unverified",
+    "detail": "Saved work\n\nResult available \u00b7 Unverified\n\nSummarize: We agreed to ship the draft on Friday. <script>window.injected=true</script>\n\nAssigned to: <img src=x onerror=\"window.injected=true\"> Writer\n\nRetry explicitly\n\nA retry sends the saved text again and creates a separate attempt. Previous results stay in history.\n\nAttempt 2 \u00b7 Result available \u00b7 Unverified\n\nTest response \u2014 not live validation \u00b7 test-model\n\nTEST RESPONSE \u2014 unverified\n<script>window.injected = true</script>\nSummarize: We agreed to ship the draft on Friday. <script>window.injected=true</script>\nEND OF FULL RESULT\n\nWork ID: 49266045-38a6-4b14-b3f2-4b1540643b0e \u00b7 Attempt ID: a62f0636-7a74-4f31-8b31-1eb76e7f433f\n\nAttempt 1 \u00b7 rate_limit"
+  },
+  {
+    "step": "06-disconnected",
+    "status": "Disconnected \u2014 displayed history may be out of date. Disconnected. Reconnect and inspect history before retrying; your request may have been saved or sent.",
+    "detail": "Saved work\n\nResult available \u00b7 Unverified\n\nSummarize: We agreed to ship the draft on Friday. <script>window.injected=true</script>\n\nAssigned to: <img src=x onerror=\"window.injected=true\"> Writer\n\nRetry explicitly\n\nA retry sends the saved text again and creates a separate attempt. Previous results stay in history.\n\nAttempt 2 \u00b7 Result available \u00b7 Unverified\n\nTest response \u2014 not live validation \u00b7 test-model\n\nTEST RESPONSE \u2014 unverified\n<script>window.injected = true</script>\nSummarize: We agreed to ship the draft on Friday. <script>window.injected=true</script>\nEND OF FULL RESULT\n\nWork ID: 49266045-38a6-4b14-b3f2-4b1540643b0e \u00b7 Attempt ID: a62f0636-7a74-4f31-8b31-1eb76e7f433f\n\nAttempt 1 \u00b7 rate_limit"
+  },
+  {
+    "step": "07-restarted-history",
+    "status": "Connected \u00b7 Result available \u00b7 Unverified",
+    "detail": "Saved work\n\nResult available \u00b7 Unverified\n\nSummarize: We agreed to ship the draft on Friday. <script>window.injected=true</script>\n\nAssigned to: <img src=x onerror=\"window.injected=true\"> Writer\n\nRetry explicitly\n\nA retry sends the saved text again and creates a separate attempt. Previous results stay in history.\n\nAttempt 2 \u00b7 Result available \u00b7 Unverified\n\nTest response \u2014 not live validation \u00b7 test-model\n\nTEST RESPONSE \u2014 unverified\n<script>window.injected = true</script>\nSummarize: We agreed to ship the draft on Friday. <script>window.injected=true</script>\nEND OF FULL RESULT\n\nWork ID: 49266045-38a6-4b14-b3f2-4b1540643b0e \u00b7 Attempt ID: a62f0636-7a74-4f31-8b31-1eb76e7f433f\n\nAttempt 1 \u00b7 rate_limit"
+  },
+  {
+    "step": "08-interrupted-history",
+    "status": "Connected \u00b7 Result available \u00b7 Unverified",
+    "detail": "Saved work\n\nResult available \u00b7 Unverified\n\nSummarize: We agreed to ship the draft on Friday. <script>window.injected=true</script>\n\nAssigned to: <img src=x onerror=\"window.injected=true\"> Writer\n\nRetry explicitly\n\nA retry sends the saved text again and creates a separate attempt. Previous results stay in history.\n\nAttempt 3 \u00b7 Result available \u00b7 Unverified\n\nTest response \u2014 not live validation \u00b7 test-model\n\nTEST RESPONSE \u2014 unverified\n<script>window.injected = true</script>\nSummarize: We agreed to ship the draft on Friday. <script>window.injected=true</script>\nEND OF FULL RESULT\n\nWork ID: 49266045-38a6-4b14-b3f2-4b1540643b0e \u00b7 Attempt ID: a62f0636-7a74-4f31-8b31-1eb76e7f433f\n\nAttempt 2 \u00b7 rate_limit\nAttempt 1 \u00b7 interrupted\n\nTest response \u2014 not live validation \u00b7 test-model\n\nThe process stopped or the attempt expired. No automatic resend occurred. Review before retrying.\n\nWork ID: 49266045-38a6-4b14-b3f2-4b1540643b0e \u00b7 Attempt ID: 87c7dd2a-2cea-4448-b1cf-22c07aa1940b"
+  },
+  {
+    "step": "09-mobile",
+    "status": "Connected \u00b7 Result available \u00b7 Unverified",
+    "detail": "Saved work\n\nResult available \u00b7 Unverified\n\nSummarize: We agreed to ship the draft on Friday. <script>window.injected=true</script>\n\nAssigned to: <img src=x onerror=\"window.injected=true\"> Writer\n\nRetry explicitly\n\nA retry sends the saved text again and creates a separate attempt. Previous results stay in history.\n\nAttempt 3 \u00b7 Result available \u00b7 Unverified\n\nTest response \u2014 not live validation \u00b7 test-model\n\nTEST RESPONSE \u2014 unverified\n<script>window.injected = true</script>\nSummarize: We agreed to ship the draft on Friday. <script>window.injected=true</script>\nEND OF FULL RESULT\n\nWork ID: 49266045-38a6-4b14-b3f2-4b1540643b0e \u00b7 Attempt ID: a62f0636-7a74-4f31-8b31-1eb76e7f433f\n\nAttempt 2 \u00b7 rate_limit\nAttempt 1 \u00b7 interrupted\n\nTest response \u2014 not live validation \u00b7 test-model\n\nThe process stopped or the attempt expired. No automatic resend occurred. Review before retrying.\n\nWork ID: 49266045-38a6-4b14-b3f2-4b1540643b0e \u00b7 Attempt ID: 87c7dd2a-2cea-4448-b1cf-22c07aa1940b"
+  }
+]

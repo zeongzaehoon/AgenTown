@@ -1,0 +1,167 @@
+{
+  "killed": {
+    "pid": 73137,
+    "returncode": -9,
+    "before": {
+      "employees": [
+        {
+          "id": "a9b47edc-2ec1-4d76-9f79-db48a254d622",
+          "name": "Installed writer"
+        }
+      ],
+      "work": [
+        {
+          "id": "3c869c24-082f-4705-9b32-45e75cdb45ef",
+          "input": "Summarize the Friday draft agreement.",
+          "status": "pending",
+          "assignees": [
+            "a9b47edc-2ec1-4d76-9f79-db48a254d622"
+          ],
+          "attempts": [
+            {
+              "id": "94b3a57d-2ac4-4071-99bd-f5257fa471d0",
+              "state": "finished",
+              "outcome": "failure",
+              "started": 1789297911044,
+              "ended": 1789297911053,
+              "participants": [
+                "a9b47edc-2ec1-4d76-9f79-db48a254d622"
+              ],
+              "run_id": "94b3a57d-2ac4-4071-99bd-f5257fa471d0",
+              "input": "Summarize the Friday draft agreement.",
+              "provider": "deterministic-test",
+              "model": "test-model",
+              "deadline_unix_ms": 1789298031044,
+              "output": null,
+              "error": "rate_limit",
+              "schema_version": 1,
+              "quality": "unverified"
+            },
+            {
+              "id": "86b7bba3-7422-48a0-8ac9-8beedbd7f7db",
+              "state": "finished",
+              "outcome": "reported_success",
+              "started": 1789297911116,
+              "ended": 1789297911125,
+              "participants": [
+                "a9b47edc-2ec1-4d76-9f79-db48a254d622"
+              ],
+              "run_id": "86b7bba3-7422-48a0-8ac9-8beedbd7f7db",
+              "input": "Summarize the Friday draft agreement.",
+              "provider": "deterministic-test",
+              "model": "test-model",
+              "deadline_unix_ms": 1789298031116,
+              "output": "  \ud55c\uae00 \ud83d\ude00\tTEST RESPONSE \u2014 unverified\r\n<script>window.injected = true</script>\nSummarize the Friday draft agreement.\nEND OF FULL RESULT",
+              "error": null,
+              "schema_version": 1,
+              "quality": "unverified"
+            },
+            {
+              "id": "27ea0a43-20df-4565-8c4e-6417cbebb497",
+              "state": "active",
+              "outcome": null,
+              "started": 1789297912322,
+              "ended": null,
+              "participants": [
+                "a9b47edc-2ec1-4d76-9f79-db48a254d622"
+              ],
+              "run_id": "27ea0a43-20df-4565-8c4e-6417cbebb497",
+              "input": "Summarize the Friday draft agreement.",
+              "provider": "deterministic-test",
+              "model": "test-model",
+              "deadline_unix_ms": 1789298032322,
+              "output": null,
+              "error": null,
+              "schema_version": 1,
+              "quality": "unverified"
+            }
+          ]
+        }
+      ],
+      "configuration": null,
+      "provider": "deterministic-test",
+      "model": "test-model"
+    }
+  },
+  "restarted": {
+    "employees": [
+      {
+        "id": "a9b47edc-2ec1-4d76-9f79-db48a254d622",
+        "name": "Installed writer"
+      }
+    ],
+    "work": [
+      {
+        "id": "3c869c24-082f-4705-9b32-45e75cdb45ef",
+        "input": "Summarize the Friday draft agreement.",
+        "status": "pending",
+        "assignees": [
+          "a9b47edc-2ec1-4d76-9f79-db48a254d622"
+        ],
+        "attempts": [
+          {
+            "id": "94b3a57d-2ac4-4071-99bd-f5257fa471d0",
+            "state": "finished",
+            "outcome": "failure",
+            "started": 1789297911044,
+            "ended": 1789297911053,
+            "participants": [
+              "a9b47edc-2ec1-4d76-9f79-db48a254d622"
+            ],
+            "run_id": "94b3a57d-2ac4-4071-99bd-f5257fa471d0",
+            "input": "Summarize the Friday draft agreement.",
+            "provider": "deterministic-test",
+            "model": "test-model",
+            "deadline_unix_ms": 1789298031044,
+            "output": null,
+            "error": "rate_limit",
+            "schema_version": 1,
+            "quality": "unverified"
+          },
+          {
+            "id": "86b7bba3-7422-48a0-8ac9-8beedbd7f7db",
+            "state": "finished",
+            "outcome": "reported_success",
+            "started": 1789297911116,
+            "ended": 1789297911125,
+            "participants": [
+              "a9b47edc-2ec1-4d76-9f79-db48a254d622"
+            ],
+            "run_id": "86b7bba3-7422-48a0-8ac9-8beedbd7f7db",
+            "input": "Summarize the Friday draft agreement.",
+            "provider": "deterministic-test",
+            "model": "test-model",
+            "deadline_unix_ms": 1789298031116,
+            "output": "  \ud55c\uae00 \ud83d\ude00\tTEST RESPONSE \u2014 unverified\r\n<script>window.injected = true</script>\nSummarize the Friday draft agreement.\nEND OF FULL RESULT",
+            "error": null,
+            "schema_version": 1,
+            "quality": "unverified"
+          },
+          {
+            "id": "27ea0a43-20df-4565-8c4e-6417cbebb497",
+            "state": "finished",
+            "outcome": "interruption",
+            "started": 1789297912322,
+            "ended": 1789298033241,
+            "participants": [
+              "a9b47edc-2ec1-4d76-9f79-db48a254d622"
+            ],
+            "run_id": "27ea0a43-20df-4565-8c4e-6417cbebb497",
+            "input": "Summarize the Friday draft agreement.",
+            "provider": "deterministic-test",
+            "model": "test-model",
+            "deadline_unix_ms": 1789298032322,
+            "output": null,
+            "error": "interrupted",
+            "schema_version": 1,
+            "quality": "unverified"
+          }
+        ]
+      }
+    ],
+    "configuration": null,
+    "provider": "deterministic-test",
+    "model": "test-model"
+  },
+  "submissions": 3
+}

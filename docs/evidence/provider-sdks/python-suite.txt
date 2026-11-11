@@ -1,0 +1,106 @@
+......................E................................................. [ 59%]
+.................................................s                       [100%]
+==================================== ERRORS ====================================
+_______ ERROR at setup of test_installed_web_assets_and_process_recovery _______
+
+tmp_path_factory = TempPathFactory(_given_basetemp=None, _trace=<pluggy._tracing.TagTracerSub object at 0x10506efd0>, _basetemp=PosixPath...r/folders/dx/ny9cjsmd1bb3r42zbp694xkh0000gn/T/pytest-of-hoon/pytest-147'), _retention_count=3, _retention_policy='all')
+
+>   ???
+
+/Users/hoon/Portfolio/llm-engine/tests/conftest.py:11: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/installed_package.py:41: in prepare_installed
+    run(['uv', 'pip', 'install', '--python', python, '--require-hashes', '-r', requirements])
+tests/installed_package.py:21: in run
+    subprocess.run([str(a) for a in args], cwd=ROOT / "python", stdout=log,
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+input = None, capture_output = False, timeout = 300, check = True
+popenargs = (['uv', 'pip', 'install', '--python', '/private/var/folders/dx/ny9cjsmd1bb3r42zbp694xkh0000gn/T/pytest-of-hoon/pytest-147/installed-package0/venv/bin/python', '--require-hashes', ...],)
+kwargs = {'cwd': PosixPath('/Users/hoon/Portfolio/llm-engine/python'), 'stdout': <_io.TextIOWrapper name='/private/var/folders/...f-hoon/pytest-147/installed-package0/evidence/package/package-subprocess.txt' mode='a' encoding='utf-8'>, 'stderr': -2}
+
+    def run(*popenargs,
+            input=None, capture_output=False, timeout=None, check=False, **kwargs):
+        """Run command with arguments and return a CompletedProcess instance.
+    
+        The returned instance will have attributes args, returncode, stdout and
+        stderr. By default, stdout and stderr are not captured, and those attributes
+        will be None. Pass stdout=PIPE and/or stderr=PIPE in order to capture them,
+        or pass capture_output=True to capture both.
+    
+        If check is True and the exit code was non-zero, it raises a
+        CalledProcessError. The CalledProcessError object will have the return code
+        in the returncode attribute, and output & stderr attributes if those streams
+        were captured.
+    
+        If timeout (seconds) is given and the process takes too long,
+         a TimeoutExpired exception will be raised.
+    
+        There is an optional argument "input", allowing you to
+        pass bytes or a string to the subprocess's stdin.  If you use this argument
+        you may not also use the Popen constructor's "stdin" argument, as
+        it will be used internally.
+    
+        By default, all communication is in bytes, and therefore any "input" should
+        be bytes, and the stdout and stderr will be bytes. If in text mode, any
+        "input" should be a string, and stdout and stderr will be strings decoded
+        according to locale encoding, or by "encoding" if set. Text mode is
+        triggered by setting any of text, encoding, errors or universal_newlines.
+    
+        The other arguments are the same as for the Popen constructor.
+        """
+        if input is not None:
+            if kwargs.get('stdin') is not None:
+                raise ValueError('stdin and input arguments may not both be used.')
+            kwargs['stdin'] = PIPE
+    
+        if capture_output:
+            if kwargs.get('stdout') is not None or kwargs.get('stderr') is not None:
+                raise ValueError('stdout and stderr arguments may not be used '
+                                 'with capture_output.')
+            kwargs['stdout'] = PIPE
+            kwargs['stderr'] = PIPE
+    
+        with Popen(*popenargs, **kwargs) as process:
+            try:
+                stdout, stderr = process.communicate(input, timeout=timeout)
+            except TimeoutExpired as exc:
+                process.kill()
+                if _mswindows:
+                    # Windows accumulates the output in a single blocking
+                    # read() call run on child threads, with the timeout
+                    # being done in a join() on those threads.  communicate()
+                    # _after_ kill() is required to collect that and add it
+                    # to the exception.
+                    exc.stdout, exc.stderr = process.communicate()
+                else:
+                    # POSIX _communicate already populated the output so
+                    # far into the TimeoutExpired exception.
+                    process.wait()
+                raise
+            except:  # Including KeyboardInterrupt, communicate handled that.
+                process.kill()
+                # We don't call process.wait() as .__exit__ does that for us.
+                raise
+            retcode = process.poll()
+            if check and retcode:
+>               raise CalledProcessError(retcode, process.args,
+                                         output=stdout, stderr=stderr)
+E               subprocess.CalledProcessError: Command '['uv', 'pip', 'install', '--python', '/private/var/folders/dx/ny9cjsmd1bb3r42zbp694xkh0000gn/T/pytest-of-hoon/pytest-147/installed-package0/venv/bin/python', '--require-hashes', '-r', '/private/var/folders/dx/ny9cjsmd1bb3r42zbp694xkh0000gn/T/pytest-of-hoon/pytest-147/installed-package0/requirements.txt']' returned non-zero exit status 2.
+
+../../../.local/share/uv/python/cpython-3.13.12-macos-aarch64-none/lib/python3.13/subprocess.py:577: CalledProcessError
+=============================== warnings summary ===============================
+.venv/lib/python3.13/site-packages/starlette/testclient.py:53
+  /Users/hoon/Portfolio/llm-engine/python/.venv/lib/python3.13/site-packages/starlette/testclient.py:53: DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead.
+    _PortalFactoryType = Callable[[], AbstractContextManager[anyio.abc.BlockingPortal]]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+ERROR tests/test_installed_web.py::test_installed_web_assets_and_process_recovery
+120 passed, 1 skipped, 1 warning, 1 error in 38.38s
+Traceback (most recent call last):
+  File "/tmp/engine_run.py", line 6, in <module>
+    subprocess.run(sys.argv[1:],cwd=r,env=e,check=True)
+  File "/Library/Frameworks/Python.framework/Versions/3.9/lib/python3.9/subprocess.py", line 528, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['uv', 'run', '--directory', 'python', '--locked', 'python', '-m', 'pytest', '-q']' returned non-zero exit status 1.

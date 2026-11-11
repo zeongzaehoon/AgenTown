@@ -1,0 +1,255 @@
+
+$ cargo test --manifest-path rust/Cargo.toml --workspace --locked
+   Compiling pyo3-build-config v0.27.2
+   Compiling pyo3-macros-backend v0.27.2
+   Compiling pyo3-ffi v0.27.2
+   Compiling pyo3 v0.27.2
+   Compiling pyo3-macros v0.27.2
+   Compiling llm-engine-python v0.1.0 (/Users/hoon/Portfolio/llm-engine/rust/crates/engine-python)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 38.48s
+     Running unittests src/lib.rs (rust/target/debug/deps/llm_engine_core-0688dd267123f080)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/domain.rs (rust/target/debug/deps/domain-9616bafcab4f39fe)
+
+running 5 tests
+test two_assignees_and_duplicate_rejection_preserve_state ... ok
+test creation_listing_and_stable_typed_id_round_trips ... ok
+test unknown_ids_and_empty_values_never_mutate_state ... ok
+test starting_requires_assignment_and_cancelled_tasks_are_frozen ... ok
+test every_lifecycle_edge_and_rejected_transition ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/runs.rs (rust/target/debug/deps/runs-6428d3346221fc22)
+
+running 6 tests
+test historical_membership_and_active_state_survive_restoration ... ok
+test restoration_rejects_malformed_run_history ... ok
+test selected_multiple_participants_are_copied_in_id_order ... ok
+test retries_keep_history_and_success_does_not_complete_task ... ok
+test rejected_commands_are_atomic_and_tasks_have_independent_active_runs ... ok
+test all_task_transitions_and_cancellation_remain_explicit ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/teams.rs (rust/target/debug/deps/teams-d4276fed99fc4f96)
+
+running 1 test
+test team_commands_validate_whole_batches_and_copy_membership ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (rust/target/debug/deps/_native-5448e2708314ac75)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (rust/target/debug/deps/llm_engine_sqlite-f346f57343dc3ddb)
+
+running 9 tests
+test tests::inspection_connection_is_sqlite_read_only ... ok
+test tests::every_adapter_connection_enforces_sql_constraints ... ok
+test tests::pre_commit_failure_rolls_back_all_written_rows_after_reopen ... ok
+test execution::tests::stale_recovery_never_resends_and_rejects_late_response ... ok
+test execution::web_admission_tests::observed_attempt_count_rejects_replays_across_connections_and_restart ... ok
+test execution::integrity_tests::execution_mutation_audit_and_invalid_restoration ... ok
+test execution::tests::migration_preserves_v3_and_rolls_back_failed_ddl ... ok
+test tests::run_sql_writes_roll_back_after_injected_failure_and_reopen ... ok
+test execution::tests::restart_duplicate_terminal_atomicity_and_history ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.16s
+
+     Running tests/persistence.rs (rust/target/debug/deps/persistence-1c94c17c39f5a239)
+
+running 6 tests
+test separate_connections_load_latest_committed_state ... ok
+test domain_errors_roll_back_entire_batches ... ok
+test identities_relationships_and_lifecycle_survive_restart ... ok
+test unsupported_versions_and_foreign_databases_are_unchanged ... ok
+test invalid_stored_lifecycle_and_ids_are_rejected_without_repair ... ok
+test incremental_writes_preserve_references_and_skip_net_noops ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.14s
+
+     Running tests/queries.rs (rust/target/debug/deps/queries-b9bf9a7ce091f6fe)
+
+running 1 test
+test existing_reader_observes_commits_and_snapshots_cannot_write ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running tests/run_boundary.rs (rust/target/debug/deps/run_boundary-3e070a3469565165)
+
+running 6 tests
+test sql_constraints_enforce_references_active_uniqueness_and_retention ... ok
+test replacement_closures_cannot_erase_or_rewrite_history ... ok
+test separate_connections_racing_to_start_have_one_winner ... ok
+test v2_migration_and_failure_after_run_ddl_preserve_every_existing_record ... ok
+test restart_retry_history_and_exact_mutation_audit ... ok
+test malformed_stored_history_is_rejected_without_repair ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.52s
+
+     Running tests/teams.rs (rust/target/debug/deps/teams-75c463c2506af858)
+
+running 4 tests
+test failed_migration_rolls_back_ddl_and_version_then_can_retry ... ok
+test writable_migration_preserves_v1_and_read_only_never_migrates ... ok
+test membership_restart_atomic_batches_constraints_and_incremental_writes ... ok
+test invalid_stored_membership_is_rejected_without_writes ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.19s
+
+   Doc-tests llm_engine_core
+
+running 2 tests
+test crates/engine-core/src/lib.rs - (line 5) - compile fail ... ok
+test crates/engine-core/src/lib.rs - (line 13) - compile fail ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.71s
+
+   Doc-tests _native
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests llm_engine_sqlite
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+$ npm --prefix frontend run test
+
+> llm-engine-workspace@0.1.0 test
+> tsc --noEmit && vitest run
+
+
+ RUN  v5.0.0 /Users/hoon/Portfolio/llm-engine/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  6 passed (6)
+   Start at  14:46:52
+   Duration  9.19s (tests 45%, environment 35%, import 13%, transform 6%, worker 1%)
+
+
+$ npm --prefix frontend run build
+
+> llm-engine-workspace@0.1.0 build
+> tsc --noEmit && vite build
+
+vite v8.3.0 building client environment for production...
+transforming...
+✓ 17 modules transformed.
+rendering chunks...
+computing gzip size...
+../python/src/llm_engine/static/index.html                   0.38 kB │ gzip:  0.28 kB
+../python/src/llm_engine/static/assets/index-DyXUQ6-Y.css    1.91 kB │ gzip:  0.88 kB
+../python/src/llm_engine/static/assets/index-Dp0J6Tdu.js   227.81 kB │ gzip: 71.45 kB
+
+✓ built in 752ms
+
+$ uv run --directory python --locked python -m pytest
+============================= test session starts ==============================
+platform darwin -- Python 3.13.12, pytest-9.1.1, pluggy-1.6.0
+rootdir: /Users/hoon/Portfolio/llm-engine/python
+configfile: pyproject.toml
+testpaths: tests
+plugins: anyio-4.15.1
+collected 57 items
+
+tests/test_cli.py .....                                                  [  8%]
+tests/test_execution.py ................                                 [ 36%]
+tests/test_installed_web.py .                                            [ 38%]
+tests/test_mcp.py ........                                               [ 52%]
+tests/test_queries.py .................                                  [ 82%]
+tests/test_runs_cli.py ..                                                [ 85%]
+tests/test_teams_cli.py ..                                               [ 89%]
+tests/test_web.py .....                                                  [ 98%]
+tests/test_web_browser.py s                                              [100%]
+
+=============================== warnings summary ===============================
+.venv/lib/python3.13/site-packages/starlette/testclient.py:53
+  /Users/hoon/Portfolio/llm-engine/python/.venv/lib/python3.13/site-packages/starlette/testclient.py:53: DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead.
+    _PortalFactoryType = Callable[[], AbstractContextManager[anyio.abc.BlockingPortal]]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+============= 56 passed, 1 skipped, 1 warning in 239.73s (0:03:59) =============
+
+$ cargo test --manifest-path .harness/Cargo.toml --workspace --locked
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.51s
+     Running unittests src/main.rs (.harness/target/debug/deps/harnessd-2b71acd13c49ea74)
+
+running 25 tests
+test domain::tests::idle_and_backoff_are_bounded ... ok
+test domain::tests::invalid_output_does_not_advance ... ok
+test domain::tests::self_forward_and_unknown_dependencies_are_rejected_without_mutation ... ok
+test executor::tests::classify_limits_separately ... ok
+test domain::tests::blocked_prerequisite_excludes_dependents_but_not_independent_work ... ok
+test domain::tests::failed_review_never_completes_task ... ok
+test executor::tests::prompt_worker ... ok
+test domain::tests::completion_requires_review ... ok
+test domain::handoff_tests::ready_requests_verification_without_completing_task ... ok
+test domain::tests::legacy_checkpoint_migrates_conservatively ... ok
+
+running 1 test
+test integration_tests::duplicate_runner_rejected ... ok
+test integration_tests::failing_check_cannot_reach_review ... ok
+test integration_tests::quota_keeps_same_task_and_persists_cooldown ... ok
+test integration_tests::failing_product_check_blocks_completion_even_when_harness_checks_pass ... ok
+test integration_tests::repeated_environment_outage_pauses_and_preserves_stage ... ok
+test integration_tests::repeated_infrastructure_failure_pauses ... ok
+test integration_tests::supervisor_lease_survives_in_child ... ok
+test executor::tests::parallel_review_really_runs_both_profiles_and_rejects_one_failure ... ok
+test store::tests::restart_preserves_stage_and_pause ... ok
+test integration_tests::changed_product_invalidates_verification ... ok
+test integration_tests::full_cycle_with_real_verification_and_restart ... ok
+test integration_tests::operator_can_check_while_paused ... ok
+test executor::tests::prompt_worker ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 24 filtered out; finished in 1.25s
+
+
+running 1 test
+test executor::tests::timeout_and_pause_stop_process ... ok
+test executor::tests::prompt_worker ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 24 filtered out; finished in 0.89s
+
+
+running 1 test
+test executor::tests::prompt_worker ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 24 filtered out; finished in 0.73s
+
+
+running 1 test
+test executor::tests::prompt_worker ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 24 filtered out; finished in 0.48s
+
+test executor::tests::large_prompt_supervision_is_bounded ... ok
+test integration_tests::supervisor_failure_blocks_review_but_not_agent_local_checks ... ok
+
+test result: ok. 25 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.88s
+
+
+$ python3 -m unittest discover -s .harness/tests -v
+test_background_python_resolves_to_313_environment (test_cli.LaunchAgentTests.test_background_python_resolves_to_313_environment) ... ok
+test_paths_with_spaces_are_separate_arguments (test_cli.LaunchAgentTests.test_paths_with_spaces_are_separate_arguments) ... ok
+test_service_does_not_copy_secret_environment (test_cli.LaunchAgentTests.test_service_does_not_copy_secret_environment) ... ok
+test_missing_database_is_not_created (test_dashboard.SnapshotTests.test_missing_database_is_not_created) ... ok
+test_preserves_state_and_handles_partial_events (test_dashboard.SnapshotTests.test_preserves_state_and_handles_partial_events) ... ok
+
+----------------------------------------------------------------------
+Ran 5 tests in 0.151s
+
+OK

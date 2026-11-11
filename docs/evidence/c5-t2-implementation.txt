@@ -1,0 +1,216 @@
+C5-T2 implementation verification, 2026-09-13
+Only implement stage; no additional agents invoked.
+Initial workspace test passed (output below).
+
+$ cargo test --workspace --locked
+   Compiling pyo3-build-config v0.27.2
+   Compiling llm-engine-sqlite v0.1.0 (/Users/hoon/Portfolio/llm-engine/crates/engine-sqlite)
+   Compiling pyo3-ffi v0.27.2
+   Compiling pyo3-macros-backend v0.27.2
+   Compiling pyo3 v0.27.2
+   Compiling pyo3-macros v0.27.2
+   Compiling llm-engine-python v0.1.0 (/Users/hoon/Portfolio/llm-engine/crates/engine-python)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 43.21s
+     Running unittests src/lib.rs (target/debug/deps/llm_engine_core-0688dd267123f080)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/domain.rs (target/debug/deps/domain-9616bafcab4f39fe)
+
+running 5 tests
+test unknown_ids_and_empty_values_never_mutate_state ... ok
+test two_assignees_and_duplicate_rejection_preserve_state ... ok
+test creation_listing_and_stable_typed_id_round_trips ... ok
+test starting_requires_assignment_and_cancelled_tasks_are_frozen ... ok
+test every_lifecycle_edge_and_rejected_transition ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/runs.rs (target/debug/deps/runs-6428d3346221fc22)
+
+running 6 tests
+test selected_multiple_participants_are_copied_in_id_order ... ok
+test rejected_commands_are_atomic_and_tasks_have_independent_active_runs ... ok
+test historical_membership_and_active_state_survive_restoration ... ok
+test restoration_rejects_malformed_run_history ... ok
+test retries_keep_history_and_success_does_not_complete_task ... ok
+test all_task_transitions_and_cancellation_remain_explicit ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/teams.rs (target/debug/deps/teams-d4276fed99fc4f96)
+
+running 1 test
+test team_commands_validate_whole_batches_and_copy_membership ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/_native-5448e2708314ac75)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/llm_engine_sqlite-f346f57343dc3ddb)
+
+running 4 tests
+test tests::inspection_connection_is_sqlite_read_only ... ok
+test tests::every_adapter_connection_enforces_sql_constraints ... ok
+test tests::run_sql_writes_roll_back_after_injected_failure_and_reopen ... ok
+test tests::pre_commit_failure_rolls_back_all_written_rows_after_reopen ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+     Running tests/persistence.rs (target/debug/deps/persistence-1c94c17c39f5a239)
+
+running 6 tests
+test separate_connections_load_latest_committed_state ... ok
+test domain_errors_roll_back_entire_batches ... ok
+test identities_relationships_and_lifecycle_survive_restart ... ok
+test invalid_stored_lifecycle_and_ids_are_rejected_without_repair ... ok
+test unsupported_versions_and_foreign_databases_are_unchanged ... ok
+test incremental_writes_preserve_references_and_skip_net_noops ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+
+     Running tests/queries.rs (target/debug/deps/queries-b9bf9a7ce091f6fe)
+
+running 1 test
+test existing_reader_observes_commits_and_snapshots_cannot_write ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/run_boundary.rs (target/debug/deps/run_boundary-3e070a3469565165)
+
+running 6 tests
+test sql_constraints_enforce_references_active_uniqueness_and_retention ... ok
+test replacement_closures_cannot_erase_or_rewrite_history ... ok
+test v2_migration_and_failure_after_run_ddl_preserve_every_existing_record ... ok
+test restart_retry_history_and_exact_mutation_audit ... ok
+test separate_connections_racing_to_start_have_one_winner ... ok
+test malformed_stored_history_is_rejected_without_repair ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.41s
+
+     Running tests/teams.rs (target/debug/deps/teams-75c463c2506af858)
+
+running 4 tests
+test writable_migration_preserves_v1_and_read_only_never_migrates ... ok
+test failed_migration_rolls_back_ddl_and_version_then_can_retry ... ok
+test membership_restart_atomic_batches_constraints_and_incremental_writes ... ok
+test invalid_stored_membership_is_rejected_without_writes ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.14s
+
+   Doc-tests llm_engine_core
+
+running 2 tests
+test crates/engine-core/src/lib.rs - (line 5) - compile fail ... ok
+test crates/engine-core/src/lib.rs - (line 13) - compile fail ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.50s
+
+   Doc-tests _native
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests llm_engine_sqlite
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+EXIT 0
+
+$ uv run --locked maturin develop --locked
+🍹 Building a mixed python/rust project
+🐍 Found CPython 3.13 at /Users/hoon/Portfolio/llm-engine/.venv/bin/python
+🔗 Found pyo3 bindings
+📡 Using build options features from pyproject.toml
+Audited 1 package in 48ms
+Resolved 11 packages in 142ms
+Audited 11 packages in 0.86ms
+   Compiling llm-engine-sqlite v0.1.0 (/Users/hoon/Portfolio/llm-engine/crates/engine-sqlite)
+   Compiling llm-engine-python v0.1.0 (/Users/hoon/Portfolio/llm-engine/crates/engine-python)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 6.94s
+📦 Built wheel for CPython 3.13 to /var/folders/dx/ny9cjsmd1bb3r42zbp694xkh0000gn/T/.tmpDWPlE4/llm_engine-0.1.0-cp313-cp313-macosx_11_0_arm64.whl
+✏️ Setting installed package as editable
+🛠 Installed llm-engine-0.1.0
+
+EXIT 0
+
+$ cargo fmt --all -- --check
+
+EXIT 0
+
+$ uv run --locked python -m pytest
+Uninstalled 1 package in 5ms
+Installed 1 package in 16ms
+============================= test session starts ==============================
+platform darwin -- Python 3.13.12, pytest-9.1.1, pluggy-1.6.0
+rootdir: /Users/hoon/Portfolio/llm-engine
+configfile: pyproject.toml
+testpaths: tests
+plugins: anyio-4.15.1
+collected 32 items
+
+tests/test_cli.py .....                                                  [ 15%]
+tests/test_mcp.py ........                                               [ 40%]
+tests/test_queries.py .................                                  [ 93%]
+tests/test_teams_cli.py ..                                               [100%]
+
+============================= 32 passed in 52.16s ==============================
+
+EXIT 0
+
+$ python3 .harness/cli.py check
+Python runtime: 3.13.12 (/Users/hoon/Portfolio/llm-engine/.harness/.venv/bin/python3)
+All configured checks passed.
+
+EXIT 0
+
+$ git diff --check
+
+EXIT 0
+
+SOURCE SHA256 (35 files; verified unchanged after all checks)
+31e7ea27cafffc05b7fb7d569a9bdfeeec4f424efbf73659e315c2f4ec0a3fc8  Cargo.lock
+797fced2312c8aa4aaf82bbd0c27505a65bce7c613f64b3054be4e53072f39cd  Cargo.toml
+4c28e443d9a0058d9bad42ea63cd27a31666f90d8d7e43a975a5a1df9d8dc327  README.md
+283467fc26c7875db1d07d38a4f643cac2304c0b7d3dbe7b652c77734707f82e  crates/engine-core/Cargo.toml
+212e025883417e1a0d46d7c4b503abca2ca856cae660971d2c10ebd8303938a0  crates/engine-core/src/lib.rs
+54f68f92dd62536fd3f5424709d709cb8b365e952cc0bfca3286e620fca04a4f  crates/engine-core/src/persistence.rs
+dba9b34cce11978f558a49e53897c5629b6c5209b258e43728fae128418a4e90  crates/engine-core/src/runs.rs
+325e5a0bd7865954db16d6128218380f929a8949b6b332850f2ab72d60442e81  crates/engine-core/tests/domain.rs
+2e80804600045bfe01a7df231b9844813b9cc38c8af157a27f79a67b01e11f40  crates/engine-core/tests/runs.rs
+aca35c7aaf9709435a16a0af032acad4d853584d89851d260cf51ccdc7860986  crates/engine-core/tests/teams.rs
+c12d2110e6b5e32a8c5c1234ce079a67b466ab363a7ebb87388fec654e8ce720  crates/engine-python/Cargo.toml
+de8f8fc9b9c8971a1efa9f130a00a75b2b9d8230bf456474c7ead18b51b5f490  crates/engine-python/src/lib.rs
+5d7ad9814be8139d860254b36641f1936bd8f3c27d5b984c8814b4eef6d1dd97  crates/engine-sqlite/Cargo.toml
+3088fbcc6542f204d16ee411cff025bf6cfc78a4f67d714f4d67665503d3bf19  crates/engine-sqlite/src/lib.rs
+1063e7cf0edff5cdea392e8dac922405c93e67d7c740ebee26a76d3cfe2fe13a  crates/engine-sqlite/src/migration-v2.sql
+57d976ef76b098f2eb1f0ec661805bd4a1d6724c63fc068d096dc600a883242c  crates/engine-sqlite/src/migration-v3.sql
+db2a85793567fec7edfa98e72bc0a41a3796df79c520b69c0319335e57e92237  crates/engine-sqlite/src/schema.sql
+5cdd9d77f7cdd19e1930c3944881994ae4b643471f3714f4ba9e962796141124  crates/engine-sqlite/tests/persistence.rs
+097d4bc4d259c80675c97b636060dac6cd8ebab2aee6f5ca709c3f6c03e58ee3  crates/engine-sqlite/tests/queries.rs
+11a6edfa0c9cbd9cd9115bef1df9ef9231c2324fa602eef12d3112208dc9e493  crates/engine-sqlite/tests/run_boundary.rs
+dcc644aef08aeb30115cd8bf4911219cc1c43ce6051c0d2e10bad9fd150dc5f7  crates/engine-sqlite/tests/teams.rs
+e8b8d95a11cae38d33773db0d61fb5feeee2f0a54b592d99237bc561c21d2d9e  docs/core.md
+7b917ce174ea0374847f91932ee6a7ba8a5c1b5f5f54f14069a0c7ea5c33148e  docs/mcp.md
+7930bd95378890f93a03ab98db9d374daec5f9b7428713a9de7ab517002d3be6  docs/persistence.md
+025e152a3939626d8a2f187b9a5c002d7f4b752dde123d1025b3467062194fcd  docs/python-cli.md
+85bd302cd17be86ed10ca02e5128ebaf7d3fa0eebc7ffc492d9bccd1ce9b79ac  pyproject.toml
+9800a7ca0fd91f4e50b6bbdca21bbd948c5bc776b7cfc365f0557323b44818b2  python/llm_engine/__init__.py
+935a1c1166b0c1ea35a82256345000bf2c73ded718d77773bc27a71ecce28f7d  python/llm_engine/__main__.py
+7b4d763913c3004507b940544042a5b39e01601ceaeba32994731e449b6df878  python/llm_engine/cli.py
+a294126eeff58a115a4881e3cbc44a5f900fc4e78bbc076ef76b43dc794cd888  python/llm_engine/mcp_server.py
+a7c0b4f74eceeacd9ac66be39de31a6043e9dafb585ac16d3a48073c3a1b5ef9  tests/test_cli.py
+de693eceb516b149cd6a720db34ef055caefd502bc50ff97b27ed5f45dbd191c  tests/test_mcp.py
+b6cdc950a9e9d716e367001fcec77b5c4df15b6231e6d612ee1ab66fc5403fb4  tests/test_queries.py
+8495c2a71d5e442191961bc1058f58297891efc6a1e865e42facf72dd885584a  tests/test_teams_cli.py
+4519fe81063e1fb7d5011cea467bc2d4ed231680f8661955277d0b70543a339f  uv.lock

@@ -1,0 +1,17 @@
+[package]
+name = "llm-engine-python"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+name = "_native"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+llm-engine-core = { path = "../engine-core" }
+llm-engine-sqlite = { path = "../engine-sqlite" }
+pyo3 = { version = "=0.27.2" }
+
+[features]
+extension-module = ["pyo3/extension-module"]

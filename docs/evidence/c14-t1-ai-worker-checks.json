@@ -1,0 +1,66 @@
+{
+  "scope": "AI Developer isolated implementation; stdlib stub adapter check, not real SDK or persistence validation",
+  "platform": "macOS-14.5-arm64-arm-64bit-Mach-O",
+  "python": "3.13.12 (main, Mar  3 2026, 15:32:44) [Clang 21.1.4 ]",
+  "syntax_files_passed": [
+    "python/src/llm_engine/providers/anthropic.py",
+    "python/tests/test_execution.py",
+    "python/tests/test_web.py",
+    "python/tests/web_browser_server.py",
+    "python/tests/test_web_browser.py"
+  ],
+  "adapter_cases": [
+    {
+      "case": "empty limit",
+      "result": "passed",
+      "submissions": 1
+    },
+    {
+      "case": "partial limit",
+      "result": "passed",
+      "submissions": 1
+    },
+    {
+      "case": "missing limited content",
+      "result": "passed",
+      "submissions": 1
+    },
+    {
+      "case": "null limited content",
+      "result": "passed",
+      "submissions": 1
+    },
+    {
+      "case": "refusal",
+      "result": "passed",
+      "submissions": 1
+    },
+    {
+      "case": "malformed",
+      "result": "passed",
+      "submissions": 1
+    },
+    {
+      "case": "unexpected stop",
+      "result": "passed",
+      "submissions": 1
+    },
+    {
+      "case": "success redaction",
+      "result": "passed",
+      "submissions": 1
+    }
+  ],
+  "sha256": {
+    "python/src/llm_engine/providers/anthropic.py": "d9483262c505d3587e7ca7bc007de9965a080b1638c3cf159a55d5ae3107969a",
+    "python/tests/test_execution.py": "80d4d109082448faf5d64036cb82658e596e94aed7a5108cea8dbd33491f0181",
+    "python/tests/test_web.py": "98b5248588e8e26b615b868c3354ecfd57f442654656cc51fa112198e9b28223",
+    "python/tests/web_browser_server.py": "75ddae853749dbabd57158efe702d4206de32450e0c52e6b459d80694a916dbb",
+    "python/tests/test_web_browser.py": "4e664a50a54dd5b451ec633d57c7d32f9fca9a198f800ab8529f0ad6f65ba143"
+  },
+  "pending": [
+    "pytest SDK/API tests",
+    "consolidated frontend/Rust/native/Python/installed-package/harness gates",
+    "supervisor installed browser verification"
+  ]
+}

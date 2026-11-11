@@ -1,0 +1,31 @@
+
+> llm-engine-workspace@0.1.0 test
+> tsc --noEmit && vitest run
+
+
+ RUN  v5.0.0 /Users/hoon/Portfolio/llm-engine/frontend
+
+ ❯ src/App.test.tsx (50 tests | 1 failed) 21834ms
+   × StrictMode employee → saved work → running → failure → explicit retry → full safe result and reload 5154ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/App.test.tsx > StrictMode employee → saved work → running → failure → explicit retry → full safe result and reload
+Error: Test timed out in 5000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ src/App.test.tsx:46:1
+     44| const connected = () => waitFor(() => expect(document.querySelector('#…
+     45|
+     46| test('StrictMode employee → saved work → running → failure → explicit …
+       | ^
+     47|   const f = fixture();
+     48|   const user = userEvent.setup();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 49 passed (50)
+   Start at  20:37:41
+   Duration  29.63s (tests 76%, environment 18%, import 3%, transform 2%)
+

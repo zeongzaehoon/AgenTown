@@ -1,0 +1,9 @@
+Python runtime: 3.13.12 (/Users/hoon/Portfolio/llm-engine/.harness/.venv/bin/python3)
+Error: unknown field `task_teams`, expected one of `codex_command`, `model`, `stage_timeout_seconds`, `poll_seconds`, `cooldown_seconds`, `max_cooldown_seconds`, `idle_seconds`, `max_task_attempts`, `max_infrastructure_failures`, `checks`, `product_checks`, `network_access`, `supervisor_checks` at line 47 column 14
+Command '['/Users/hoon/Portfolio/llm-engine/.harness/bin/harnessd', 'check', '/Users/hoon/Portfolio/llm-engine']' returned non-zero exit status 1.
+Traceback (most recent call last):
+  File "/tmp/engine_run.py", line 6, in <module>
+    subprocess.run(sys.argv[1:],cwd=r,env=e,check=True)
+  File "/Library/Frameworks/Python.framework/Versions/3.9/lib/python3.9/subprocess.py", line 528, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['python3', '.harness/cli.py', 'check']' returned non-zero exit status 1.

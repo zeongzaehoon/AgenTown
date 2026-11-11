@@ -1,0 +1,42 @@
+[build-system]
+requires = ["maturin>=1.9,<2"]
+build-backend = "maturin"
+
+[project]
+name = "agentown"
+version = "0.1.0"
+description = "A world where AI agents come alive and work together"
+requires-python = ">=3.13,<3.14"
+readme = "README.md"
+dependencies = [
+    "fastmcp>=3,<4",
+    "anthropic>=0.79,<2",
+    "starlette>=0.52,<2",
+    "uvicorn>=0.35,<1",
+    "openai>=2,<3",
+    "boto3>=1.42,<2",
+    "xai-sdk>=1,<2",
+]
+
+[project.scripts]
+agentown = "llm_engine.cli:main"
+agentown-web = "llm_engine.web:main"
+agentown-mcp = "llm_engine.mcp_server:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8,<10",
+    "maturin>=1.9,<2",
+    "jsonschema>=4,<5",
+    "playwright>=1.55,<2",
+]
+
+[tool.maturin]
+manifest-path = "../rust/crates/engine-python/Cargo.toml"
+python-source = "src"
+module-name = "llm_engine._native"
+features = ["extension-module"]
+include = ["src/llm_engine/static/**/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

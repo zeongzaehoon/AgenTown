@@ -1,0 +1,194 @@
+"""Loopback presentation adapter. Rust owns all durable state and admission.
+
+An execution stays in its async HTTP request; there is no queue, background
+scheduler, automatic retry, or Python execution-state registry.
+"""
+import argparse
+import json
+import os
+from pathlib import Path
+
+from starlette.applications import Starlette
+from starlette.responses import FileResponse, JSONResponse
+from starlette.routing import Route, Mount
+from starlette.staticfiles import StaticFiles
+
+from . import _native
+from .execution import configured_provider, finish_text, record
+from .providers import PROVIDERS, runtime_secrets, redact
+
+ASSETS = Path(__file__).with_name("static")
+
+
+class RequestTooLarge(ValueError):
+    pass
+
+
+class LocalBoundary:
+    def __init__(self, app, origin):
+        self.app, self.origin = app, origin
+        self.host = origin.removeprefix("http://")
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+        headers = dict(scope["headers"])
+        if headers.get(b"host", b"").decode() != self.host:
+            return await JSONResponse({"error": "Open the documented loopback URL."}, 403)(scope, receive, send)
+        if scope["method"] not in ("GET", "HEAD") and (
+            headers.get(b"origin", b"").decode() != self.origin
+            or headers.get(b"content-type", b"").decode().split(";")[0] != "application/json"
+            or headers.get(b"sec-fetch-site", b"same-origin") != b"same-origin"
+        ):
+            return await JSONResponse({"error": "Same-origin JSON requests required."}, 403)(scope, receive, send)
+
+        async def secured(message):
+            if message["type"] == "http.response.start":
+                message["headers"] += [
+                    (b"content-security-policy", b"default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"),
+                    (b"x-content-type-options", b"nosniff"),
+                    (b"referrer-policy", b"no-referrer"),
+                    (b"cache-control", b"no-store"),
+                ]
+            await send(message)
+        await self.app(scope, receive, secured)
+
+
+def create_app(database, model=None, *, port=8765, provider=None, provider_name="anthropic"):
+    database = str(database)
+    # Injection is for tests only. The product CLI always uses configured Anthropic.
+    configuration = None
+    if provider is None:
+        try:
+            provider = configured_provider(model, provider_name)
+        except ValueError as exc:
+            configuration = str(exc) + " Then restart this server."
+    secrets = runtime_secrets()
+
+    def response(value, status=200):
+        # Never echo the configured credential, even through legacy stored text.
+        def redact_value(item):
+            if isinstance(item, str):
+                return redact(item, secrets)
+            if isinstance(item, list):
+                return [redact_value(entry) for entry in item]
+            if isinstance(item, dict):
+                return {key: redact_value(entry) for key, entry in item.items()}
+            return item
+        return JSONResponse(redact_value(value), status)
+
+    async def body(request):
+        chunks = bytearray()
+        async for chunk in request.stream():
+            chunks.extend(chunk)
+            if len(chunks) > 120_000:
+                raise RequestTooLarge("oversize")
+        data = json.loads(chunks)
+        def contains_secret(item):
+            if isinstance(item, str):
+                return any(secret in item for secret in secrets)
+            if isinstance(item, dict):
+                return any(contains_secret(entry) for entry in item.values())
+            if isinstance(item, list):
+                return any(contains_secret(entry) for entry in item)
+            return False
+        if not isinstance(data, dict) or contains_secret(data):
+            raise ValueError("invalid body")
+        return data
+
+    async def home(request):
+        if not (ASSETS / "index.html").is_file():
+            return JSONResponse({"error": "Frontend assets are missing. Run npm ci and npm run build before the native build, then restart."}, 503)
+        return FileResponse(ASSETS / "index.html")
+
+    async def state(request):
+        try:
+            agents, tasks, executions = _native.history_snapshot(database)
+            results = {row[0]: record(row) for row in executions}
+            employees = [dict(zip(("id", "name"), a)) for a in agents]
+            work = []
+            for task, runs in tasks:
+                item = dict(zip(("id", "input", "status", "assignees"), task))
+                attempts = []
+                for run in runs:
+                    attempt = {"id": run[0], "state": run[6], "outcome": run[7], "started": run[4], "ended": run[5], "participants": run[8]}
+                    # CLI reporters may use the same stage without an execution.
+                    if run[0] in results:
+                        attempt.update(results[run[0]])
+                    attempts.append(attempt)
+                item["attempts"] = sorted(attempts, key=lambda a: (a["started"], a["id"]))
+                work.append(item)
+            return response({"employees": employees, "work": work, "configuration": configuration,
+                             "provider": provider.name if provider else provider_name, "model": model})
+        except (ValueError, OSError):
+            return response({"error": "Cannot read work history. Check the database path, permissions and compatibility, then restart."}, 503)
+
+    async def employee(request):
+        try:
+            data = await body(request)
+            name = data["name"]
+            if not isinstance(name, str) or len(name) > 200:
+                raise ValueError("name")
+            row = _native.create_agent(database, name)
+            return response({"id": row[0]}, 201)
+        except (ValueError, KeyError, TypeError):
+            return response({"error": "Employee could not be saved. Enter a name (1–200 characters) and check database access."}, 400)
+
+    async def work(request):
+        try:
+            data = await body(request)
+            row = _native.create_assigned_work(database, data["input"], data["employee"])
+            return response({"id": row[0]}, 201)
+        except RequestTooLarge:
+            return response({"code": "request_too_large", "error": "The serialized request exceeds 120,000 bytes after text escaping. Shorten it or split it into separate requests; your draft is unchanged."}, 413)
+        except ValueError as error:
+            # Only classify the native validation message; never expose raw errors.
+            if str(error) == "provide work text of 1 to 100000 UTF-8 bytes":
+                return response({"code": "invalid_work_text", "error": "Enter nonblank text of at most 100,000 UTF-8 bytes. Shorten or split oversized text; your draft is unchanged."}, 400)
+            return response({"error": "Work could not be saved. Check the selected employee and database path, permissions and compatibility. Your draft is unchanged."}, 400)
+        except (KeyError, TypeError, UnicodeError):
+            return response({"error": "Work could not be saved. Select an existing employee and provide valid text. Your draft is unchanged."}, 400)
+        except OSError:
+            return response({"error": "Work could not be saved. Check database access. Your draft is unchanged."}, 503)
+
+    async def execute(request):
+        if configuration:
+            return response({"error": configuration}, 409)
+        try:
+            data = await body(request)
+            count = data["expected_runs"]
+            if type(count) is not int or count < 0:
+                raise ValueError("count")
+            row = _native.start_web_execution(database, request.path_params["task"], provider.name, model, count)
+        except (ValueError, KeyError, TypeError, OverflowError):
+            return response({"error": "Execution was not started. Refresh history: work may already be running or changed. Select work with one employee and retry explicitly."}, 409)
+        try:
+            return response(await finish_text(database, row, provider))
+        except (ValueError, OSError):
+            return response({"error": "The response could not be saved or the attempt expired. Refresh history before deciding to retry."}, 409)
+
+    app = Starlette(routes=[Route("/", home), Route("/api/state", state, methods=["POST"]),
+        Route("/api/employees", employee, methods=["POST"]),
+        Route("/api/work", work, methods=["POST"]),
+        Route("/api/work/{task}/execute", execute, methods=["POST"]),
+        Mount("/static", StaticFiles(directory=ASSETS, check_dir=False))])
+    return LocalBoundary(app, f"http://127.0.0.1:{port}")
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description="Open the local AgenTown employee and text-work screen.")
+    parser.add_argument("--database", required=True, help="explicit SQLite file; parent must exist")
+    parser.add_argument("--model", help="Provider model ID or Bedrock inference profile ID")
+    parser.add_argument("--provider", choices=PROVIDERS, default="anthropic")
+    parser.add_argument("--port", type=int, default=8765)
+    args = parser.parse_args(argv)
+    if not 1024 <= args.port <= 65535:
+        parser.error("--port must be between 1024 and 65535")
+    import uvicorn
+    print(f"Open AgenTown at http://127.0.0.1:{args.port} — results remain unverified.")
+    uvicorn.run(create_app(args.database, args.model, port=args.port, provider_name=args.provider), host="127.0.0.1",
+                port=args.port, proxy_headers=False, access_log=False, timeout_graceful_shutdown=70)
+
+
+if __name__ == "__main__":
+    main()

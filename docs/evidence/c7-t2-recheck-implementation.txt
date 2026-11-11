@@ -1,0 +1,46 @@
+C7-T2 implement-stage recheck, 2026-09-13
+
+Preserved existing product code and all partial/user changes. No subagents ran.
+Read required instructions, source, tests, prior reports and the exact supplied
+.harness/runs/1789271391-755924000/checks.log. That earlier artifact does not
+establish current browser acceptance. New evidence uses c7-t2-recheck-* paths.
+
+Authoritative research fetched before deciding to retain the implementation:
+- https://www.w3.org/WAI/WCAG22/quickref/ identifies keyboard access, visible
+  focus, labels, contrast and status messages. Existing native controls and live
+  announcements follow these decisions; browser accessibility remains unverified.
+- https://playwright.dev/python/docs/browsers describes version-specific browser
+  binaries. Retried the existing Playwright Chromium headless shell with its
+  matching downloaded binary; no permissions or installed runtime were changed.
+- https://starlette.dev/threadpool/ describes dispatch of synchronous endpoints
+  to a thread pool. Existing async endpoints await provider I/O without adding
+  a Python scheduler. The older www.starlette.io URL returned HTTP 502.
+
+Commands and actual results (log names below have the c7-t2- prefix):
+- python3 .harness/cli.py check: exit 0; recheck-harness.txt.
+- cargo test --workspace --locked: exit 0, 40 tests passed; recheck-cargo.txt.
+- UV_CACHE_DIR=.harness/cache/uv uv run --locked maturin develop: exit 0;
+  recheck-native.txt. Rebuild finished before all Python-bearing checks.
+- UV_CACHE_DIR=.harness/cache/uv uv run --locked python -m pytest: exit 0;
+  54 passed, 1 opt-in browser skip, 1 upstream warning in 72.59s;
+  recheck-pytest.txt.
+- node --check python/llm_engine/static/app.js: exit 0; recheck-javascript.txt.
+- shasum -a 256 -c docs/evidence/c7-t2-source-sha256.txt: all 42 hashes match;
+  recheck-source-check.txt. Existing source manifest was preserved.
+- LLM_ENGINE_BROWSER=1 PLAYWRIGHT_BROWSERS_PATH=/private/tmp/llm-engine-playwright
+  LLM_ENGINE_BROWSER_EVIDENCE=docs/evidence/c7-t2-recheck-browser
+  UV_CACHE_DIR=.harness/cache/uv uv run --locked python -m pytest -s
+  tests/test_web_browser.py: exit 1, 1 failed in 4.28s; recheck-browser.txt.
+  Chromium exited with SIGTRAP inside BrowserType.launch. No page was opened,
+  no application assertion ran, and no screenshot/trace was produced.
+  c7-t2-recheck-browser/interactions.json is []; server.txt retains server output.
+
+Browser acceptance remains blocked by the environment. Launch/walkthrough steps
+remain in docs/local-screen.md. Only macOS arm64 checks ran; Windows, actual
+browser interactions, visual/accessibility inspection, installed-wheel walkthrough
+and live provider validation remain unperformed. No credentials were searched.
+Task C7-T3 and PLAN.md section 8 are not declared complete.
+
+Lesson: repeated C7-T2 launch failures precede application execution. Retain
+failure evidence and matching source hashes; use an environment capable of
+launching the browser before claiming interaction or screenshot validation.

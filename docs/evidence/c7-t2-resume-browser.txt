@@ -1,0 +1,107 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.13.12, pytest-9.1.1, pluggy-1.6.0
+rootdir: /Users/hoon/Portfolio/llm-engine
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collected 1 item
+
+tests/test_web_browser.py F
+
+=================================== FAILURES ===================================
+_______________________ test_employee_to_result_browser ________________________
+
+tmp_path = PosixPath('/private/var/folders/dx/ny9cjsmd1bb3r42zbp694xkh0000gn/T/pytest-of-hoon/pytest-85/test_employee_to_result_browse0')
+
+    def test_employee_to_result_browser(tmp_path):
+        from playwright.sync_api import sync_playwright, expect
+        evidence = Path(os.environ.get('LLM_ENGINE_BROWSER_EVIDENCE', str(tmp_path / 'browser')))
+        evidence.mkdir(parents=True, exist_ok=True)
+        database = tmp_path / 'work.db'
+        gate = tmp_path / 'provider-gate'
+        with socket.socket() as sock:
+            sock.bind(('127.0.0.1', 0))
+            port = sock.getsockname()[1]
+        url = f'http://127.0.0.1:{port}'
+        events = []
+        log = (evidence / 'server.txt').open('w')
+        server = None
+    
+        def start():
+            process = subprocess.Popen([sys.executable, str(Path(__file__).with_name('web_browser_server.py')), str(database), str(port), str(gate)], stdout=log, stderr=subprocess.STDOUT)
+            for _ in range(100):
+                try:
+                    if httpx.get(url + '/').status_code == 200:
+                        return process
+                except httpx.HTTPError:
+                    pass
+                if process.poll() is not None:
+                    pytest.fail('browser fixture server failed; inspect server.txt')
+                time.sleep(.1)
+            process.kill()
+            process.wait()
+            pytest.fail('browser fixture did not start')
+    
+        def snapshot(page, name):
+            page.screenshot(path=str(evidence / (name + '.png')), full_page=True)
+            events.append({'step': name, 'status': page.locator('#connection').inner_text(),
+                           'detail': page.locator('#detail').inner_text()})
+    
+        try:
+            server = start()
+            with sync_playwright() as playwright:
+>               browser = playwright.chromium.launch(channel=os.environ.get('LLM_ENGINE_BROWSER_CHANNEL'))
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_web_browser.py:57: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+.venv/lib/python3.13/site-packages/playwright/sync_api/_generated.py:16702: in launch
+    self._sync(
+.venv/lib/python3.13/site-packages/playwright/_impl/_browser_type.py:97: in launch
+    await self._channel.send(
+.venv/lib/python3.13/site-packages/playwright/_impl/_connection.py:76: in send
+    return await self._connection.wrap_api_call(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <playwright._impl._connection.Connection object at 0x104c5ae40>
+cb = <function Channel.send.<locals>.<lambda> at 0x104d81da0>
+is_internal = False, title = None
+
+    async def wrap_api_call(
+        self, cb: Callable[[], Any], is_internal: bool = False, title: str = None
+    ) -> Any:
+        if self._api_zone.get():
+            return await cb()
+        task = asyncio.current_task(self._loop)
+        parsed_st = _attach_api_call_information(
+            getattr(task, "__pw_stack__", None) or _capture_stack_trace(),
+            is_internal,
+            title,
+        )
+        self._api_zone.set(parsed_st)
+        try:
+            return await cb()
+        except Exception as error:
+>           raise rewrite_error(error, f"{parsed_st['apiName']}: {error}") from None
+E           playwright._impl._errors.TargetClosedError: BrowserType.launch: Target page, context or browser has been closed
+E           Browser logs:
+E           
+E           <launching> /private/tmp/llm-engine-playwright/chromium_headless_shell-1234/chrome-headless-shell-mac-arm64/chrome-headless-shell --disable-field-trial-config --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-back-forward-cache --disable-breakpad --disable-client-side-phishing-detection --disable-component-extensions-with-background-pages --disable-component-update --no-default-browser-check --disable-default-apps --disable-dev-shm-usage --disable-edgeupdater --disable-extensions --disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,BoundaryEventDispatchTracksNodeRemoval,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,BlockOriginHeaderModificationOnRedirect,Translate,AutoDeElevate,OptimizationHints,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion --enable-features=CDPScreenshotNewSurface --allow-pre-commit-input --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --disable-updater-scheduler --force-color-profile=srgb --metrics-recording-only --no-first-run --password-store=basic --use-mock-keychain --no-service-autorun --export-tagged-pdf --disable-search-engine-choice-screen --unsafely-disable-devtools-self-xss-warnings --edge-skip-compat-layer-relaunch --disable-infobars --disable-search-engine-choice-screen --disable-sync --enable-unsafe-swiftshader --headless --hide-scrollbars --mute-audio --blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4 --no-sandbox --user-data-dir=/var/folders/dx/ny9cjsmd1bb3r42zbp694xkh0000gn/T/playwright_chromiumdev_profile-5JWQyH --remote-debugging-pipe --no-startup-window
+E           <launched> pid=35692
+E           [pid=35692][err] [0913/131621.595878:ERROR:base/power_monitor/thermal_state_observer_mac.mm:140] ThermalStateObserverMac unable to register to power notifications. Result: 9
+E           Call log:
+E             - <launching> /private/tmp/llm-engine-playwright/chromium_headless_shell-1234/chrome-headless-shell-mac-arm64/chrome-headless-shell --disable-field-trial-config --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-back-forward-cache --disable-breakpad --disable-client-side-phishing-detection --disable-component-extensions-with-background-pages --disable-component-update --no-default-browser-check --disable-default-apps --disable-dev-shm-usage --disable-edgeupdater --disable-extensions --disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,BoundaryEventDispatchTracksNodeRemoval,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,BlockOriginHeaderModificationOnRedirect,Translate,AutoDeElevate,OptimizationHints,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion --enable-features=CDPScreenshotNewSurface --allow-pre-commit-input --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --disable-updater-scheduler --force-color-profile=srgb --metrics-recording-only --no-first-run --password-store=basic --use-mock-keychain --no-service-autorun --export-tagged-pdf --disable-search-engine-choice-screen --unsafely-disable-devtools-self-xss-warnings --edge-skip-compat-layer-relaunch --disable-infobars --disable-search-engine-choice-screen --disable-sync --enable-unsafe-swiftshader --headless --hide-scrollbars --mute-audio --blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4 --no-sandbox --user-data-dir=/var/folders/dx/ny9cjsmd1bb3r42zbp694xkh0000gn/T/playwright_chromiumdev_profile-5JWQyH --remote-debugging-pipe --no-startup-window
+E             - <launched> pid=35692
+E             - [pid=35692][err] [0913/131621.595878:ERROR:base/power_monitor/thermal_state_observer_mac.mm:140] ThermalStateObserverMac unable to register to power notifications. Result: 9
+E             - [pid=35692] <gracefully close start>
+E             - [pid=35692] <kill>
+E             - [pid=35692] <will force kill>
+E             - [pid=35692] exception while trying to kill process: Error: kill ESRCH
+E             - [pid=35692] <process did exit: exitCode=null, signal=SIGTRAP>
+E             - [pid=35692] starting temporary directories cleanup
+E             - [pid=35692] finished temporary directories cleanup
+E             - [pid=35692] <gracefully close end>
+
+.venv/lib/python3.13/site-packages/playwright/_impl/_connection.py:632: TargetClosedError
+=========================== short test summary info ============================
+FAILED tests/test_web_browser.py::test_employee_to_result_browser - playwrigh...
+============================== 1 failed in 4.34s ===============================

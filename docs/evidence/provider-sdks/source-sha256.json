@@ -1,0 +1,16 @@
+{
+  "python/src/llm_engine/providers/__init__.py": "d783db064abe6d9ffad577a7d870fdcdb2c1fb04935412cf9cd47e30fb417840",
+  "python/src/llm_engine/providers/openai.py": "8dd0adb0e210c85ecce25a166b4d22295507bb445be0c99353c4a2f2501d1928",
+  "python/src/llm_engine/providers/anthropic.py": "d9483262c505d3587e7ca7bc007de9965a080b1638c3cf159a55d5ae3107969a",
+  "python/src/llm_engine/providers/xai.py": "dd33ce7481748554c51539f3ceded757b842e228bc560af6319257aa7327456c",
+  "python/src/llm_engine/providers/base.py": "1d96376983be66c43962cf08fc537683d0b0c1fd9426dbff325bd18f4dba738c",
+  "python/src/llm_engine/providers/bedrock.py": "9c8fd313abdf9a76142553eb27cb77ea1898cee2531bb317cdbba353e5692d44",
+  "python/src/llm_engine/execution.py": "f2ce44e98c47188bb0fe0cbfedd44438b2fc03cf897382bcbfe241f3e960751f",
+  "python/src/llm_engine/cli.py": "6026ebeae932e924227824976efc41cd4e6379d80f88af6b64c30ec23dc9b203",
+  "python/src/llm_engine/web.py": "926b1ca8cb1b47c3a4d32a14f0f9e6cf20740c04a2536c750067e0c34cbf610d",
+  "python/pyproject.toml": "0879f5a5d7a9d7cf757757a178b073e06260773b53114d9fa0cf8ebb6c108248",
+  "python/uv.lock": "2af6abde27336044571713ceba0b3dda2112c2edc8b62ae0e1d24221179f60e6",
+  "python/tests/test_providers.py": "52b99b26613e589a9359d15ecde05b188e6495e83217333aea550682b83c17a6",
+  "frontend/src/App.tsx": "74640fb06ab2d4a333d454240b5da65268f28861c9aac8b2864553f23f25f8f7",
+  "frontend/src/App.test.tsx": "f8ce22e2ca56c2fc0023df6629a40e91e2501de3ee706892120b519e578757d1"
+}

@@ -1,0 +1,10 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.13.12, pytest-9.1.1, pluggy-1.6.0
+rootdir: /Users/hoon/Portfolio/llm-engine/python
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collected 1 item
+
+tests/test_installed_web.py .                                            [100%]
+
+======================== 1 passed in 136.42s (0:02:16) =========================

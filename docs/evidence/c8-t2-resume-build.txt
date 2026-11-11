@@ -1,0 +1,14 @@
+
+> llm-engine-workspace@0.1.0 build
+> tsc --noEmit && vite build
+
+vite v8.3.0 building client environment for production...
+transforming...
+✓ 17 modules transformed.
+rendering chunks...
+computing gzip size...
+../python/src/llm_engine/static/index.html                   0.38 kB │ gzip:  0.28 kB
+../python/src/llm_engine/static/assets/index-DyXUQ6-Y.css    1.91 kB │ gzip:  0.88 kB
+../python/src/llm_engine/static/assets/index-Dp0J6Tdu.js   227.81 kB │ gzip: 71.45 kB
+
+✓ built in 433ms

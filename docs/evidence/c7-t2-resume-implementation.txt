@@ -1,0 +1,57 @@
+C7-T2 implementation-stage recovery — 2026-09-13
+No subagents invoked. Existing implementation and user changes preserved.
+No product implementation edits were needed after inspection. This attempt adds
+fresh verification evidence only; previous attempt evidence is retained.
+
+Inspected the required instructions, PLAN.md, source, browser/API tests, previous
+c7-t2 evidence, and the supplied .harness/runs/1789271391-755924000/checks.log.
+That supplied artifact predates the screen tests (50 Python tests); it is not used
+as proof of current C7-T2 browser validation. Fresh checks are recorded separately.
+
+Research fetched before deciding to preserve the implementation:
+- https://playwright.dev/python/docs/browsers : Playwright needs version-specific
+  browser binaries; default headless shell and full Chromium are distinct supported
+  modes. Existing downloaded chromium/headless-shell revision 1234 was retained;
+  retry used the default headless shell without browser permission changes.
+- https://starlette.dev/threadpool/ : synchronous endpoints dispatch to a thread
+  pool. Existing async endpoints await the async SDK; Rust retains admission/state.
+  The old https://www.starlette.io/threadpool/ URL returned HTTP 502 in this attempt.
+- https://www.w3.org/WAI/WCAG22/quickref/ : keyboard access, visible focus, labels,
+  contrast and status messages guide the existing native controls and live status.
+  Source inspection does not establish browser or assistive-technology validation.
+
+Browser command (after successful native rebuild):
+LLM_ENGINE_BROWSER=1 PLAYWRIGHT_BROWSERS_PATH=/private/tmp/llm-engine-playwright LLM_ENGINE_BROWSER_EVIDENCE=docs/evidence/c7-t2-resume-browser UV_CACHE_DIR=.harness/cache/uv uv run --locked python -m pytest -s tests/test_web_browser.py
+Exit 1: TargetClosedError during BrowserType.launch, SIGTRAP; 1 failed in 4.34s.
+See c7-t2-resume-browser.txt and c7-t2-resume-browser/server.txt.
+interactions.json is []; no page, screenshot, or trace was produced. Browser
+flow, accessibility, keyboard, mobile layout and visual checks remain unperformed.
+This is an environment blocker; no application assertion was reached.
+
+Source linkage: shasum -a 256 -c docs/evidence/c7-t2-source-sha256.txt exited 0.
+All 42 previously recorded source/test/lock/documentation hashes still match;
+see c7-t2-resume-source-check.txt. No prior source hash manifest was replaced.
+
+Launch and macOS/Windows walkthrough remain in docs/local-screen.md.
+Only macOS arm64 checks ran here. Windows, screen-reader, installed-wheel and live
+provider walkthrough remain unperformed. No credentials were searched or supplied.
+C7-T3 and PLAN.md section 8 are not declared complete.
+
+Fresh required checks, all actual process exits:
+- cargo test --workspace --locked: exit 0, 40 Rust tests passed;
+  c7-t2-resume-cargo.txt.
+- UV_CACHE_DIR=.harness/cache/uv uv run --locked maturin develop: exit 0;
+  c7-t2-resume-native.txt. Completed before any Python-bearing checks started.
+- UV_CACHE_DIR=.harness/cache/uv uv run --locked python -m pytest: exit 0;
+  54 passed, 1 opt-in browser skip, 1 upstream deprecation warning in 71.30s;
+  c7-t2-resume-pytest.txt. Browser ran separately and failed as recorded above.
+- node --check python/llm_engine/static/app.js: exit 0;
+  c7-t2-resume-javascript.txt (empty successful syntax output).
+- python3 .harness/cli.py check: exit 0; c7-t2-resume-harness.txt.
+
+Final outcome: blocked, blocker_kind environment. Chromium launch remains the
+required missing validation. No screenshots or completed interactions claimed.
+Lesson: C7-T2 recovery reproduced the same browser launch failure while source
+hashes and non-browser checks passed. Preserve the implementation and failure
+artifacts; browser acceptance requires an environment that can launch Chromium,
+not repeated source changes or weaker assertions.

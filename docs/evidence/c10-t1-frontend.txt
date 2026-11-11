@@ -1,0 +1,13 @@
+
+> llm-engine-workspace@0.1.0 test
+> tsc --noEmit && vitest run
+
+
+ RUN  v5.0.0 /Users/hoon/Portfolio/llm-engine/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  15 passed (15)
+   Start at  18:31:50
+   Duration  9.23s (tests 66%, environment 25%, import 5%, transform 3%)
+

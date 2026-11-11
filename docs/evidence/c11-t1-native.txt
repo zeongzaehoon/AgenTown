@@ -1,0 +1,16 @@
+🍹 Building a mixed python/rust project
+🐍 Found CPython 3.13 at /Users/hoon/Portfolio/llm-engine/python/.venv/bin/python
+🔗 Found pyo3 bindings
+📡 Using build options features from pyproject.toml
+Audited 4 packages in 55ms
+Resolved 15 packages in 179ms
+Audited 15 packages in 1ms
+    Blocking waiting for file lock on build directory
+   Compiling libsqlite3-sys v0.36.0
+   Compiling rusqlite v0.38.0
+   Compiling llm-engine-sqlite v0.1.0 (/Users/hoon/Portfolio/llm-engine/rust/crates/engine-sqlite)
+   Compiling llm-engine-python v0.1.0 (/Users/hoon/Portfolio/llm-engine/rust/crates/engine-python)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 53.75s
+📦 Built wheel for CPython 3.13 to /var/folders/dx/ny9cjsmd1bb3r42zbp694xkh0000gn/T/.tmpSXZKbV/llm_engine-0.1.0-cp313-cp313-macosx_11_0_arm64.whl
+✏️ Setting installed package as editable
+🛠 Installed llm-engine-0.1.0

@@ -1,0 +1,77 @@
+{
+  "employees": [
+    {
+      "id": "54e9f315-a5bd-4880-9bb1-6ab60d65c2c1",
+      "name": "<img src=x onerror=\"window.injected=true\"> Writer"
+    }
+  ],
+  "work": [
+    {
+      "id": "49266045-38a6-4b14-b3f2-4b1540643b0e",
+      "input": "Summarize: We agreed to ship the draft on Friday. <script>window.injected=true</script>",
+      "status": "pending",
+      "assignees": [
+        "54e9f315-a5bd-4880-9bb1-6ab60d65c2c1"
+      ],
+      "attempts": [
+        {
+          "id": "87c7dd2a-2cea-4448-b1cf-22c07aa1940b",
+          "state": "finished",
+          "outcome": "interruption",
+          "started": 1000,
+          "participants": [
+            "54e9f315-a5bd-4880-9bb1-6ab60d65c2c1"
+          ],
+          "run_id": "87c7dd2a-2cea-4448-b1cf-22c07aa1940b",
+          "input": "Summarize: We agreed to ship the draft on Friday. <script>window.injected=true</script>",
+          "provider": "deterministic-test",
+          "model": "test-model",
+          "deadline_unix_ms": 121000,
+          "output": null,
+          "error": "interrupted",
+          "schema_version": 1,
+          "quality": "unverified"
+        },
+        {
+          "id": "0cd81204-2a71-4940-9584-831f9b4ec8d7",
+          "state": "finished",
+          "outcome": "failure",
+          "started": 1789275590740,
+          "participants": [
+            "54e9f315-a5bd-4880-9bb1-6ab60d65c2c1"
+          ],
+          "run_id": "0cd81204-2a71-4940-9584-831f9b4ec8d7",
+          "input": "Summarize: We agreed to ship the draft on Friday. <script>window.injected=true</script>",
+          "provider": "deterministic-test",
+          "model": "test-model",
+          "deadline_unix_ms": 1789275710740,
+          "output": null,
+          "error": "rate_limit",
+          "schema_version": 1,
+          "quality": "unverified"
+        },
+        {
+          "id": "a62f0636-7a74-4f31-8b31-1eb76e7f433f",
+          "state": "finished",
+          "outcome": "reported_success",
+          "started": 1789275593047,
+          "participants": [
+            "54e9f315-a5bd-4880-9bb1-6ab60d65c2c1"
+          ],
+          "run_id": "a62f0636-7a74-4f31-8b31-1eb76e7f433f",
+          "input": "Summarize: We agreed to ship the draft on Friday. <script>window.injected=true</script>",
+          "provider": "deterministic-test",
+          "model": "test-model",
+          "deadline_unix_ms": 1789275713047,
+          "output": "TEST RESPONSE \u2014 unverified\n<script>window.injected = true</script>\nSummarize: We agreed to ship the draft on Friday. <script>window.injected=true</script>\nEND OF FULL RESULT",
+          "error": null,
+          "schema_version": 1,
+          "quality": "unverified"
+        }
+      ]
+    }
+  ],
+  "configuration": null,
+  "provider": "deterministic-test",
+  "model": "test-model"
+}

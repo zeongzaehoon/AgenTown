@@ -12,3 +12,15 @@ __pycache__/
 /.agents/
 /AGENTS.md
 /CLAUDE.md
+
+# Product Python build and test outputs
+.venv/
+.pytest_cache/
+dist/
+*.so
+*.pyd
+*.egg-info/
+
+# Generated frontend dependencies and production assets
+node_modules/
+/python/src/llm_engine/static/

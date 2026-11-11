@@ -1,0 +1,72 @@
+[
+  {
+    "check": "frontend",
+    "command": [
+      "npm",
+      "--prefix",
+      "frontend",
+      "test"
+    ],
+    "exit_code": 0
+  },
+  {
+    "check": "build",
+    "command": [
+      "npm",
+      "--prefix",
+      "frontend",
+      "run",
+      "build"
+    ],
+    "exit_code": 0
+  },
+  {
+    "check": "cargo",
+    "command": [
+      "cargo",
+      "test",
+      "--manifest-path",
+      "rust/Cargo.toml",
+      "--workspace",
+      "--locked"
+    ],
+    "exit_code": 0
+  },
+  {
+    "check": "native",
+    "command": [
+      "uv",
+      "run",
+      "--directory",
+      "python",
+      "--locked",
+      "maturin",
+      "develop",
+      "--locked"
+    ],
+    "exit_code": 0
+  },
+  {
+    "check": "pytest",
+    "command": [
+      "uv",
+      "run",
+      "--directory",
+      "python",
+      "--locked",
+      "python",
+      "-m",
+      "pytest"
+    ],
+    "exit_code": 0
+  },
+  {
+    "check": "harness",
+    "command": [
+      "python3",
+      ".harness/cli.py",
+      "check"
+    ],
+    "exit_code": 0
+  }
+]

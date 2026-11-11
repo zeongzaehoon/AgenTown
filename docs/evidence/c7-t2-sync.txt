@@ -1,0 +1,12 @@
+Resolved 86 packages in 11ms
+   Building llm-engine @ file:///Users/hoon/Portfolio/llm-engine
+Downloading playwright (40.5MiB)
+ Downloaded playwright
+      Built llm-engine @ file:///Users/hoon/Portfolio/llm-engine
+Prepared 4 packages in 1m 08s
+Uninstalled 1 package in 10ms
+Installed 4 packages in 38ms
+ + greenlet==3.5.5
+ ~ llm-engine==0.1.0 (from file:///Users/hoon/Portfolio/llm-engine)
+ + playwright==1.62.0
+ + pyee==13.0.1

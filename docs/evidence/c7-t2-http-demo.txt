@@ -1,0 +1,67 @@
+GET / 200 text/html; charset=utf-8
+GET /static/app.js 200 text/javascript; charset=utf-8
+GET /static/style.css 200 text/css; charset=utf-8
+{
+  "validation": "real HTTP; deterministic provider; no browser",
+  "restarted_history_matches": true,
+  "history": {
+    "employees": [
+      {
+        "id": "f62201b1-b49e-4700-bb52-2c28c9db5588",
+        "name": "Writer"
+      }
+    ],
+    "work": [
+      {
+        "id": "57990f7b-bce0-4dbc-9c94-e960ce7a9bd6",
+        "input": "Summarize: We agreed to ship the draft on Friday.",
+        "status": "pending",
+        "assignees": [
+          "f62201b1-b49e-4700-bb52-2c28c9db5588"
+        ],
+        "attempts": [
+          {
+            "id": "8e27f428-9695-4146-8c2f-0317544805d1",
+            "state": "finished",
+            "outcome": "failure",
+            "started": 1789272420123,
+            "participants": [
+              "f62201b1-b49e-4700-bb52-2c28c9db5588"
+            ],
+            "run_id": "8e27f428-9695-4146-8c2f-0317544805d1",
+            "input": "Summarize: We agreed to ship the draft on Friday.",
+            "provider": "deterministic-test",
+            "model": "test-model",
+            "deadline_unix_ms": 1789272540123,
+            "output": null,
+            "error": "rate_limit",
+            "schema_version": 1,
+            "quality": "unverified"
+          },
+          {
+            "id": "e7e8f836-9c4d-46c0-90df-b0c57275ef95",
+            "state": "finished",
+            "outcome": "reported_success",
+            "started": 1789272420139,
+            "participants": [
+              "f62201b1-b49e-4700-bb52-2c28c9db5588"
+            ],
+            "run_id": "e7e8f836-9c4d-46c0-90df-b0c57275ef95",
+            "input": "Summarize: We agreed to ship the draft on Friday.",
+            "provider": "deterministic-test",
+            "model": "test-model",
+            "deadline_unix_ms": 1789272540139,
+            "output": "TEST RESPONSE \u2014 unverified\n<script>window.injected = true</script>\nSummarize: We agreed to ship the draft on Friday.\nEND OF FULL RESULT",
+            "error": null,
+            "schema_version": 1,
+            "quality": "unverified"
+          }
+        ]
+      }
+    ],
+    "configuration": null,
+    "provider": "deterministic-test",
+    "model": "test-model"
+  }
+}
+Product web command: HTTP 200, packaged assets and retained history available; missing model guidance present.

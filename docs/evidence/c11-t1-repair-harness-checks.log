@@ -1,0 +1,382 @@
+
+$ cargo test --manifest-path rust/Cargo.toml --workspace --locked
+   Compiling pyo3-build-config v0.27.2
+   Compiling pyo3-macros-backend v0.27.2
+   Compiling pyo3-ffi v0.27.2
+   Compiling pyo3 v0.27.2
+   Compiling pyo3-macros v0.27.2
+   Compiling llm-engine-python v0.1.0 (/Users/hoon/Portfolio/llm-engine/rust/crates/engine-python)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 35.43s
+     Running unittests src/lib.rs (rust/target/debug/deps/llm_engine_core-0688dd267123f080)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/domain.rs (rust/target/debug/deps/domain-9616bafcab4f39fe)
+
+running 6 tests
+test text_work_preserves_whitespace_but_rejects_blank_requests ... ok
+test two_assignees_and_duplicate_rejection_preserve_state ... ok
+test starting_requires_assignment_and_cancelled_tasks_are_frozen ... ok
+test unknown_ids_and_empty_values_never_mutate_state ... ok
+test creation_listing_and_stable_typed_id_round_trips ... ok
+test every_lifecycle_edge_and_rejected_transition ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/runs.rs (rust/target/debug/deps/runs-6428d3346221fc22)
+
+running 6 tests
+test rejected_commands_are_atomic_and_tasks_have_independent_active_runs ... ok
+test retries_keep_history_and_success_does_not_complete_task ... ok
+test restoration_rejects_malformed_run_history ... ok
+test selected_multiple_participants_are_copied_in_id_order ... ok
+test historical_membership_and_active_state_survive_restoration ... ok
+test all_task_transitions_and_cancellation_remain_explicit ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/teams.rs (rust/target/debug/deps/teams-d4276fed99fc4f96)
+
+running 1 test
+test team_commands_validate_whole_batches_and_copy_membership ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (rust/target/debug/deps/_native-5448e2708314ac75)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (rust/target/debug/deps/llm_engine_sqlite-f346f57343dc3ddb)
+
+running 9 tests
+test tests::inspection_connection_is_sqlite_read_only ... ok
+test tests::pre_commit_failure_rolls_back_all_written_rows_after_reopen ... ok
+test tests::every_adapter_connection_enforces_sql_constraints ... ok
+test execution::tests::stale_recovery_never_resends_and_rejects_late_response ... ok
+test execution::integrity_tests::execution_mutation_audit_and_invalid_restoration ... ok
+test execution::web_admission_tests::observed_attempt_count_rejects_replays_across_connections_and_restart ... ok
+test execution::tests::migration_preserves_v3_and_rolls_back_failed_ddl ... ok
+test tests::run_sql_writes_roll_back_after_injected_failure_and_reopen ... ok
+test execution::tests::restart_duplicate_terminal_atomicity_and_history ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.16s
+
+     Running tests/persistence.rs (rust/target/debug/deps/persistence-1c94c17c39f5a239)
+
+running 6 tests
+test domain_errors_roll_back_entire_batches ... ok
+test separate_connections_load_latest_committed_state ... ok
+test identities_relationships_and_lifecycle_survive_restart ... ok
+test invalid_stored_lifecycle_and_ids_are_rejected_without_repair ... ok
+test unsupported_versions_and_foreign_databases_are_unchanged ... ok
+test incremental_writes_preserve_references_and_skip_net_noops ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.15s
+
+     Running tests/queries.rs (rust/target/debug/deps/queries-b9bf9a7ce091f6fe)
+
+running 1 test
+test existing_reader_observes_commits_and_snapshots_cannot_write ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running tests/run_boundary.rs (rust/target/debug/deps/run_boundary-3e070a3469565165)
+
+running 6 tests
+test sql_constraints_enforce_references_active_uniqueness_and_retention ... ok
+test replacement_closures_cannot_erase_or_rewrite_history ... ok
+test v2_migration_and_failure_after_run_ddl_preserve_every_existing_record ... ok
+test restart_retry_history_and_exact_mutation_audit ... ok
+test separate_connections_racing_to_start_have_one_winner ... ok
+test malformed_stored_history_is_rejected_without_repair ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.55s
+
+     Running tests/teams.rs (rust/target/debug/deps/teams-75c463c2506af858)
+
+running 4 tests
+test failed_migration_rolls_back_ddl_and_version_then_can_retry ... ok
+test membership_restart_atomic_batches_constraints_and_incremental_writes ... ok
+test writable_migration_preserves_v1_and_read_only_never_migrates ... ok
+test invalid_stored_membership_is_rejected_without_writes ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.20s
+
+   Doc-tests llm_engine_core
+
+running 2 tests
+test crates/engine-core/src/lib.rs - (line 5) - compile fail ... ok
+test crates/engine-core/src/lib.rs - (line 13) - compile fail ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.78s
+
+   Doc-tests _native
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests llm_engine_sqlite
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+$ npm --prefix frontend run test
+
+> llm-engine-workspace@0.1.0 test
+> tsc --noEmit && vitest run
+
+
+ RUN  v5.0.0 /Users/hoon/Portfolio/llm-engine/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  18 passed (18)
+   Start at  19:33:05
+   Duration  11.83s (tests 73%, environment 19%, import 4%, transform 3%)
+
+
+$ npm --prefix frontend run build
+
+> llm-engine-workspace@0.1.0 build
+> tsc --noEmit && vite build
+
+vite v8.3.0 building client environment for production...
+transforming...
+✓ 17 modules transformed.
+rendering chunks...
+computing gzip size...
+../python/src/llm_engine/static/index.html                   0.38 kB │ gzip:  0.28 kB
+../python/src/llm_engine/static/assets/index-bXn7cmky.css    1.96 kB │ gzip:  0.91 kB
+../python/src/llm_engine/static/assets/index-BHHNgpg6.js   232.08 kB │ gzip: 72.75 kB
+
+✓ built in 352ms
+
+$ uv run --directory python --locked python -m pytest
+============================= test session starts ==============================
+platform darwin -- Python 3.13.12, pytest-9.1.1, pluggy-1.6.0
+rootdir: /Users/hoon/Portfolio/llm-engine/python
+configfile: pyproject.toml
+testpaths: tests
+plugins: anyio-4.15.1
+collected 58 items
+
+tests/test_cli.py .....                                                  [  8%]
+tests/test_execution.py ................                                 [ 36%]
+tests/test_installed_web.py F                                            [ 37%]
+tests/test_mcp.py ........                                               [ 51%]
+tests/test_queries.py .................                                  [ 81%]
+tests/test_runs_cli.py ..                                                [ 84%]
+tests/test_teams_cli.py ..                                               [ 87%]
+tests/test_web.py ......                                                 [ 98%]
+tests/test_web_browser.py s                                              [100%]
+
+=================================== FAILURES ===================================
+________________ test_installed_web_assets_and_process_recovery ________________
+
+tmp_path = PosixPath('/private/var/folders/dx/ny9cjsmd1bb3r42zbp694xkh0000gn/T/pytest-of-hoon/pytest-126/test_installed_web_assets_and_0')
+installed_package = (PosixPath('/private/var/folders/dx/ny9cjsmd1bb3r42zbp694xkh0000gn/T/pytest-of-hoon/pytest-126/installed-package0/venv...sers/hoon/Portfolio/llm-engine/.harness/cache/cargo', 'CI': 'true', 'CODEX_CI': '1', 'CODEX_MANAGED_BY_NPM': '1', ...})
+
+>   ???
+E   AssertionError: assert {'employees':...ic-test', ...} == {'employees':...ic-test', ...}
+E     
+E     Omitting 4 identical items, use -vv to show
+E     Differing items:
+E     {'work': [{'id': '71bacd4d-5481-4349-ad34-8c4d2aefa587', 'input': 'Summarize the Friday draft agreement.', 'status': 'pending', 'assignees': ['3aff53dc-25ff-4f91-a58d-ab2d36b01998'], ...}]} != {'work': [{'id': '71bacd4d-5481-4349-ad34-8c4d2aefa587', 'input': 'Summarize the Friday draft agreement.', 'status': 'pending', 'assignees': ['3aff53dc-25ff-4f91-a58d-ab2d36b01998'], ...}]}
+E     
+E     Full diff:
+E       {
+E           'employees': [
+E               {
+E                   'id': '3aff53dc-25ff-4f91-a58d-ab2d36b01998',
+E                   'name': 'Installed writer',
+E               },
+E           ],
+E           'work': [
+E               {
+E                   'id': '71bacd4d-5481-4349-ad34-8c4d2aefa587',
+E                   'input': 'Summarize the Friday draft agreement.',
+E                   'status': 'pending',
+E                   'assignees': [
+E                       '3aff53dc-25ff-4f91-a58d-ab2d36b01998',
+E                   ],
+E                   'attempts': [
+E                       {
+E                           'id': '1d895604-e6b5-40fa-b597-d32e27192cb7',
+E                           'state': 'finished',
+E                           'outcome': 'failure',
+E                           'started': 1789295625356,
+E                           'participants': [
+E                               '3aff53dc-25ff-4f91-a58d-ab2d36b01998',
+E                           ],
+E                           'run_id': '1d895604-e6b5-40fa-b597-d32e27192cb7',
+E                           'input': 'Summarize the Friday draft agreement.',
+E                           'provider': 'deterministic-test',
+E                           'model': 'test-model',
+E                           'deadline_unix_ms': 1789295745356,
+E                           'output': None,
+E                           'error': 'rate_limit',
+E                           'schema_version': 1,
+E                           'quality': 'unverified',
+E                       },
+E                       {
+E                           'id': '819c8e22-808b-4f43-92ef-915112bbd864',
+E                           'state': 'finished',
+E                           'outcome': 'reported_success',
+E                           'started': 1789295625434,
+E                           'participants': [
+E                               '3aff53dc-25ff-4f91-a58d-ab2d36b01998',
+E                           ],
+E                           'run_id': '819c8e22-808b-4f43-92ef-915112bbd864',
+E                           'input': 'Summarize the Friday draft agreement.',
+E                           'provider': 'deterministic-test',
+E                           'model': 'test-model',
+E                           'deadline_unix_ms': 1789295745434,
+E                           'output': '  한글 😀\tTEST RESPONSE — unverified\r\n'
+E                           '<script>window.injected = true</script>\n'
+E                           'Summarize the Friday draft agreement.\n'
+E                           'END OF FULL RESULT',
+E                           'error': None,
+E                           'schema_version': 1,
+E                           'quality': 'unverified',
+E                       },
+E                       {
+E                           'id': 'f9f658b0-ac9d-4c90-b498-89bbbb3436c1',
+E     -                     'state': 'active',
+E     ?                               ^^^ ^
+E     +                     'state': 'finished',
+E     ?                               ^ ^^^^ +
+E     -                     'outcome': None,
+E     ?                                ^  ^
+E     +                     'outcome': 'interruption',
+E     ?                                ^^^^^^^^^^^  ^
+E                           'started': 1789295626447,
+E                           'participants': [
+E                               '3aff53dc-25ff-4f91-a58d-ab2d36b01998',
+E                           ],
+E                           'run_id': 'f9f658b0-ac9d-4c90-b498-89bbbb3436c1',
+E                           'input': 'Summarize the Friday draft agreement.',
+E                           'provider': 'deterministic-test',
+E                           'model': 'test-model',
+E                           'deadline_unix_ms': 1789295746447,
+E                           'output': None,
+E                           'error': 'interrupted',
+E                           'schema_version': 1,
+E                           'quality': 'unverified',
+E                       },
+E                   ],
+E               },
+E           ],
+E           'configuration': None,
+E           'provider': 'deterministic-test',
+E           'model': 'test-model',
+E       }
+
+/Users/hoon/Portfolio/llm-engine/tests/test_installed_web.py:111: AssertionError
+=============================== warnings summary ===============================
+.venv/lib/python3.13/site-packages/starlette/testclient.py:53
+  /Users/hoon/Portfolio/llm-engine/python/.venv/lib/python3.13/site-packages/starlette/testclient.py:53: DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead.
+    _PortalFactoryType = Callable[[], AbstractContextManager[anyio.abc.BlockingPortal]]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_installed_web.py::test_installed_web_assets_and_process_recovery - AssertionError: assert {'employees':...ic-test', ...} == {'employees':...ic-test', ...}
+  
+  Omitting 4 identical items, use -vv to show
+  Differing items:
+  {'work': [{'id': '71bacd4d-5481-4349-ad34-8c4d2aefa587', 'input': 'Summarize the Friday draft agreement.', 'status': 'pending', 'assignees': ['3aff53dc-25ff-4f91-a58d-ab2d36b01998'], ...}]} != {'work': [{'id': '71bacd4d-5481-4349-ad34-8c4d2aefa587', 'input': 'Summarize the Friday draft agreement.', 'status': 'pending', 'assignees': ['3aff53dc-25ff-4f91-a58d-ab2d36b01998'], ...}]}
+  
+  Full diff:
+    {
+        'employees': [
+            {
+                'id': '3aff53dc-25ff-4f91-a58d-ab2d36b01998',
+                'name': 'Installed writer',
+            },
+        ],
+        'work': [
+            {
+                'id': '71bacd4d-5481-4349-ad34-8c4d2aefa587',
+                'input': 'Summarize the Friday draft agreement.',
+                'status': 'pending',
+                'assignees': [
+                    '3aff53dc-25ff-4f91-a58d-ab2d36b01998',
+                ],
+                'attempts': [
+                    {
+                        'id': '1d895604-e6b5-40fa-b597-d32e27192cb7',
+                        'state': 'finished',
+                        'outcome': 'failure',
+                        'started': 1789295625356,
+                        'participants': [
+                            '3aff53dc-25ff-4f91-a58d-ab2d36b01998',
+                        ],
+                        'run_id': '1d895604-e6b5-40fa-b597-d32e27192cb7',
+                        'input': 'Summarize the Friday draft agreement.',
+                        'provider': 'deterministic-test',
+                        'model': 'test-model',
+                        'deadline_unix_ms': 1789295745356,
+                        'output': None,
+                        'error': 'rate_limit',
+                        'schema_version': 1,
+                        'quality': 'unverified',
+                    },
+                    {
+                        'id': '819c8e22-808b-4f43-92ef-915112bbd864',
+                        'state': 'finished',
+                        'outcome': 'reported_success',
+                        'started': 1789295625434,
+                        'participants': [
+                            '3aff53dc-25ff-4f91-a58d-ab2d36b01998',
+                        ],
+                        'run_id': '819c8e22-808b-4f43-92ef-915112bbd864',
+                        'input': 'Summarize the Friday draft agreement.',
+                        'provider': 'deterministic-test',
+                        'model': 'test-model',
+                        'deadline_unix_ms': 1789295745434,
+                        'output': '  한글 😀\tTEST RESPONSE — unverified\r\n'
+                        '<script>window.injected = true</script>\n'
+                        'Summarize the Friday draft agreement.\n'
+                        'END OF FULL RESULT',
+                        'error': None,
+                        'schema_version': 1,
+                        'quality': 'unverified',
+                    },
+                    {
+                        'id': 'f9f658b0-ac9d-4c90-b498-89bbbb3436c1',
+  -                     'state': 'active',
+  ?                               ^^^ ^
+  +                     'state': 'finished',
+  ?                               ^ ^^^^ +
+  -                     'outcome': None,
+  ?                                ^  ^
+  +                     'outcome': 'interruption',
+  ?                                ^^^^^^^^^^^  ^
+                        'started': 1789295626447,
+                        'participants': [
+                            '3aff53dc-25ff-4f91-a58d-ab2d36b01998',
+                        ],
+                        'run_id': 'f9f658b0-ac9d-4c90-b498-89bbbb3436c1',
+                        'input': 'Summarize the Friday draft agreement.',
+                        'provider': 'deterministic-test',
+                        'model': 'test-model',
+                        'deadline_unix_ms': 1789295746447,
+                        'output': None,
+                        'error': 'interrupted',
+                        'schema_version': 1,
+                        'quality': 'unverified',
+                    },
+                ],
+            },
+        ],
+        'configuration': None,
+        'provider': 'deterministic-test',
+        'model': 'test-model',
+    }
+======== 1 failed, 56 passed, 1 skipped, 1 warning in 201.61s (0:03:21) ========

@@ -1,0 +1,26 @@
+Uninstalled 1 package in 4ms
+Installed 1 package in 19ms
+============================= test session starts ==============================
+platform darwin -- Python 3.13.12, pytest-9.1.1, pluggy-1.6.0
+rootdir: /Users/hoon/Portfolio/llm-engine
+configfile: pyproject.toml
+testpaths: tests
+plugins: anyio-4.15.1
+collected 55 items
+
+tests/test_cli.py .....                                                  [  9%]
+tests/test_execution.py ................                                 [ 38%]
+tests/test_mcp.py ........                                               [ 52%]
+tests/test_queries.py .................                                  [ 83%]
+tests/test_runs_cli.py ..                                                [ 87%]
+tests/test_teams_cli.py ..                                               [ 90%]
+tests/test_web.py ....                                                   [ 98%]
+tests/test_web_browser.py s                                              [100%]
+
+=============================== warnings summary ===============================
+.venv/lib/python3.13/site-packages/starlette/testclient.py:53
+  /Users/hoon/Portfolio/llm-engine/.venv/lib/python3.13/site-packages/starlette/testclient.py:53: DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead.
+    _PortalFactoryType = Callable[[], AbstractContextManager[anyio.abc.BlockingPortal]]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+============= 54 passed, 1 skipped, 1 warning in 71.30s (0:01:11) ==============

@@ -1,0 +1,73 @@
+{
+  "task": "C14-T1",
+  "stage": "integrate",
+  "scope": "Member source comparison and interface inspection only; no test suites executed.",
+  "files": [
+    {
+      "path": "docs/evidence/c14-t1-ai-worker-checks.json",
+      "sha256": "b096653017a9351403a49c2c512be35dd5df6a6fc5025596cddc8b66bd4169a8",
+      "matches_member": 1
+    },
+    {
+      "path": "docs/evidence/c14-t1-ai-worker.md",
+      "sha256": "1513d328d4f3bc76b5e1503f2e864773e2f9c68b6938042d37dc79888b39a97f",
+      "matches_member": 1
+    },
+    {
+      "path": "docs/evidence/c14-t1-implementation.md",
+      "sha256": "609aa758539e70fef42fcdbfefba12aef6643465b21d75bca6796543d296d941",
+      "matches_member": 1
+    },
+    {
+      "path": "docs/local-screen.md",
+      "sha256": "2c17175a64094fa04502c31772b6bb2ee16ee2df60de43dce8a5ba0412fa1071",
+      "matches_member": 1
+    },
+    {
+      "path": "python/tests/test_execution.py",
+      "sha256": "80d4d109082448faf5d64036cb82658e596e94aed7a5108cea8dbd33491f0181",
+      "matches_member": 1
+    },
+    {
+      "path": "python/tests/test_web.py",
+      "sha256": "98b5248588e8e26b615b868c3354ecfd57f442654656cc51fa112198e9b28223",
+      "matches_member": 1
+    },
+    {
+      "path": "python/tests/test_web_browser.py",
+      "sha256": "4e664a50a54dd5b451ec633d57c7d32f9fca9a198f800ab8529f0ad6f65ba143",
+      "matches_member": 1
+    },
+    {
+      "path": "python/tests/web_browser_server.py",
+      "sha256": "75ddae853749dbabd57158efe702d4206de32450e0c52e6b459d80694a916dbb",
+      "matches_member": 1
+    },
+    {
+      "path": "rust/crates/engine-sqlite/src/execution.rs",
+      "sha256": "0404deabda7bb3d4ce88305515d2bcc9fcb2d38aabcdb0d3b8ce645337090f3a",
+      "matches_member": 2
+    },
+    {
+      "path": "frontend/src/App.test.tsx",
+      "sha256": "d20b60042db6a2c1b74ea13c1bc415a8cad3d8004ee874f56dc89c6f16c786c0",
+      "matches_member": 3
+    },
+    {
+      "path": "frontend/src/App.tsx",
+      "sha256": "5c7c9b78e23f0f01532fe30e13b3a28b23257f362198038561ec35541290a7d4",
+      "matches_member": 3
+    },
+    {
+      "path": "frontend/src/api.ts",
+      "sha256": "b6f633e71c9f8e591866913b7b3c609f5b3d28ae26fbf4d03b732d2ea2af4321",
+      "matches_member": 3
+    }
+  ],
+  "pending": [
+    "supervisor consolidated mandatory checks",
+    "installed-package and browser verification",
+    "independent acceptance review"
+  ],
+  "live_acceptance": "C8-T2 remains outstanding"
+}

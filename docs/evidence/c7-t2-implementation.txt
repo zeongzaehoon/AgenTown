@@ -1,0 +1,92 @@
+C7-T2 implementation evidence — 2026-09-13, macOS arm64, Python 3.13.12
+Stage: implement only. No subagents or independent reviewers invoked.
+Outcome: BLOCKED (environment): Chromium cannot launch in this execution environment.
+Implementation and independent-of-browser checks completed; no browser success claimed.
+
+Product sources:
+- python/llm_engine/web.py: explicit-database loopback entry point, same-origin
+  boundary (including state/recovery POST), packaged assets, async provider I/O,
+  actionable fixed errors and credential redaction.
+- python/llm_engine/static/{index.html,style.css,app.js}: employee creation, saved
+  assignment, pending/running/failure/interrupted/disconnected/result history,
+  explicit retry, text-only rendering, keyboard controls and status announcements.
+- crates/engine-python/src/lib.rs: atomic create_assigned_work and guarded
+  start_web_execution; no Python persistence or scheduling.
+- crates/engine-sqlite/src/execution.rs: transaction-local expected-attempt-count
+  guard prevents replay becoming a retry; retained result remains unchanged.
+- python/llm_engine/execution.py: same Task 1 execution port, split admitted I/O
+  into finish_text for both CLI and HTTP; no provider auto-retry.
+- pyproject.toml / uv.lock: direct Starlette/Uvicorn runtime dependencies, packaged
+  static inclusion, web command, locked Playwright development tooling.
+- docs/local-screen.md: macOS/Windows launch, walkthrough, design, research URLs,
+  state/recovery semantics, limitations and browser test commands.
+
+Checks (actual tool-observed process exits):
+1. uv lock: exit 0; resolved 86 packages.
+2. uv sync --locked: exit 0; c7-t2-sync.txt.
+3. cargo test --workspace --locked: exit 0, 40 tests passed;
+   c7-t2-cargo.txt. Includes replay rejection across connections and restart.
+4. uv run --locked maturin develop: exit 0; c7-t2-native.txt.
+   Final rebuild completed before the final Python suite. No native rebuild was
+   running during that suite. Binding wheel installed editable for source checks.
+5. uv run --locked python -m pytest: exit 0, 54 passed, 1 explicitly skipped
+   opt-in browser test, one upstream Starlette/AnyIO deprecation warning;
+   c7-t2-pytest.txt. Four new API tests include actual Rust persistence, failure,
+   explicit retry, fast replay, concurrent admission, responsive provider wait,
+   restart, expired history, legacy recorded attempts, origin protection and redaction.
+6. node --check python/llm_engine/static/app.js: exit 0, no diagnostic output;
+   c7-t2-javascript.txt. Syntax validation is not browser interaction evidence.
+7. python3 .harness/cli.py check: exit 0, All configured checks passed;
+   c7-t2-harness.txt. No harness source/state/config edits were made.
+8. uv run --locked python docs/evidence/c7-t2-http-demo.py: exit 0;
+   c7-t2-http-demo.txt and c7-t2-http-server.txt. Real loopback HTTP server:
+   assets served, employee/work created, deterministic rate-limit failure,
+   explicit successful retry with full test text, replay 409, server restart with
+   identical history. Log retains actual Task/Run identifiers and outputs.
+   Also launches python -m llm_engine.web and confirms retained history and missing
+   model guidance. This is HTTP evidence, NOT browser or live-provider validation.
+9. uv run --locked python -m uvicorn --help: exit 0;
+   c7-t2-uvicorn-help.txt records installed launch options after web fetch failures.
+
+Browser attempts (actual failures, not skips):
+- PLAYWRIGHT_BROWSERS_PATH=/private/tmp/llm-engine-playwright
+  uv run --locked playwright install chromium: exit 0;
+  c7-t2-browser-install.txt. Downloaded Chromium and headless shell v1234.
+- LLM_ENGINE_BROWSER=1 PLAYWRIGHT_BROWSERS_PATH=/private/tmp/llm-engine-playwright
+  LLM_ENGINE_BROWSER_EVIDENCE=docs/evidence/c7-t2-browser
+  uv run --locked python -m pytest -s tests/test_web_browser.py:
+  exit 1; TargetClosedError at BrowserType.launch; headless shell exits SIGTRAP.
+  Latest attempt used final source. See c7-t2-browser.txt.
+- Full Chromium was also attempted with LLM_ENGINE_BROWSER_CHANNEL=chromium and
+  evidence directory docs/evidence/c7-t2-browser-full: exit 1; TargetClosedError,
+  process exits SIGABRT. See c7-t2-browser-full.txt. This earlier attempt also
+  failed before any page opened; it does not validate subsequent source changes.
+- Both server logs show fixture server startup; interactions.json is [] because
+  no page opened. NO screenshots or traces were produced. No visual, keyboard,
+  browser DOM, mobile reflow or browser restart assertions ran. Do not interpret
+  the written test or empty artifact directories as successful browser evidence.
+- tests/test_web_browser.py and tests/web_browser_server.py retain a reproducible
+  real-browser test for the complete flow, double clicks, keyboard execution,
+  running/reload, failure/retry, disconnected controls, restart, safe complete text,
+  interrupted historical fixture and mobile viewport. Run where Chromium launches
+  successfully and retain screenshots/trace/interactions before accepting this Task.
+
+Source attribution:
+- c7-t2-source-sha256.txt hashes 42 product source, test, lock and documentation
+  files, including the runnable HTTP evidence script.
+- c7-t2-http-demo.txt contains actual persisted test response and identities.
+- Prior/user changes were preserved, including pre-existing PLAN.md/.gitignore
+  edits and partial provenance code. This Task did not edit PLAN.md, .agents,
+  service configuration, .harness source/state/config or installed harness runtime.
+
+Outstanding:
+- Browser launch/interaction/visual validation and screenshots: environment blocker.
+- Live Anthropic validation: not attempted; no intentionally supplied credentials.
+- Windows execution, screen-reader checks and installed-wheel walkthrough: not
+  performed. Installed/live integration belongs to C7-T3; no claim of its completion.
+- PLAN.md section 8 and whole product remain incomplete.
+
+Lesson: History inspection may perform lease recovery. Protect that endpoint as a
+mutation too, and verify origin rejection. A successful HTTP walkthrough cannot
+substitute for actual browser evidence; preserve launch errors and empty interaction
+results honestly while finishing all checks that do not require the browser.

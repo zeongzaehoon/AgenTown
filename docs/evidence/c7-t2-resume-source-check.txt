@@ -1,0 +1,49 @@
+perl: warning: Setting locale failed.
+perl: warning: Please check that your locale settings:
+	LC_ALL = "C.UTF-8",
+	LC_CTYPE = "C.UTF-8",
+	LANG = "C.UTF-8"
+    are supported and installed on your system.
+perl: warning: Falling back to the standard locale ("C").
+Cargo.lock: OK
+Cargo.toml: OK
+README.md: OK
+crates/engine-core/Cargo.toml: OK
+crates/engine-core/src/lib.rs: OK
+crates/engine-core/src/persistence.rs: OK
+crates/engine-core/src/provenance.rs: OK
+crates/engine-core/src/runs.rs: OK
+crates/engine-core/tests/domain.rs: OK
+crates/engine-core/tests/runs.rs: OK
+crates/engine-core/tests/teams.rs: OK
+crates/engine-python/Cargo.toml: OK
+crates/engine-python/src/lib.rs: OK
+crates/engine-sqlite/Cargo.toml: OK
+crates/engine-sqlite/src/execution.rs: OK
+crates/engine-sqlite/src/lib.rs: OK
+crates/engine-sqlite/tests/persistence.rs: OK
+crates/engine-sqlite/tests/queries.rs: OK
+crates/engine-sqlite/tests/run_boundary.rs: OK
+crates/engine-sqlite/tests/teams.rs: OK
+docs/evidence/c7-t2-http-demo.py: OK
+docs/local-screen.md: OK
+pyproject.toml: OK
+python/llm_engine/__init__.py: OK
+python/llm_engine/__main__.py: OK
+python/llm_engine/cli.py: OK
+python/llm_engine/execution.py: OK
+python/llm_engine/mcp_server.py: OK
+python/llm_engine/static/app.js: OK
+python/llm_engine/static/index.html: OK
+python/llm_engine/static/style.css: OK
+python/llm_engine/web.py: OK
+tests/test_cli.py: OK
+tests/test_execution.py: OK
+tests/test_mcp.py: OK
+tests/test_queries.py: OK
+tests/test_runs_cli.py: OK
+tests/test_teams_cli.py: OK
+tests/test_web.py: OK
+tests/test_web_browser.py: OK
+tests/web_browser_server.py: OK
+uv.lock: OK

@@ -1,0 +1,9 @@
+[package]
+name = "llm-engine-core"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+uuid = { version = "1", features = ["v4"] }
+
