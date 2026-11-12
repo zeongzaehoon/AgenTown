@@ -1076,3 +1076,55 @@ Subsequent configuration edits do not change saved provenance.
 
 Deterministic browser interaction and visual validation for this snapshot are
 pending the supervisor gate. A fixture response is not live-provider evidence.
+
+### Preview and explicitly execute an employee Hook (C28-T2)
+
+For saved production work, launch `agentown-web --database /tmp/agentown-hook.sqlite --port 8765`
+and open <http://127.0.0.1:8765>. Execution needs intentionally supplied provider
+configuration. Live provider calls are skipped under the current policy.
+
+To exercise the complete flow without credentials, use the existing test-only
+server with built frontend assets and the prepared Python development environment:
+
+```sh
+printf 'success' > /tmp/c28-hook-gate
+uv run --directory python --locked python tests/web_browser_server.py /tmp/c28-hook.sqlite 8766 /tmp/c28-hook-gate
+```
+
+Open <http://127.0.0.1:8766>. Create employee Writer, save a short text request,
+and choose **Execute work**. Wait for the deterministic TEST RESPONSE and a
+finished attempt. In Configuration create and enable a Skill (for example,
+name Follow-up, instructions “Write a concise follow-up”). Create and enable a
+Hook targeting Writer, referencing that Skill, with event `run_completed`.
+Return to the saved work detail.
+
+1. Under **Apply an employee Hook**, choose the matching Hook using Tab and arrow
+   keys. Press Enter on **Preview Hook with saved work**. Preview sends no
+   provider request: `/tmp/c28-hook-gate.calls` still has one line. The preview
+   shows the server-composed effective input and source event, Run ID and outcome.
+2. Focus moves to **Execute once with Hook**. Escape or **Cancel Hook preview**
+   closes consent and returns focus. Preview again and explicitly execute once.
+   The fixture call count becomes two; no automatic third attempt appears.
+3. Open the new attempt. **Saved Hook provenance** shows the persisted Hook,
+   source Run/event/outcome, employee, Skill, preview ID, instructions and input.
+   Editing configuration afterwards does not rewrite that provenance.
+4. Preview again, then edit the unsaved draft or change the Hook/Skill in
+   Configuration. Consent is invalidated on the next configuration refresh;
+   changed work, attempts and provider/model also invalidate it. Disabled Hooks,
+   missing/disabled Skills, and unmatched targets/events have distinct choice
+   labels. Team and `task_created` Hooks are unmatched in this bounded flow.
+5. Stop the fixture server. Disconnected state removes consent. If an execution
+   response was lost, **Submission needs inspection** prevents fresh consent
+   until **Refresh connection** succeeds. Background polling does not clear that
+   requirement. Restart the fixture with the same database, refresh, inspect
+   attempts, then request a new preview before explicitly retrying.
+6. For `run_failed`, set the gate file to `fail`, explicitly retry ordinary saved
+   work and wait for its failure; configure an enabled `run_failed` employee Hook.
+   Interrupted and caller-reported outcomes do not qualify for this adapter.
+
+Ordinary execution and direct Skill preview remain separate explicit actions.
+Enabling a Hook never dispatches work or activates a Loop. The commands above are
+runnable fixture instructions, not evidence that browser execution passed in this
+invocation. Frontend behavior tests cover consent and recovery; frontend
+checks/build, applicable supervisor checks and browser validation are pending
+handoff. Live-provider validation remains skipped, not passed.

@@ -23,6 +23,7 @@ for (const path of ['/api/state', '/api/employees', '/api/work', '/api/work/w/ex
       const late: Array<(value: never) => void> = [];
       const calls: string[] = [];
       vi.stubGlobal('fetch', vi.fn(async (url: string, options: RequestInit) => {
+        if (url === '/api/config/v1/hooks') return new Response('{"hooks":[]}');
         if (url === '/api/config/v1/skills') return new Response('{"skills":[]}');
         calls.push(url);
         if (stall && url === path) {
@@ -76,6 +77,7 @@ for (const path of ['/api/employees', '/api/work', '/api/work/w/execute']) {
     let stallHistory = false;
     const calls: string[] = [];
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/config/v1/hooks') return new Response('{"hooks":[]}');
       if (url === '/api/config/v1/skills') return new Response('{"skills":[]}');
       calls.push(url);
       if (url === '/api/state') return stallHistory ? new Promise(() => {}) : new Response(JSON.stringify(state()));
@@ -106,6 +108,7 @@ test('unmount cancels pending mutation and history without starting a recovery r
   const signals: AbortSignal[] = [];
   let pending = false;
   const fetcher = vi.fn(async (_url: string, options: RequestInit) => {
+    if (_url === '/api/config/v1/hooks') return new Response('{"hooks":[]}');
     if (_url === '/api/config/v1/skills') return new Response('{"skills":[]}');
     signals.push(options.signal as AbortSignal);
     return pending ? new Promise(() => {}) : new Response(JSON.stringify(state()));
@@ -119,7 +122,7 @@ test('unmount cancels pending mutation and history without starting a recovery r
   // measuring unmount cleanup, without advancing any request deadline.
   await advance(0);
   expect(signals.slice(-2).every(signal => !signal.aborted)).toBe(true);
-  expect(vi.getTimerCount()).toBe(4); // State and Skills poll intervals, plus two request deadlines.
+  expect(vi.getTimerCount()).toBe(5); // State, Skills and Hooks poll intervals, plus two request deadlines.
   const count = fetcher.mock.calls.length;
   view.unmount(); await flush();
   expect(signals.slice(-2).every(signal => signal.aborted)).toBe(true);
@@ -133,6 +136,7 @@ for (const path of ['/api/work', '/api/work/w/execute']) {
     let stalled = false;
     const calls: string[] = [];
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/config/v1/hooks') return new Response('{"hooks":[]}');
       if (url === '/api/config/v1/skills') return new Response('{"skills":[]}');
       calls.push(url);
       return stalled ? new Promise(() => {}) : new Response(JSON.stringify(state()));

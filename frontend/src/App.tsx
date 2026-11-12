@@ -1,3 +1,4 @@
+import { HookExecution } from './HookExecution';
 import { SkillExecution } from './SkillExecution';
 import { Configuration } from './Configuration';
 import { Teams } from './Teams';
@@ -69,6 +70,15 @@ function AttemptResult({ attempt, work, number, latest }: {attempt: Attempt; wor
     {attempt.error && <p>{advice[attempt.error] || 'Refresh history before retrying.'}</p>}
     {attempt.state === 'active' && !attempt.provider && <p>Caller-reported active attempt; no provider request is recorded.</p>}
     {attempt.state === 'active' && !!attempt.provider && <p>Waiting for the provider. After an unexpected stop, recovery can take up to 120 seconds. No work is automatically resent.</p>}
+    {attempt.hook && <section aria-label={`Attempt ${number} saved Hook provenance`}>
+      <h4>Saved Hook provenance</h4>
+      <p>{attempt.hook.hook_name} · Hook ID: {attempt.hook.hook_id}</p>
+      <p>Source event: {attempt.hook.event} · Source Run: {attempt.hook.source_run_id} · Outcome: {attempt.hook.source_outcome}</p>
+      <p>Employee ID: {attempt.hook.agent_id} · Preview ID: {attempt.hook.preview_id}</p>
+      <p>{attempt.hook.skill_name} · Skill ID: {attempt.hook.skill_id}</p>
+      <p>Instructions saved at execution</p><pre>{attempt.hook.instructions}</pre>
+      <p>Effective input saved at execution</p><pre>{attempt.hook.input}</pre>
+    </section>}
     {attempt.skill && <section aria-label={`Attempt ${number} saved Skill provenance`}>
       <h4>Saved Skill provenance</h4>
       <p>{attempt.skill.skill_name} · Skill ID: {attempt.skill.skill_id}</p>
@@ -324,6 +334,11 @@ export function App() {
               <button type="button" disabled={busy.has('work')} onClick={() => loadDraft(replacement)}>Replace draft</button>
             </section>}
             {inspectionRequired && <p role="status">Submission needs inspection. Choose Refresh connection, inspect the attempts below, then explicitly retry. Nothing is resent automatically.</p>}
+            <HookExecution key={`hook/${work.id}`} work={work} workspace={state!} connected={connected}
+              draft={input} disabled={cannotExecute}
+              submit={preview => { void mutate(work.id, async signal => {
+                await api(`/api/work/${encodeURIComponent(work.id)}/execute`, {hook_preview_id: preview.preview_id, expected_runs: preview.expected_runs}, signal);
+              }); }} />
             <SkillExecution key={`skill/${work.id}`} work={work} workspace={state!} connected={connected}
               draft={input} disabled={cannotExecute}
               submit={preview => { void mutate(work.id, async signal => {

@@ -1,3 +1,10 @@
+export interface HookPreview extends SkillPreview {
+  hook_id: string; hook_name: string; event: string; agent_id: string;
+  source_run_id: string; source_outcome: string; hook_enabled: true; skill_enabled: true;
+}
+export interface HookProvenance extends SkillProvenance {
+  hook_id: string; hook_name: string; event: string; agent_id: string; source_run_id: string; source_outcome: string;
+}
 export interface SkillPreview {
   schema_version: 1; preview_id: string; task_id: string; skill_id: string;
   input: string; expected_runs: number;
@@ -10,7 +17,7 @@ export interface Employee { id: string; name: string }
 export interface Attempt {
   id: string; state: 'active' | 'finished'; outcome: string | null;
   started?: number | null; ended?: number | null; participants: string[]; provider?: string; model?: string;
-  skill?: SkillProvenance; input?: string;
+  hook?: HookProvenance; skill?: SkillProvenance; input?: string;
   output?: string | null; error?: string | null; quality?: 'unverified';
 }
 export interface Work {

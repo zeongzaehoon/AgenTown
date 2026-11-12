@@ -12,6 +12,7 @@ function fixture(state = initial()) {
   let finish: (() => void) | undefined;
   const calls: {path: string; body: Record<string, unknown>}[] = [];
   const fetcher = vi.fn(async (path: string, options: RequestInit) => {
+    if (path === '/api/config/v1/hooks') return new Response('{"hooks":[]}');
     if (path === '/api/config/v1/skills') return new Response(JSON.stringify({skills: []}));
     const body = JSON.parse(options.body as string) as Record<string, unknown>;
     calls.push({path, body});
@@ -402,6 +403,9 @@ test.each([
   if (error === 'interrupted') expect(detail.textContent).toContain('Interruption recorded: 2026-01-01 00:00:00.000 UTC');
   if (output) expect(detail.textContent).toContain('Unverified');
   expect(detail.textContent).toContain('Test response — not live validation');
+  // Configuration loads independently of workspace history. Observe stable
+  // polling only after the Hook panel has announced its initial loaded state.
+  await waitFor(() => expect(within(screen.getByRole('region', {name: 'Apply an employee Hook'})).getByRole('status').textContent).not.toContain('Waiting for configuration'));
   const changes = vi.fn(); const observer = new MutationObserver(changes);
   document.querySelectorAll('[role=status], #connection, details').forEach(node => observer.observe(node, {subtree: true, childList: true, characterData: true}));
   const calls = f.calls.length;

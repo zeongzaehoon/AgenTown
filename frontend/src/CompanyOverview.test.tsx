@@ -59,6 +59,7 @@ test('App uses existing polling, retains stale counts and drafts, reconnects and
   let state = workspace();
   let disconnected = false;
   const fetcher = vi.fn(async (path: string, init?: RequestInit) => {
+    if (path === '/api/config/v1/hooks') return new Response('{"hooks":[]}');
     if (path === '/api/config/v1/skills') {
       expect(init?.method).toBe('GET');
       expect(init?.body).toBeUndefined();
@@ -91,5 +92,5 @@ test('App uses existing polling, retains stale counts and drafts, reconnects and
   expect(within(overview).getAllByText('No assigned work.')).toHaveLength(3);
   expect((screen.getByLabelText('What would you like help with?') as HTMLTextAreaElement).value).toBe('Keep draft');
   expect(fetcher.mock.calls.filter(([path]) => path === '/api/state')).toHaveLength(4);
-  expect(fetcher.mock.calls.every(([path]) => path === '/api/state' || path === '/api/config/v1/skills')).toBe(true);
+  expect(fetcher.mock.calls.every(([path]) => path === '/api/state' || (path === '/api/config/v1/skills' || path === '/api/config/v1/hooks'))).toBe(true);
 });

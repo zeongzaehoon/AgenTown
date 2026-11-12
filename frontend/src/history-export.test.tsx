@@ -25,6 +25,7 @@ function setup() {
   };
   let disconnected = false;
   const fetcher = vi.fn(async (url: string) => {
+    if (url === '/api/config/v1/hooks') return new Response('{"hooks":[]}');
     if (url === '/api/config/v1/skills') return new Response('{"skills":[]}');
     if (disconnected) throw new TypeError('network');
     return new Response(JSON.stringify(state));
@@ -71,10 +72,10 @@ test('keyboard download contains complete Unicode loaded history while disconnec
   f.disconnect();
   fireEvent.click(screen.getByRole('button', {name: 'Refresh connection'}));
   await waitFor(() => expect(document.querySelector('#connection')!.textContent).toContain('Disconnected'));
-  const calls = f.fetcher.mock.calls.filter(([url]) => url !== '/api/config/v1/skills').length;
+  const calls = f.fetcher.mock.calls.filter(([url]) => url !== '/api/config/v1/skills' && url !== '/api/config/v1/hooks').length;
   download().focus();
   await user.keyboard('{Enter}');
-  expect(f.fetcher.mock.calls.filter(([url]) => url !== '/api/config/v1/skills').length).toBe(calls);
+  expect(f.fetcher.mock.calls.filter(([url]) => url !== '/api/config/v1/skills' && url !== '/api/config/v1/hooks').length).toBe(calls);
   expect(document.activeElement).toBe(download());
   const feedback = screen.getByText('History download requested. Check your browser’s downloads.');
   expect(feedback.getAttribute('role')).toBe('status');
@@ -108,7 +109,7 @@ test('keyboard download contains complete Unicode loaded history while disconnec
 test('pending work exports saved input and explicitly has no loaded attempts', async () => {
   const f = setup();
   await selectSaved('pending');
-  const calls = f.fetcher.mock.calls.filter(([url]) => url !== '/api/config/v1/skills').length;
+  const calls = f.fetcher.mock.calls.filter(([url]) => url !== '/api/config/v1/skills' && url !== '/api/config/v1/hooks').length;
   fireEvent.click(download());
   const text = await f.blobs[0].text();
   expect(text).toContain('Work ID: pending');
@@ -118,7 +119,7 @@ test('pending work exports saved input and explicitly has no loaded attempts', a
   expect(text).toContain('Loaded attempts: 0');
   expect(text).toContain('No loaded attempts. No execution is implied.');
   expect(text).not.toContain('Attempt ID:');
-  expect(f.fetcher.mock.calls.filter(([url]) => url !== '/api/config/v1/skills').length).toBe(calls);
+  expect(f.fetcher.mock.calls.filter(([url]) => url !== '/api/config/v1/skills' && url !== '/api/config/v1/hooks').length).toBe(calls);
 });
 
 test.each(['object URL', 'anchor click'])('download failure at %s gives accessible feedback and can be retried', async boundary => {
@@ -127,7 +128,7 @@ test.each(['object URL', 'anchor click'])('download failure at %s gives accessib
   fireEvent.change(screen.getByLabelText('What would you like help with?'), {target: {value: 'Keep this unsaved draft 한글'}});
   fireEvent.change(screen.getByLabelText('Assign to'), {target: {value: 'other'}});
   const before = JSON.stringify(f.state);
-  const calls = f.fetcher.mock.calls.filter(([url]) => url !== '/api/config/v1/skills').length;
+  const calls = f.fetcher.mock.calls.filter(([url]) => url !== '/api/config/v1/skills' && url !== '/api/config/v1/hooks').length;
   if (boundary === 'object URL') f.create.mockImplementationOnce(() => { throw new Error('unavailable'); });
   else f.click.mockImplementationOnce(() => { throw new Error('denied'); });
   download().focus();
@@ -141,7 +142,7 @@ test.each(['object URL', 'anchor click'])('download failure at %s gives accessib
   expect((screen.getByLabelText('Saved work') as HTMLSelectElement).value).toBe('work/한글');
   fireEvent.click(download());
   expect(screen.getByText(/History download requested/).getAttribute('aria-live')).toBe('polite');
-  expect(f.fetcher.mock.calls.filter(([url]) => url !== '/api/config/v1/skills').length).toBe(calls);
+  expect(f.fetcher.mock.calls.filter(([url]) => url !== '/api/config/v1/skills' && url !== '/api/config/v1/hooks').length).toBe(calls);
   expect(JSON.stringify(f.state)).toBe(before);
   const text = await f.blobs.at(-1)!.text();
   expect(text).toContain(savedInput);
