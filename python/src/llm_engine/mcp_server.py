@@ -89,11 +89,11 @@ class WorkSaved(Record):
     task: Task
 
 
-def create_server(database: str, *, provider_factory=None) -> FastMCP:
+def create_server(database: str, *, provider_factory=None, auth=None) -> FastMCP:
     # The client cannot select a different database through tool arguments.
     database = str(Path(database).absolute())
     _native.query_agents(database)  # validate the entire store before serving
-    server = FastMCP("AgenTown", version="0.2.0", mask_error_details=True)
+    server = FastMCP("AgenTown", version="0.2.0", mask_error_details=True, auth=auth)
     annotations = {"readOnlyHint": True, "destructiveHint": False,
                    "idempotentHint": True, "openWorldHint": False}
 

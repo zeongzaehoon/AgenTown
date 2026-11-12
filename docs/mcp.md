@@ -194,7 +194,7 @@ registration use `codex mcp remove agentown` or `claude mcp remove agentown` in
 the same scope used to add it. Claude Code project approval can be reconsidered
 with `claude mcp reset-project-choices`. Keep the product database and environment.
 
-The server is stdio-only, version 0.2.0 with workflow `schema_version: 1` and eight
+The default server uses stdio, version 0.2.0 with workflow `schema_version: 1` and eight
 tools. Older four-tool read clients keep their envelopes. This is configuration
 syntax compatibility, not certification of client versions. Record client version,
 OS, initialization, discovery, inspection and disconnect results when validating
@@ -210,11 +210,10 @@ process launch or permissions.
   this checkout, credentials or a company database in a bundle.
 - Codex/Claude plugins can package the same stdio command with platform runtime
   and explicit user database selection. A plugin manifest alone is not an
-  installation or authorization boundary. Remote MCP/ChatGPT integration needs
-  a separately designed authenticated HTTPS transport, per-user database isolation,
-  execution authorization and deployment lifecycle. This server has no URL and
-  cannot be connected remotely by copying its local file paths. Remote/plugin
-  delivery is deferred; preserve the same eight-tool consent contract.
+  installation or authorization boundary. The opt-in remote adapter below adds authenticated HTTP for a single trusted
+  workspace. Public HTTPS, identity-provider setup and actual ChatGPT exercise
+  remain operator work. Local file paths cannot connect ChatGPT; preserve the
+  same eight-tool consent contract. Plugin packaging remains deferred.
 
 ### Artifact-driven checks and validation record
 
@@ -391,3 +390,143 @@ confirms Desktop's manual JSON destinations and restart;
 locations and stdio fields. Cursor's current field table requires `type: "stdio"`;
 its generated artifacts include it. Existing Codex/Claude Code guidance above is
 reused without repeating research. Bundled extensions remain future work.
+
+## Opt-in authenticated HTTP adapter (C26-T2)
+
+The separate `python -m llm_engine.mcp_remote` module serves Streamable HTTP at
+`/mcp`; `agentown-mcp` continues to use stdio. It reuses the same eight tools,
+Rust admission, execution consent and history. Launch one process per explicitly
+selected existing absolute database path. All authorized tokens on that process
+have workspace access, including mutations and explicitly requested execution.
+This is a single trusted workspace, not a multi-tenant service: use separate
+processes, databases, audiences and signing keys for separate trust boundaries.
+Client arguments cannot select a database. `declared_source` remains untrusted
+metadata, not the authenticated JWT subject or an audit identity.
+
+With the installed product environment activated, initialize your selected store:
+
+```sh
+agentown --database /absolute/company.sqlite agent list
+python -m llm_engine.mcp_remote --database /absolute/company.sqlite --public-key /absolute/issuer-public.pem --issuer https://issuer.example --base-url http://127.0.0.1:8766
+```
+
+Only the public RSA key is read by this adapter. No signing key, provider key or
+bearer token belongs in launch arguments, tool arguments, source or shared
+configuration. The issuer must mint RS256 access tokens with exact `iss`,
+`aud` equal to the base URL plus `/mcp`, a future `exp`, and scope
+`agentown:workspace`. Signature, issuer, audience, expiry, not-before (when
+present) and scope are validated before MCP access; missing expiry is rejected.
+Pinned public keys require operator rotation and a process restart. Revocation
+is bounded by token expiry; no introspection or dynamic JWKS refresh is supplied.
+Use short-lived tokens and restrict issuance to trusted workspace operators.
+Authentication does not itself obtain user consent to spend money or resend text.
+
+### Deterministic local reproduction
+
+The supervisor-installed environment can run this without user credentials:
+
+```sh
+cd python
+python -m pytest tests/test_mcp_remote.py tests/test_mcp.py -q
+```
+
+For a manual local-only session, create disposable fixture keys/token in a private
+temporary directory with the activated installed product Python. This signs a
+five-minute test token, not a real OAuth login. Do not use fixture keys publicly.
+
+```sh
+mkdir -m 700 /tmp/agentown-http-fixture
+python - <<'PY'
+import base64, json, time
+from pathlib import Path
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import padding, rsa
+p = Path('/tmp/agentown-http-fixture')
+k = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+p.joinpath('public.pem').write_bytes(k.public_key().public_bytes(serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo))
+def enc(x):
+    return base64.urlsafe_b64encode(json.dumps(x).encode()).rstrip(b'=')
+body = b'.'.join(map(enc, [{'alg': 'RS256', 'typ': 'JWT'}, {'iss': 'https://issuer.example', 'aud': 'http://127.0.0.1:8766/mcp', 'sub': 'local-fixture', 'exp': int(time.time())+300, 'scope': 'agentown:workspace'}]))
+sig = base64.urlsafe_b64encode(k.sign(body, padding.PKCS1v15(), hashes.SHA256())).rstrip(b'=')
+p.joinpath('token').write_bytes(body+b'.'+sig)
+PY
+python -m llm_engine.mcp_remote --database /absolute/company.sqlite --public-key /tmp/agentown-http-fixture/public.pem --issuer https://issuer.example
+```
+
+In a second terminal with that environment activated, initialize, discover and
+read without provider requests (the token stays out of command arguments):
+
+```sh
+python - <<'PY'
+import asyncio
+from pathlib import Path
+from fastmcp import Client
+async def check():
+    token = Path('/tmp/agentown-http-fixture/token').read_text()
+    async with Client('http://127.0.0.1:8766/mcp', auth=token, timeout=10) as client:
+        print([tool.name for tool in await client.list_tools()])
+        print(await client.call_tool('list_agents', {}))
+asyncio.run(check())
+PY
+```
+
+Expect eight tools and employees from the selected store. The pytest fixtures
+exercise raw HTTP rejection before mutation, authenticated initialization/tool
+list, OAuth metadata, unchanged second-store bytes, execution replay rejection,
+resubmission consent, and transport lifespan teardown. These tests are distinct
+from actual client application validation. Integration ran the six remote-MCP
+tests successfully against this checkout's Python source with the existing
+product environment and native binding. A future `nbf` initially exposed a
+FastMCP 3.4.7 validation gap; the adapter now checks authenticated not-before
+claims explicitly, including malformed values. Consolidated supervisor checks
+remain pending.
+
+### Public HTTPS, OAuth discovery and shutdown
+
+Public deployment is an explicit operator action. Example behind an already
+configured TLS reverse proxy, forwarding `/mcp` and discovery routes unchanged:
+
+```sh
+python -m llm_engine.mcp_remote --database /absolute/company.sqlite --public-key /absolute/issuer-public.pem --issuer https://issuer.example --base-url https://mcp.example --allow-public --host 127.0.0.1
+```
+
+A non-loopback bind additionally requires `--host 0.0.0.0` (or a literal IPv6
+address), `--allow-public` and an HTTPS base URL. Uvicorn itself serves plain HTTP;
+provide a valid public HTTPS certificate and trusted TLS proxy/tunnel yourself.
+Even a loopback bind can be exposed by a proxy, so do not forward it publicly
+without explicitly choosing the public base URL and `--allow-public`. No tunnel,
+firewall, DNS, deployment or application settings are created automatically.
+Forward Authorization headers; never log them. Do not expose the plaintext
+upstream directly. Proxy headers are not trusted by this process.
+
+The unauthenticated OAuth protected-resource discovery endpoint
+`/.well-known/oauth-protected-resource/mcp` advertises the trusted issuer and
+resource. Unauthorized MCP requests carry the authentication challenge. The
+external issuer must supply working authorization-server/OIDC discovery,
+authorization and token endpoints, supported client registration, redirect URI
+validation, PKCE and appropriately scoped/audienced access tokens. The adapter
+is a resource server: it does not implement login, client registration, token
+issuance or refresh. The fixture issuer is deliberately not a working OAuth
+server. Metadata discovery alone does not establish end-to-end OAuth.
+
+Stop the foreground process with Ctrl-C (SIGINT; SIGTERM also supported by
+Uvicorn). Graceful shutdown is bounded to ten seconds; stop/revoke the external
+proxy or tunnel separately. Keep the database and public key. A disconnect or
+forced shutdown may leave an admitted Run until lease recovery: inspect history
+before retrying, obtain fresh resubmission consent, and never assume cancellation
+rolled back a provider request. Remove the disposable fixture directory yourself.
+
+ChatGPT cannot reach loopback or use local executable paths. A public HTTPS
+endpoint plus a supported OAuth issuer/client-registration flow and an eligible
+ChatGPT workspace/client configuration are prerequisites. A bearer-token SDK
+fixture does not prove ChatGPT login, tool approval, discovery or execution.
+No ChatGPT connection, public endpoint, OAuth login, tunnel or live provider call
+was exercised here. Actual ChatGPT compatibility remains unverified; stdio
+setup artifacts are unaffected.
+
+New API uncertainty was checked against primary FastMCP documentation:
+[Remote OAuth](https://gofastmcp.com/docs/servers/auth/remote-oauth) describes
+composing discovery with a token verifier;
+[token verification](https://gofastmcp.com/docs/servers/auth/token-verification)
+documents pinned RSA verification and issuer/audience validation. Existing MCP
+workflow/client research above is reused.
