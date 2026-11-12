@@ -14,7 +14,7 @@ function fixture() {
   let rejectSave = false;
   const fetcher = vi.fn(async (path: string, init: RequestInit) => {
     if (offline) throw new Error('offline');
-    if (path === '/api/teams') return response({teams: [{id: 't', name: 'Editors'}]});
+    if (path === '/api/teams') return response({teams: [{id: 't', name: 'Editors', members: []}]});
     const [, , , , kind, id, enabled] = path.split('/');
     if (init.method === 'GET') return response({[kind]: rows[kind]});
     if (rejectSave) return response({error: 'Reference unavailable'}, 404);

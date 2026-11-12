@@ -37,3 +37,8 @@
 .workstation-monitor { font-size: 2.5rem; border-bottom: .3rem solid currentColor; }
 .client-workstation { color: #24362e; }
 .client-workstation:hover { background: #e5eee5; }
+.team-rooms { background: #edf2eb; }
+.team-room-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr)); gap: 16px; margin-top: 20px; }
+.team-room { min-width: 0; border: 2px solid #73836d; background: #fffdf6; padding: 16px; }
+.team-room h4 { margin: 0; font-size: 1.1rem; overflow-wrap: anywhere; }
+@media (prefers-reduced-motion: reduce) { .team-rooms * { animation: none !important; transition: none !important; scroll-behavior: auto; } }

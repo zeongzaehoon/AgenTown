@@ -23,6 +23,7 @@ for (const path of ['/api/state', '/api/employees', '/api/work', '/api/work/w/ex
       const late: Array<(value: never) => void> = [];
       const calls: string[] = [];
       vi.stubGlobal('fetch', vi.fn(async (url: string, options: RequestInit) => {
+        if (url === '/api/teams') return new Response('{"teams":[]}');
         if (url === '/api/config/v1/loops') return new Response('{"loops":[]}');
         if (url === '/api/loops/v1') return new Response('{"schema_version":1,"control":{"state":"available","can_control":true,"message":""},"sessions":[],"attempts":[],"cancellation":"Stop prevents admissions"}');
         if (url === '/api/config/v1/hooks') return new Response('{"hooks":[]}');
@@ -79,6 +80,7 @@ for (const path of ['/api/employees', '/api/work', '/api/work/w/execute']) {
     let stallHistory = false;
     const calls: string[] = [];
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/teams') return new Response('{"teams":[]}');
       if (url === '/api/config/v1/loops') return new Response('{"loops":[]}');
       if (url === '/api/loops/v1') return new Response('{"schema_version":1,"control":{"state":"available","can_control":true,"message":""},"sessions":[],"attempts":[],"cancellation":"Stop prevents admissions"}');
       if (url === '/api/config/v1/hooks') return new Response('{"hooks":[]}');
@@ -112,6 +114,7 @@ test('unmount cancels pending mutation and history without starting a recovery r
   const signals: AbortSignal[] = [];
   let pending = false;
   const fetcher = vi.fn(async (_url: string, options: RequestInit) => {
+    if (_url === '/api/teams') return new Response('{"teams":[]}');
     if (_url === '/api/config/v1/loops') return new Response('{"loops":[]}');
     if (_url === '/api/loops/v1') return new Response('{"schema_version":1,"control":{"state":"available","can_control":true,"message":""},"sessions":[],"attempts":[],"cancellation":"Stop prevents admissions"}');
     if (_url === '/api/config/v1/hooks') return new Response('{"hooks":[]}');
@@ -144,6 +147,7 @@ for (const path of ['/api/work', '/api/work/w/execute']) {
     let stalled = false;
     const calls: string[] = [];
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/teams') return new Response('{"teams":[]}');
       if (url === '/api/config/v1/loops') return new Response('{"loops":[]}');
       if (url === '/api/loops/v1') return new Response('{"schema_version":1,"control":{"state":"available","can_control":true,"message":""},"sessions":[],"attempts":[],"cancellation":"Stop prevents admissions"}');
       if (url === '/api/config/v1/hooks') return new Response('{"hooks":[]}');

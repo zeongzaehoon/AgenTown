@@ -1530,3 +1530,44 @@ Deterministic coverage: with frontend dependencies installed, run
 and `npx tsc --noEmit`. Supervisor verification supplies the current check profile
 and any browser checks. These steps do not prove actual client integration or
 live-provider execution; live LLM validation is skipped under the user policy.
+
+### Persistent company team rooms
+
+Launch `agentown-web --database PATH --port 8765` and open
+`http://127.0.0.1:8765`. In the existing Teams panel, create two teams with the
+same name and add a shared employee to both. In Company overview choose
+**Refresh team rooms**. Each room displays the persisted team ID, so duplicate
+names remain distinguishable. Empty teams say **No members yet**; missing
+employees display their ID without an actionable character.
+
+Tab to a room's **Select team member** character and press Enter or Space to
+open that employee's assigned-work view. The search field receives focus and
+filters reset. The displayed member workload counts recorded employee
+assignments using the same status classification as the employee office; shared
+requests count once per employee. These counts are not team-owned work and
+must not be summed across rooms. Membership implies neither collaboration nor
+execution. Active can include caller-reported activity without a provider call;
+results remain unverified.
+
+Activate **Manage team: … · ID: …** to open that exact team in the existing
+management panel, with focus on **Saved team**. Type an unsaved team name,
+select an employee to add, and type a work draft. Visit another room's management
+panel, then return, including opening the same room twice. The work draft,
+assignment, team-name draft and per-team membership selections remain intact.
+Opening rooms does not save membership, assign team work, or start execution.
+Use Refresh team rooms after explicit team changes; room and management
+snapshots refresh independently. A removed selected team is reported unavailable
+in management and its draft is retained.
+
+Loading, no teams, initial failure and stale snapshots have separate text
+statuses. Stop the server and refresh rooms to retain a visibly stale snapshot;
+restart and refresh to recover. With no previously loaded rooms a failure says
+unavailable. Employee assignments also show stale labels on a disconnected
+workspace. Character actions retain native keyboard support and visible focus;
+reduced-motion settings suppress room animation and transitions.
+
+Deterministic coverage is in `frontend/src/TeamRooms.test.tsx` and the existing
+CompanyOverview/Teams tests. With dependencies available, run
+`cd frontend && npx vitest run src/TeamRooms.test.tsx src/CompanyOverview.test.tsx src/Teams.test.tsx`
+and `npx tsc --noEmit`. Supervisor checks and browser validation are pending at
+implementation handoff. Live LLM calls are skipped under the user policy.

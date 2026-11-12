@@ -121,6 +121,14 @@ export const advice: Record<string, string> = {
 };
 
 export interface Team { id: string; name: string; members: string[] }
-export const listTeams = (signal?: AbortSignal) => api<{teams: Team[]}>('/api/teams', {}, signal, 'GET');
+export async function listTeams(signal?: AbortSignal): Promise<{teams: Team[]}> {
+  const result = await api<{teams: Team[]}>('/api/teams', {}, signal, 'GET');
+  if (!result || !Array.isArray(result.teams) || result.teams.some(team =>
+    !team || typeof team.id !== 'string' || typeof team.name !== 'string' ||
+    !Array.isArray(team.members) || team.members.some(id => typeof id !== 'string'))) {
+    throw new ApiError('Team data unavailable: invalid team response. Refresh to try again.');
+  }
+  return result;
+}
 export const createTeam = (name: string, signal?: AbortSignal) => api<Team>('/api/teams', {name}, signal);
 export const addTeamMembers = (id: string, members: string[], signal?: AbortSignal) => api<Team>(`/api/teams/${encodeURIComponent(id)}/members`, {members}, signal);

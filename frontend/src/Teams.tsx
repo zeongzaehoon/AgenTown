@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { addTeamMembers, createTeam, listTeams, type Team, type Workspace } from './api';
 
-export function Teams(props: {workspace: Workspace | null; connected: boolean; onSelectEmployee: (id: string) => void}) {
+export function Teams(props: {openTeam?: {id: string} | null; workspace: Workspace | null; connected: boolean; onSelectEmployee: (id: string) => void}) {
   const [open, setOpen] = useState(false);
+  useEffect(() => { if (props.openTeam) setOpen(true); }, [props.openTeam]);
   return <section aria-labelledby="teams-title">
     <h2 id="teams-title">Teams</h2>
     <p>Membership does not assign work or start collaboration. Nothing executes when you create a team, add members or browse their work.</p>
@@ -11,9 +12,9 @@ export function Teams(props: {workspace: Workspace | null; connected: boolean; o
   </section>;
 }
 
-function TeamPanel({workspace, connected, onSelectEmployee}: {workspace: Workspace | null; connected: boolean; onSelectEmployee: (id: string) => void}) {
+function TeamPanel({workspace, connected, onSelectEmployee, openTeam}: {openTeam?: {id: string} | null; workspace: Workspace | null; connected: boolean; onSelectEmployee: (id: string) => void}) {
   const [teams, setTeams] = useState<Team[] | null>(null);
-  const [selected, setSelected] = useState('');
+  const [selected, setSelected] = useState(openTeam?.id ?? '');
   const [name, setName] = useState('');
   // Separate drafts per team: switching or refreshing never discards selections.
   const [drafts, setDrafts] = useState<Record<string, string[]>>({});
@@ -61,6 +62,9 @@ function TeamPanel({workspace, connected, onSelectEmployee}: {workspace: Workspa
     void refresh(request.signal).finally(() => { if (!request.signal.aborted) setBusy(false); });
     return () => controller.current?.abort();
   }, []);
+  useEffect(() => {
+    if (openTeam) { setSelected(openTeam.id); selector.current?.focus(); }
+  }, [openTeam]);
   const unavailable = !connected || stale || teams === null || busy;
   return <>
     <p role="status">{busy ? 'Loading or saving teams…' : teams === null ? 'Team data unavailable.' : stale || !connected ? 'Showing stale team data. Refresh teams before making changes.' : 'Showing persisted teams.'}</p>

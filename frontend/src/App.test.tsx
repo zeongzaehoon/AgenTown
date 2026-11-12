@@ -12,6 +12,7 @@ function fixture(state = initial()) {
   let finish: (() => void) | undefined;
   const calls: {path: string; body: Record<string, unknown>}[] = [];
   const fetcher = vi.fn(async (path: string, options: RequestInit) => {
+    if (path === '/api/teams') return new Response('{"teams":[]}');
     if (path === '/api/config/v1/loops') return new Response('{"loops":[]}');
     if (path === '/api/loops/v1') return new Response('{"schema_version":1,"control":{"state":"available","can_control":true,"message":""},"sessions":[],"attempts":[],"cancellation":"Stop prevents admissions"}');
     if (path === '/api/config/v1/hooks') return new Response('{"hooks":[]}');

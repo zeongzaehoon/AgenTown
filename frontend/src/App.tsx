@@ -102,6 +102,7 @@ export function App() {
   const [selected, setSelected] = useState('');
   const [search, setSearch] = useState('');
   const [clientRequest, setClientRequest] = useState<OpenClientRequest | null>(null);
+  const [teamRequest, setTeamRequest] = useState<{id: string} | null>(null);
   const [skillRequest, setSkillRequest] = useState<{id: string} | null>(null);
   const [viewEmployee, setViewEmployee] = useState('');
   const [outcome, setOutcome] = useState<WorkOutcome | 'all'>('all');
@@ -268,10 +269,10 @@ export function App() {
       <p id="connection" role="status" aria-live="polite">{connected ? `Connected · ${work ? workStatus(work) : 'Ready for your first work'}` : connectionError ? `Disconnected — displayed history may be out of date. ${connectionError}` : 'Connecting to your workspace…'}</p>
       <p id="configuration">{state && (state.configuration || `Provider: ${state.provider} · Model: ${state.model} · ${['anthropic', 'openai', 'bedrock', 'xai'].includes(state.provider) ? 'Real provider requests' : 'Test responses — not live validation'}`)}</p>
       <p id="notice" role="alert">{notice}</p><button id="refresh" type="button" onClick={() => { void refresh().then(ok => { if (ok) setInspectionRequired(false); }); }}>Refresh connection</button>
-      <CompanyOverview onOpenClient={id => setClientRequest({id})} onOpenSkill={id => setSkillRequest({id})} workspace={state} connected={connected} error={connectionError} selectedEmployee={viewEmployee} onSelectEmployee={setViewEmployee} onOpenWork={id => {
+      <CompanyOverview onSelectTeamMember={id => { setViewEmployee(id); setSearch(''); setOutcome('all'); searchRef.current?.focus(); }} onOpenTeam={id => setTeamRequest({id})} onOpenClient={id => setClientRequest({id})} onOpenSkill={id => setSkillRequest({id})} workspace={state} connected={connected} error={connectionError} selectedEmployee={viewEmployee} onSelectEmployee={setViewEmployee} onOpenWork={id => {
         setViewEmployee(''); setSearch(''); setOutcome('all'); setSelected(id); historyRef.current?.focus();
       }} />
-      <Teams workspace={state} connected={connected} onSelectEmployee={id => {
+      <Teams openTeam={teamRequest} workspace={state} connected={connected} onSelectEmployee={id => {
         setViewEmployee(id); setSearch(''); setOutcome('all'); searchRef.current?.focus();
       }} />
       <div className="workspace"><aside><section><h2>1. Your employees</h2>

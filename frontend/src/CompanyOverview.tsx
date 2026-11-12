@@ -1,4 +1,5 @@
 import { workstationClients, type ConnectionClientId } from './Connections';
+import { TeamRooms } from './TeamRooms';
 import { SkillBooks } from './SkillBooks';
 import { OverviewLoops } from './OverviewLoops';
 import { classifyWork, type WorkOutcome, type Workspace } from './api';
@@ -9,7 +10,9 @@ const categories: {key: WorkOutcome; label: string}[] = [
   {key: 'other', label: 'Other recorded work'},
 ];
 
-export function CompanyOverview({workspace, connected, error, onOpenWork, selectedEmployee = '', onSelectEmployee, onOpenSkill, onOpenClient}: {
+export function CompanyOverview({workspace, connected, error, onOpenWork, selectedEmployee = '', onSelectEmployee, onOpenSkill, onOpenClient, onOpenTeam, onSelectTeamMember}: {
+  onSelectTeamMember?: (id: string) => void;
+  onOpenTeam?: (id: string) => void;
   onOpenClient?: (id: ConnectionClientId) => void;
   onOpenSkill?: (id: string) => void; workspace: Workspace | null; connected: boolean; error: string; onOpenWork: (id: string) => void; selectedEmployee?: string; onSelectEmployee?: (id: string) => void;
 }) {
@@ -42,6 +45,7 @@ export function CompanyOverview({workspace, connected, error, onOpenWork, select
         <span className="workstation-monitor" aria-hidden="true">▣</span><strong>{client.name}</strong><span>Open client setup</span>
       </button>)}</div>
     </section>
+    <TeamRooms workspace={workspace} connected={connected} selectedEmployee={selectedEmployee} onSelectEmployee={onSelectTeamMember ?? onSelectEmployee} onOpenTeam={onOpenTeam} />
     <SkillBooks onOpenSkill={onOpenSkill} />
     <OverviewLoops workspace={workspace} onOpenWork={onOpenWork} />
     {workspace && <>

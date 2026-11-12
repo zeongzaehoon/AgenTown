@@ -25,6 +25,7 @@ function setup() {
   };
   let disconnected = false;
   const fetcher = vi.fn(async (url: string) => {
+    if (url === '/api/teams') return new Response('{"teams":[]}');
     if (url === '/api/config/v1/loops') return new Response('{"loops":[]}');
     if (url === '/api/loops/v1') return new Response('{"schema_version":1,"control":{"state":"available","can_control":true,"message":""},"sessions":[],"attempts":[],"cancellation":"Stop prevents admissions"}');
     if (url === '/api/config/v1/hooks') return new Response('{"hooks":[]}');

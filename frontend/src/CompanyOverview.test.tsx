@@ -63,6 +63,7 @@ test('App uses existing polling, retains stale counts and drafts, reconnects and
   let disconnected = false;
   let loopUnavailable = false;
   const fetcher = vi.fn(async (path: string, init?: RequestInit) => {
+    if (path === '/api/teams') return new Response('{"teams":[]}');
     if (path === '/api/config/v1/loops') return new Response('{"loops":[]}');
     if (path === '/api/loops/v1' && loopUnavailable) throw new Error('Loop inspection offline');
     if (path === '/api/loops/v1') return new Response('{"schema_version":1,"control":{"state":"available","can_control":true,"message":""},"sessions":[],"attempts":[],"cancellation":"Stop prevents admissions"}');
@@ -104,7 +105,7 @@ test('App uses existing polling, retains stale counts and drafts, reconnects and
   expect(within(within(overview).getByRole('list', {name: 'Employee workload'})).getAllByText('No assigned work.')).toHaveLength(3);
   expect((screen.getByLabelText('What would you like help with?') as HTMLTextAreaElement).value).toBe('Keep draft');
   expect(fetcher.mock.calls.filter(([path]) => path === '/api/state')).toHaveLength(5);
-  expect(fetcher.mock.calls.every(([path]) => path === '/api/state' || (path === '/api/config/v1/skills' || path === '/api/config/v1/hooks' || path === '/api/config/v1/loops' || path === '/api/loops/v1'))).toBe(true);
+  expect(fetcher.mock.calls.every(([path]) => path === '/api/state' || path === '/api/teams' || (path === '/api/config/v1/skills' || path === '/api/config/v1/hooks' || path === '/api/config/v1/loops' || path === '/api/loops/v1'))).toBe(true);
 });
 
 
