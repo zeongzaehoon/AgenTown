@@ -213,7 +213,7 @@ process launch or permissions.
   installation or authorization boundary. The opt-in remote adapter below adds authenticated HTTP for a single trusted
   workspace. Public HTTPS, identity-provider setup and actual ChatGPT exercise
   remain operator work. Local file paths cannot connect ChatGPT; preserve the
-  same eight-tool consent contract. Plugin packaging remains deferred.
+  same nine-tool consent contract. Plugin packaging remains deferred.
 
 ### Artifact-driven checks and validation record
 
@@ -226,7 +226,7 @@ uv run --directory python --locked python -m pytest tests/test_mcp_config.py -q
 The four artifact variants are parsed, their two machine-specific paths replaced
 with installed executable/temporary database paths, and their resulting command
 launched through the real MCP SDK. Tests bound the session to 30 seconds, check
-initialization, eight-tool discovery, employee/Task/history inspection, v1 schema,
+initialization, nine-tool discovery, employee/Task/history inspection, v1 schema,
 unchanged database bytes, JSON-RPC-only stdout and process exit. They perform no
 provider calls and never read or modify installed client configuration. The
 Windows artifact is launched with host paths during this test, not on Windows.
@@ -376,7 +376,7 @@ client exercise.
 Scoped deterministic coverage: `tests/test_connections.py`,
 `tests/test_cli.py -k connection`, and `tests/test_mcp_config.py`. The last parses
 all eight artifacts and exercises host-generated Desktop/Cursor commands with
-executable/database paths containing spaces through MCP initialization, eight-tool
+executable/database paths containing spaces through MCP initialization, nine-tool
 discovery, inspection, clean protocol stdout and process cleanup. Windows syntax
 on macOS is not Windows execution. No actual Claude Desktop or Cursor session
 was exercised by this implementation. Live provider calls are skipped, not passed.
@@ -394,7 +394,7 @@ reused without repeating research. Bundled extensions remain future work.
 ## Opt-in authenticated HTTP adapter (C26-T2)
 
 The separate `python -m llm_engine.mcp_remote` module serves Streamable HTTP at
-`/mcp`; `agentown-mcp` continues to use stdio. It reuses the same eight tools,
+`/mcp`; `agentown-mcp` continues to use stdio. It reuses the same nine tools,
 Rust admission, execution consent and history. Launch one process per explicitly
 selected existing absolute database path. All authorized tokens on that process
 have workspace access, including mutations and explicitly requested execution.
@@ -470,7 +470,7 @@ asyncio.run(check())
 PY
 ```
 
-Expect eight tools and employees from the selected store. The pytest fixtures
+Expect nine tools and employees from the selected store. The pytest fixtures
 exercise raw HTTP rejection before mutation, authenticated initialization/tool
 list, OAuth metadata, unchanged second-store bytes, execution replay rejection,
 resubmission consent, and transport lifespan teardown. These tests are distinct
@@ -530,3 +530,58 @@ composing discovery with a token verifier;
 [token verification](https://gofastmcp.com/docs/servers/auth/token-verification)
 documents pinned RSA verification and issuer/audience validation. Existing MCP
 workflow/client research above is reused.
+
+
+## Saved Skill discovery and immutable history
+
+Start `agentown-mcp --database /absolute/path/company.sqlite` against an existing
+product database. In a connected MCP client, call `list_skills_v1` with `{}`.
+Its structured response is `{"schema_version":1,"skills":[]}` for an empty store,
+or, for example:
+
+```json
+{"schema_version":1,"skills":[{"id":"11111111-1111-4111-8111-111111111111","name":"Concise","enabled":true}]}
+```
+
+IDs identify saved Skills; `enabled` describes current configuration. Discovery
+has read-only, idempotent annotations and never constructs or calls a provider.
+It does not preview or execute a Skill. Names and enabled states use the existing
+native configuration read, with stable ID ordering.
+
+A runnable SDK inspection (installed product environment, no credentials needed):
+
+```python
+import asyncio
+from fastmcp import Client
+from fastmcp.client.transports import StdioTransport
+
+async def inspect():
+    transport = StdioTransport(command="agentown-mcp", args=[
+        "--database", "/absolute/path/company.sqlite"])
+    async with Client(transport) as client:
+        print((await client.call_tool("list_skills_v1", {})).data)
+        tasks = (await client.call_tool("list_tasks", {})).data["tasks"]
+        for task in tasks:
+            print((await client.call_tool("get_work_history_v1", {
+                "task_id": task["id"]})).data)
+
+asyncio.run(inspect())
+```
+
+`get_work_history_v1` retains its version 1 envelope, existing attempt/execution
+fields and lease-recovery behavior. Each attempt additionally contains `skill`:
+`null` for ordinary executions and legacy Runs without a Skill snapshot, or a
+typed object with `schema_version: 1`, `run_id`, `preview_id`, `skill_id`,
+`skill_name`, `instructions`, `input`, and integer `admitted_at` (Unix milliseconds).
+The preview ID is an opaque string. Provenance is joined by Run ID from the native
+admitted snapshot, never reconstructed from current configuration. Editing a
+Skill or reopening the database therefore preserves the original admitted name,
+instructions and composed input. History inspection does not call a provider;
+it may recover expired execution leases as before.
+
+Deterministic coverage in `python/tests/test_mcp.py` checks empty and enabled/
+disabled discovery, output schemas, legacy/ordinary null provenance, and admitted
+instructions surviving edits and a fresh server process. Run in a product test
+environment with native bindings: `python -m pytest python/tests/test_mcp.py -q`.
+Live provider validation is skipped under the user policy; supervisor checks are
+pending for this change.

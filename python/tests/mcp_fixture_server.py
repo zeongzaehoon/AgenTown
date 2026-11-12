@@ -20,6 +20,12 @@ class FixtureProvider:
         return "Fixture result: " + text
 
 
+def provider_factory(model, provider):
+    if "--forbid-provider" in sys.argv:
+        raise AssertionError("Read tools must never construct a provider")
+    return FixtureProvider()
+
+
 if __name__ == "__main__":
-    create_server(sys.argv[1], provider_factory=lambda model, provider: FixtureProvider()).run(
+    create_server(sys.argv[1], provider_factory=provider_factory).run(
         transport="stdio", show_banner=False)

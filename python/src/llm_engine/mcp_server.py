@@ -59,6 +59,28 @@ class Execution(Record):
     quality: Literal["unverified"] = "unverified"
 
 
+class Skill(Record):
+    id: UUID
+    name: str
+    enabled: bool
+
+
+class Skills(Record):
+    schema_version: Literal[1] = 1
+    skills: list[Skill]
+
+
+class SkillProvenance(Record):
+    schema_version: Literal[1] = 1
+    run_id: UUID
+    preview_id: str
+    skill_id: UUID
+    skill_name: str
+    instructions: str
+    input: str
+    admitted_at: int
+
+
 class Run(Record):
     id: UUID
     task_id: UUID
@@ -71,6 +93,7 @@ class Run(Record):
     outcome: str | None
     participants: list[UUID]
     execution: Execution | None
+    skill: SkillProvenance | None = None
 
 
 class WorkHistory(Record):
@@ -109,7 +132,7 @@ def create_server(database: str, *, provider_factory=None, auth=None) -> FastMCP
     def query(function, *args):
         try:
             return function(database, *args)
-        except ValueError as exc:
+        except (ValueError, OSError, KeyError) as exc:
             # Do not echo database paths, user input or provider exception messages.
             message = str(exc).lower()
             category = next((word for word in ("schema", "invalid", "unknown", "stale",
@@ -135,6 +158,12 @@ def create_server(database: str, *, provider_factory=None, auth=None) -> FastMCP
     def get_task(task_id: str) -> Task:
         """Inspect one Task and its assigned agent IDs by stable UUID."""
         return task(query(_native.query_task, task_id))
+
+    @server.tool(annotations=annotations)
+    def list_skills_v1() -> Skills:
+        """List saved Skill IDs, names and enabled configuration; does not execute."""
+        return Skills(skills=[Skill(id=row["id"], name=row["name"], enabled=row["enabled"])
+                              for row in query(_native.list_skills)])
 
     @server.tool(annotations=mutations)
     def create_employee_v1(name: str) -> EmployeeCreated:
@@ -186,6 +215,8 @@ def create_server(database: str, *, provider_factory=None, auth=None) -> FastMCP
         # Sources are immutable and retained. Reading after the snapshot supplies
         # metadata for every included Run without adding later attempts to it.
         sources = dict(query(_native.execution_sources))
+        provenance = {row["run_id"]: SkillProvenance(**row)
+                      for row in query(_native.skill_provenance)}
         results = {row[0]: Execution(**record(row)) for row in executions}
         saved = next(((work, runs) for work, runs in tasks if work[0] == task_id), None)
         if saved is None:
@@ -195,7 +226,8 @@ def create_server(database: str, *, provider_factory=None, auth=None) -> FastMCP
         for row in sorted(saved[1], key=lambda row: (row[4], row[0])):
             attempts.append(Run(**dict(zip(("id", "task_id", "stage", "reporting_source",
                 "started_at", "ended_at", "state", "outcome", "participants"), row, strict=True)),
-                execution=results.get(row[0]), declared_source=sources.get(row[0])))
+                execution=results.get(row[0]), declared_source=sources.get(row[0]),
+                skill=provenance.get(row[0])))
         return WorkHistory(task=work, attempts=attempts)
 
     return server

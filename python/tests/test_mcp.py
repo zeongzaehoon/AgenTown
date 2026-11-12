@@ -78,10 +78,10 @@ async def discover(client):
     tools = {tool.name: tool for tool in (await client.list_tools()).tools}
     assert set(tools) == {"list_agents", "get_agent", "list_tasks", "get_task",
                           "create_employee_v1", "save_text_work_v1",
-                          "execute_text_work_v1", "get_work_history_v1"}
+                          "execute_text_work_v1", "get_work_history_v1", "list_skills_v1"}
     for name, tool in tools.items():
         assert tool.annotations.readOnlyHint == (name in {
-            "list_agents", "get_agent", "list_tasks", "get_task"})
+            "list_agents", "get_agent", "list_tasks", "get_task", "list_skills_v1"})
         assert tool.outputSchema
         jsonschema.Draft202012Validator.check_schema(tool.outputSchema)
         if name.endswith("_v1"):
@@ -207,11 +207,12 @@ async def test_team_assignment_inspection(cli, tmp_path, server_processes):
 
 
 @asynccontextmanager
-async def fixture_session(database):
+async def fixture_session(database, *, forbid_provider=False):
     with anyio.fail_after(30):
         async with stdio.stdio_client(StdioServerParameters(
             command=sys.executable,
-            args=[str(Path(__file__).with_name("mcp_fixture_server.py")), str(database)],
+            args=[str(Path(__file__).with_name("mcp_fixture_server.py")), str(database),
+                  *(["--forbid-provider"] if forbid_provider else [])],
             cwd=str(database.parent),
         )) as streams:
             async with ClientSession(*streams) as client:
@@ -276,6 +277,7 @@ async def test_explicit_workflow_retry_failure_and_reopen(cli, tmp_path, server_
         recovered = await call(client, tools, "execute_text_work_v1", args)
         assert recovered["output"] and recovered["run_id"] != failure["run_id"]
         history = await call(client, tools, "get_work_history_v1", {"task_id": work["id"]})
+        assert all(run["skill"] is None for run in history["attempts"])
         assert len(history["attempts"]) == 3
         assert {r["declared_source"] for r in history["attempts"]} == {"test-client"}
         assert {r["reporting_source"] for r in history["attempts"]} == {"anthropic"}
@@ -321,3 +323,57 @@ async def test_workflow_errors_do_not_echo_input(cli, tmp_path, server_processes
         assert result.isError
         assert "private-invalid-value" not in str(result)
         assert "Traceback" not in str(result)
+
+
+@pytest.mark.anyio
+async def test_skill_discovery_and_immutable_history(cli, tmp_path, server_processes):
+    from llm_engine import _native
+
+    cli("agent", "list")
+    database = tmp_path / "product.sqlite"
+    db = str(database)
+    # This process fails if discovery/history ever constructs a provider.
+    async with fixture_session(database, forbid_provider=True) as client:
+        tools = await discover(client)
+        assert await call(client, tools, "list_skills_v1") == {
+            "schema_version": 1, "skills": []}
+        first = _native.create_skill(db, "Concise", "Use short sentences.")
+        second = _native.create_skill(db, "Disabled", "Other instructions.")
+        _native.set_skill_enabled(db, first["id"], True)
+        expected = {"schema_version": 1, "skills": sorted([
+            {"id": first["id"], "name": "Concise", "enabled": True},
+            {"id": second["id"], "name": "Disabled", "enabled": False},
+        ], key=lambda row: row["id"])}
+        assert await call(client, tools, "list_skills_v1") == expected
+        employee = cli("agent", "create", "Writer")
+        work = cli("task", "create", "Saved work")
+        cli("task", "assign", work["id"], employee["id"])
+        legacy = cli("run", "start", work["id"], "--stage", "implement",
+                     "--reporting-source", "operator", "--participants", employee["id"])
+        cli("run", "finish", legacy["id"], "--outcome", "failure")
+        preview = _native.preview_skill(db, work["id"], first["id"])
+        execution = _native.start_skill_execution(
+            db, work["id"], preview["preview_id"], "anthropic", "fixture", 1)
+        admitted = next(row for row in _native.skill_provenance(db)
+                        if row["run_id"] == execution[0])
+        _native.update_skill(db, first["id"], "Edited", "Different instructions.")
+        _native.set_skill_enabled(db, first["id"], False)
+        history = await call(client, tools, "get_work_history_v1", {"task_id": work["id"]})
+        attempts = {row["id"]: row for row in history["attempts"]}
+        assert attempts[legacy["id"]]["skill"] is None
+        assert attempts[legacy["id"]]["execution"] is None
+        assert attempts[execution[0]]["skill"] == admitted
+        assert admitted["instructions"] == "Use short sentences."
+        assert admitted["input"] == preview["input"]
+        assert admitted["skill_name"] == "Concise"
+        assert admitted["skill_id"] == first["id"]
+        assert admitted["preview_id"] == preview["preview_id"]
+        assert attempts[execution[0]]["execution"]["input"] == preview["input"]
+    async with fixture_session(database, forbid_provider=True) as client:
+        tools = await discover(client)
+        assert await call(client, tools, "list_skills_v1") == {
+            "schema_version": 1, "skills": sorted([
+                {"id": first["id"], "name": "Edited", "enabled": False},
+                {"id": second["id"], "name": "Disabled", "enabled": False},
+            ], key=lambda row: row["id"])}
+        assert await call(client, tools, "get_work_history_v1", {"task_id": work["id"]}) == history
