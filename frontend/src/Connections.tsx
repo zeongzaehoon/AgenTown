@@ -219,8 +219,9 @@ function Setup({workspaceConnected, openClient, active}: {active: boolean; works
   const client = data?.clients.find(c => c.id === clientId);
   const platform = client?.platforms.find(p => p.id === platformId) ?? client?.platforms[0];
   const instructions = data && client && platform ? [
-    `${client.name} · ${platform.name} · ${client.id === 'chatgpt' ? 'Remote HTTPS prerequisites' : 'stdio workflow v1'}`, data.preparation,
-    `Merge into ${platform.destination}:`, platform.configuration, platform.inspection,
+    `${client.name} · ${platform.name} · ${client.id === 'chatgpt' ? 'Remote HTTPS prerequisites' : 'stdio workflow v1'}`,
+    ...(client.id === 'chatgpt' ? [] : [data.preparation]),
+    client.id === 'chatgpt' ? `Remote prerequisites for ${platform.destination}:` : `Merge into ${platform.destination}:`, platform.configuration, platform.inspection,
     'Ask the client: Using AgenTown, list employees and saved work. Inspect the selected Task and its attempt history. Do not execute work.',
     ...data.actions, data.consent, data.recovery, data.evidence,
   ].join('\n\n') : '';
@@ -232,7 +233,9 @@ function Setup({workspaceConnected, openClient, active}: {active: boolean; works
       anchor = document.createElement('a');
       anchor.href = url; anchor.download = platform?.filename ?? `${clientId}-setup.txt`;
       document.body.appendChild(anchor); anchor.click();
-      setFeedback('Download requested. Check your downloads; merge the fragment manually. Client readiness remains unknown.');
+      setFeedback(client?.id === 'chatgpt'
+        ? 'Prerequisite checklist download requested. Check your downloads and review the HTTPS/OAuth prerequisites. Client readiness remains unknown.'
+        : 'Download requested. Check your downloads; merge the fragment manually. Client readiness remains unknown.');
     } catch { setFeedback('Could not download. Copy the setup instructions or select and save the text below manually.'); }
     finally {
       anchor?.remove();

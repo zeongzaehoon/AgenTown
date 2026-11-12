@@ -1760,3 +1760,37 @@ downloading, and local checks never establish external configuration, connection
 or exercise. Deterministic Connections interaction tests cover these states;
 supervisor-selected browser validation is pending for this implementation.
 Live provider calls remain skipped, not passed.
+
+### Copy and download ChatGPT remote prerequisites (C48-T1)
+
+Launch `agentown-web --database PATH --port 8765` with an existing product
+database and open `http://127.0.0.1:8765`, or open the desktop app. Open
+**Connections → ChatGPT**. Read the visible **ChatGPT prerequisites checklist**
+and **Setup instructions**: both describe the supplied remote HTTPS/OAuth
+prerequisites. The combined instructions identify the remote prerequisite
+destination without asking you to merge a local settings fragment. The API's
+shared local-client preparation (including “merge only the agentown entry” and
+“Download saves a merge fragment”) must be absent from ChatGPT's visible and
+copied instructions and return when selecting a local client.
+
+Choose **Copy setup instructions**, paste into a text editor, and compare with
+the read-only Setup instructions field. Choose **Download setup artifact**:
+the status identifies a prerequisite checklist and asks you to review HTTPS/OAuth
+prerequisites. The downloaded filename and exact checklist content remain those
+supplied by the setup API. No local diagnostic controls appear. Readiness remains
+unknown, and configuration/connection/exercise are unknown or unverified.
+
+If clipboard access is denied or unavailable, select the Setup instructions field
+and copy manually as directed; retry the button after clipboard access is restored.
+Switch to Codex or another local client: the numbered setup steps, configuration
+fragment, local checks, and manual merge guidance return, and ChatGPT feedback
+clears. No credentials, public endpoint, external client session or live LLM calls
+are needed to inspect this flow.
+
+Deterministic coverage in `frontend/src/Connections.test.tsx` checks remote
+clipboard text, exact downloaded checklist text and filename, download status,
+denied/unavailable clipboard recovery, and returning to local setup. With frontend
+dependencies available, run `cd frontend`, `npx vitest run src/Connections.test.tsx`
+and `npx tsc --noEmit`. This implementation workspace has no frontend dependencies;
+these checks and supervisor-selected consolidated/browser validation remain pending.
+Live LLM calls remain skipped, not passed.

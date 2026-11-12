@@ -11,7 +11,12 @@ const setup: ConnectionSetup = {
   clients: ['codex', 'claude-code'].map(id => ({id, name: id === 'codex' ? 'Codex' : 'Claude Code', readiness: 'unknown', platforms: ['macos', 'windows'].map(p => ({id: p, name: p, destination: `${id}-${p}`, configuration: `config-${id}-${p}`, inspection: 'Inspect /mcp'}))})),
 };
 
-const recoverySetup: ConnectionSetup = {...setup, clients: [...fragmentClients(), {
+const recoverySetup: ConnectionSetup = {...setup,
+  preparation: 'Artifacts use this running packaged Python and selected database. No checkout or Node is required. '
+    + 'Back up the destination and merge only the agentown entry; do not replace other settings. '
+    + 'Download saves a merge fragment, not a settings installation. For ChatGPT use the prerequisite checklist instead. '
+    + 'Moving the installation or selecting another database requires fresh artifacts.',
+  clients: [...fragmentClients(), {
   ...setup.clients[0], id: 'chatgpt', name: 'ChatGPT',
   status: {detected: null, configured: 'unknown', connected: 'unverified', exercised: 'unverified'},
   platforms: [{...setup.clients[0].platforms[0], configuration: 'Provide HTTPS\nProvide OAuth\n', filename: 'chatgpt-prerequisites.txt'}],
@@ -83,10 +88,15 @@ test.each(malformedFields)('setup recovery rejects malformed %s (%j) atomically'
   expect(create.mock.calls[0][0].size).toBe(new Blob([configuration]).size);
   expect(click).toHaveBeenCalledOnce();
   expect(screen.getByText(/Configured: Unknown. Connected: Unverified. Exercised: Unverified/)).toBeTruthy();
-  response = {...recoverySetup, preparation: 'Recovered setup instructions.'};
+  const recovered = structuredClone(recoverySetup);
+  recovered.preparation = 'Recovered setup instructions.';
+  recovered.clients[2].platforms[0].configuration = 'Recovered HTTPS/OAuth prerequisites.';
+  response = recovered;
   await user.click(screen.getByRole('button', {name: 'Refresh setup'}));
   await screen.findByText('Setup service available.');
-  expect((screen.getByLabelText('Setup instructions') as HTMLTextAreaElement).value).toContain('Recovered setup instructions.');
+  const refreshed = (screen.getByLabelText('Setup instructions') as HTMLTextAreaElement).value;
+  expect(refreshed).toContain(remote ? 'Recovered HTTPS/OAuth prerequisites.' : 'Recovered setup instructions.');
+  if (remote) expect(refreshed).not.toContain(recovered.preparation);
   expect(screen.queryByText(/Previously loaded instructions may be stale/)).toBeNull();
 });
 
@@ -303,7 +313,8 @@ test.each([[2, 3], [0, 0]])('explicit shared-data check displays only validated 
     : Promise.resolve(new Response(JSON.stringify(setup))));
   vi.stubGlobal('fetch', fetcher);
   const user = await openDiagnostic();
-  expect(fetcher.mock.calls.map(([path]) => path)).toEqual(['/api/connections/v1']);
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  expect(fetcher.mock.calls[0]).toEqual(expect.arrayContaining(['/api/connections/v1']));
   const button = screen.getByRole('button', {name: 'Check shared data'});
   button.focus();
   await user.keyboard('{Enter}');
@@ -610,4 +621,85 @@ test('failed refresh retains readable steps and keyboard refresh recovers select
   expect(steps.getByRole('heading', {name: 'Configure Cursor · windows'})).toBeTruthy();
   expect(screen.queryByText(/Previously loaded instructions may be stale/)).toBeNull();
   expect(screen.getByText(/Configured: Unknown. Connected: Unverified. Exercised: Unverified/)).toBeTruthy();
+});
+
+test('ChatGPT copies remote guidance and downloads exact prerequisites before returning to local setup', async () => {
+  const remote = recoverySetup.clients[2].platforms[0];
+  const fetcher = vi.fn(async () => new Response(JSON.stringify(recoverySetup)));
+  vi.stubGlobal('fetch', fetcher);
+  const user = userEvent.setup();
+  const copy = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue();
+  const create = vi.fn((_blob: Blob) => 'blob:prerequisites');
+  vi.stubGlobal('URL', {createObjectURL: create, revokeObjectURL: vi.fn()});
+  let filename = '';
+  vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+    filename = this.download;
+  });
+  render(<Connections workspaceConnected openClient={{id: 'chatgpt'}} />);
+  await screen.findByRole('region', {name: 'ChatGPT prerequisites checklist'});
+  const instructions = (screen.getByLabelText('Setup instructions') as HTMLTextAreaElement).value;
+  expect(instructions).toContain('Remote HTTPS prerequisites');
+  expect(instructions).toContain(`Remote prerequisites for ${remote.destination}:`);
+  expect(instructions).toContain(remote.configuration);
+  expect(instructions).toContain(remote.inspection);
+  expect(instructions).not.toMatch(/merge|fragment/i);
+  await user.click(screen.getByRole('button', {name: 'Copy setup instructions'}));
+  expect(copy).toHaveBeenLastCalledWith(instructions);
+  await user.click(screen.getByRole('button', {name: 'Download setup artifact'}));
+  const blob = create.mock.calls[0][0];
+  const downloaded = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsText(blob);
+  });
+  expect(downloaded).toBe(remote.configuration);
+  expect(filename).toBe(remote.filename);
+  const feedback = screen.getByText(/Prerequisite checklist download requested/);
+  expect(feedback.getAttribute('role')).toBe('status');
+  expect(feedback.textContent).toContain('HTTPS/OAuth prerequisites');
+  expect(feedback.textContent).not.toMatch(/merge|fragment/i);
+  expect(screen.getByText('Client readiness: Unknown')).toBeTruthy();
+  expect(screen.getByText(/Configured: Unknown. Connected: Unverified. Exercised: Unverified/)).toBeTruthy();
+  expect(screen.queryByRole('button', {name: 'Check local server'})).toBeNull();
+  expect(screen.queryByRole('button', {name: 'Check shared data'})).toBeNull();
+
+  await user.selectOptions(screen.getByLabelText('Client'), 'codex');
+  expect(screen.queryByText(/Prerequisite checklist download requested/)).toBeNull();
+  const local = recoverySetup.clients[0].platforms[0];
+  expect(screen.getByRole('list', {name: 'Local client setup steps'})).toBeTruthy();
+  expect(screen.getByText(recoverySetup.preparation)).toBeTruthy();
+  expect(screen.getByRole('button', {name: 'Check local server'})).toBeTruthy();
+  expect(screen.getByRole('button', {name: 'Check shared data'})).toBeTruthy();
+  await user.click(screen.getByRole('button', {name: 'Copy setup instructions'}));
+  expect(copy).toHaveBeenLastCalledWith(expect.stringContaining(`Merge into ${local.destination}:`));
+  expect(copy).toHaveBeenLastCalledWith(expect.stringContaining(recoverySetup.preparation));
+  await user.click(screen.getByRole('button', {name: 'Copy configuration'}));
+  expect(copy).toHaveBeenLastCalledWith(local.configuration);
+  await user.click(screen.getByRole('button', {name: 'Download setup artifact'}));
+  expect(screen.getByText(/Download requested. Check your downloads; merge the fragment manually/)).toBeTruthy();
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  expect(fetcher.mock.calls[0]).toEqual(expect.arrayContaining(['/api/connections/v1']));
+});
+
+test.each(['denied', 'unavailable'])('ChatGPT clipboard %s preserves selectable remote instructions and recovers', async failure => {
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(recoverySetup))));
+  const user = userEvent.setup();
+  const copy = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue();
+  const clipboard = navigator.clipboard;
+  if (failure === 'denied') copy.mockRejectedValueOnce(new Error('denied'));
+  else vi.spyOn(navigator, 'clipboard', 'get').mockReturnValueOnce(undefined as unknown as Clipboard).mockReturnValue(clipboard);
+  render(<Connections workspaceConnected openClient={{id: 'chatgpt'}} />);
+  await screen.findByLabelText('Setup instructions');
+  await user.click(screen.getByRole('button', {name: 'Copy setup instructions'}));
+  await screen.findByText(/Select the Setup instructions field and copy manually/);
+  const field = screen.getByLabelText('Setup instructions') as HTMLTextAreaElement;
+  field.focus(); field.select();
+  expect(field.value.slice(field.selectionStart, field.selectionEnd)).toBe(field.value);
+  expect(field.readOnly).toBe(true);
+  expect(field.value).toContain(recoverySetup.clients[2].platforms[0].configuration);
+  expect(field.value).not.toMatch(/merge|fragment/i);
+  await user.click(screen.getByRole('button', {name: 'Copy setup instructions'}));
+  expect(copy).toHaveBeenLastCalledWith(field.value);
+  await screen.findByText('Setup instructions copied. Client readiness remains unknown.');
 });
