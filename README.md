@@ -6,6 +6,8 @@ AgenTown은 LLM 에이전트로 업무 자동화와 프로젝트 생성·구현�
 직원 역할의 에이전트를 만들고 TF 팀을 구성해 Task를 할당하며, 작업 진행을 2D·3D 회사 운영 화면으로 보여주는 것을 목표로 합니다.
 
 제품 목표와 기술 원칙은 [PLAN.md](PLAN.md)에 정리되어 있습니다.
+[사람이 따라가기 쉬운 DDD·Hexagonal 코드 구조](docs/architecture.md)는
+Python, Rust, React 사이의 의존 방향과 점진적 리팩터링 규칙을 설명합니다.
 제품 Rust Core는 에이전트와 Task 생성·조회, 여러 에이전트 할당, Task 상태 전이를 지원합니다.
 SQLite 어댑터를 통해 에이전트, Task, 할당을 저장하고 재시작 후 복원할 수 있습니다.
 [Core 설계와 API 계약](docs/core.md), [저장소 사용법과 스키마](docs/persistence.md)를 참고하세요.
