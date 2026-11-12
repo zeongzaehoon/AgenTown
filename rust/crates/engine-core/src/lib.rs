@@ -22,6 +22,8 @@ use std::{error::Error, fmt, str::FromStr};
 use uuid::Uuid;
 
 mod configuration;
+mod loop_execution;
+pub use loop_execution::{LoopAdmission, loop_admission};
 pub mod persistence;
 mod provenance;
 mod runs;
@@ -59,6 +61,7 @@ identity!(EvidenceId);
 identity!(SkillId);
 identity!(HookId);
 identity!(LoopPolicyId);
+identity!(LoopSessionId);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Agent {

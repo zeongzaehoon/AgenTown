@@ -6,7 +6,7 @@ editing and enabling never invokes a provider, runs a command, dispatches an
 event, schedules work, creates a Run or reads `.agents`/`.harness` files.
 Execution requires a separate explicit preview and admission/consent boundary;
 configuration operations never cross it. See the single-Skill and terminal-Hook
-flows below. Loop execution remains unsupported. A Hook may reference a disabled
+flows below. The native Loop contract is documented below; its service/UI adapters are separate work. A Hook may reference a disabled
 Skill, but such a Hook cannot be previewed for execution.
 
 Python imports come from `llm_engine.configuration`. Each kind (`skill`, `hook`,
@@ -133,8 +133,8 @@ runnable requests. `POST /api/work/{task}/skill-preview` accepts exactly
 combined `input` must be reviewed before sending `preview_id` and `expected_runs`
 to `POST /api/work/{task}/execute`. A fresh preview is required for each retry.
 Hook configuration and terminal events never dispatch work automatically.
-The explicit terminal-Hook flow below is a separate consent boundary; Loop
-execution remains unsupported.
+The explicit terminal-Hook flow below is a separate consent boundary. The native
+Loop contract below requires its own explicit activation.
 
 ### Explicit terminal-Hook execution
 
@@ -153,3 +153,87 @@ See [runnable Hook requests and provenance](text-execution.md#explicit-terminal-
 Configuration mutations and terminal events remain inert. Team targets and
 `task_created` remain valid configuration records but are unsupported for this
 execution flow. No automatic chains or Loop scheduler are enabled.
+
+### Native bounded Loop execution (C29-T1)
+
+This contract enables the execution-service feature in C29-T2. There is no
+Loop HTTP endpoint or background dispatcher in this change. Enabling a policy,
+creating a preview, and activating a session each dispatch **zero** provider
+requests. Skill/Hook chains remain inactive.
+
+The Rust/SQLite entities are `LoopPreview` (opaque consent ID), typed
+`LoopSessionId` (one activation), and `LoopAttempt` (one existing typed `RunId`
+under that session and the original Task). Schema v9 adds `loop_previews`,
+`loop_sessions`, and `loop_attempts` transactionally; v1–v8 migrate and unknown
+versions are rejected before writes. Records and snapshot contents are retained;
+these records are execution provenance, never human quality verification.
+
+Python `_native` exports these functions (Rust `SqliteStore` uses equivalent
+methods without the database argument):
+
+```python
+preview_loop(database, policy_id, secrets=[]) -> dict
+start_loop_session(database, preview_id, expected_runs, provider, model,
+                   runtime_id, secrets=[]) -> dict
+admit_loop_attempt(database, session_id, runtime_id, secrets=[]) -> ExecutionRecord | None
+stop_loop_session(database, session_id) -> dict
+recover_loop_sessions(database, runtime_id) -> None
+loop_sessions(database) -> list[dict]
+loop_attempts(database) -> list[dict]
+```
+
+A preview requires an enabled policy, saved nonempty text and exactly one assigned
+employee, with no active Run. It returns `schema_version=1`, `preview_id`,
+`policy_id`, `policy_name`, `policy_enabled=true`, `task_id`, `agent_id`, `input`,
+`max_iterations`, `interval_seconds`, `expected_runs` (existing Task attempts),
+and `created_at` (Unix milliseconds). Limits are 1–100 attempts and 60–86400
+seconds. Start consumes this preview once, within five minutes, after checking
+its expected count and unchanged policy/text/assignment. Changes invalidate
+consent even if later restored. Another active session for the same Task is
+rejected. Provider/model selection is snapshotted on explicit activation.
+
+Session dictionaries contain `schema_version=1`, `session_id`, nested `preview`,
+`state`, `provider`, `model`, `started_at`, `expires_at`, `admitted` and `next_at`.
+States are `active`, `stopped`, `complete`, `failed`, `expired`, `restarted`, or
+`stale`. Terminal states cannot be reactivated. Session lifetime is bounded to
+`(interval_seconds * 1000 + 120000) * max_iterations + 120000` milliseconds.
+
+**Service lifecycle requirement:** generate a fresh unpredictable `runtime_id`
+once per execution-service process, keep it in memory, and call
+`recover_loop_sessions` before accepting requests. Never reuse a previous token
+or adopt persisted sessions after restart. Recovery atomically closes active
+sessions owned by another runtime as `restarted`; admission with a mismatched
+token also closes the session. Opening SQLite per API call does not imply a
+service restart. Existing Run/result history remains available, and an already
+admitted attempt may still finish. Recovery and stop do not claim to cancel a
+provider request already dispatched.
+
+Admission holds SQLite's immediate writer transaction while checking ownership,
+expiry, stale consent, expected Task count, previous failure/interruption,
+interval, attempt bound and active Run exclusion. It creates the ordinary
+120-second execution lease, Run, session counter and immutable provenance in one
+commit. Interval is measured between admission times. `None` means wait or a
+terminal transition; inspect `loop_sessions` to distinguish them. Terminal session
+admission raises a safe rejection. Stop is idempotent and serializes against
+admission; after it commits no later admission succeeds. A racing admission that
+commits first remains retained and may finish. Failures, including quota cooldown,
+expiry and interruptions close the session on the next admission check; none
+silently retry. Independent manual attempts invalidate continuation. Starting
+a fresh session always requires a fresh preview and explicit user action.
+
+The adapter must send only an ExecutionRecord returned by admission through the
+existing provider path and finalize it through `finish_execution`. It must never
+retry dispatch from `loop_attempts` or adopt an unfinished lease after restart.
+Pass configured secret values at preview, start and admission; rejections expose
+no stored input. Inspection returns saved input just like existing work history.
+
+For a deterministic local exercise without provider credentials: create and
+enable a policy using the configuration API, call `preview_loop`, inspect its
+input/count, explicitly call `start_loop_session`, then call
+`admit_loop_attempt`. Finalize that returned Run with a fixture result via
+`finish_execution`, or stop immediately. Inspect `loop_sessions`, `loop_attempts`
+and existing execution history after reopening the DB. Production adapters must
+label fixture results honestly and must not dispatch from configuration reads.
+The Rust `loop_execution::tests` fixtures use a controlled clock and real SQLite
+connections to exercise timing, concurrent writers, stop, stale consent,
+rollback, failure, expiry and reopen without real LLM calls.

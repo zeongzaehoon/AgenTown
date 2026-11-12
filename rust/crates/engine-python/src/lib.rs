@@ -8,6 +8,7 @@ use pyo3::{exceptions::PyValueError, prelude::*};
 
 mod configuration;
 mod hook_execution;
+mod loop_execution;
 mod skill_execution;
 
 type AgentRecord = (String, String);
@@ -497,6 +498,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     configuration::register(m)?;
     skill_execution::register(m)?;
     hook_execution::register(m)?;
+    loop_execution::register(m)?;
     m.add_function(wrap_pyfunction!(history_snapshot, m)?)?;
     m.add_function(wrap_pyfunction!(start_mcp_execution, m)?)?;
     m.add_function(wrap_pyfunction!(execution_sources, m)?)?;

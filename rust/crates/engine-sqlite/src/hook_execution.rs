@@ -305,9 +305,10 @@ mod tests {
                 .unwrap();
             s.finish_execution(e.run, None, Some("provider_error"))
                 .unwrap();
-            assert!(s
-                .start_hook_execution(t, &p.preview_id, "fixture", "test", 2, &[])
-                .is_err());
+            assert!(
+                s.start_hook_execution(t, &p.preview_id, "fixture", "test", 2, &[])
+                    .is_err()
+            );
             s.transact(|c| c.update_skill(k, "Changed", "Changed"))
                 .unwrap();
             s.transact(|c| c.set_hook_enabled(h, false)).unwrap();
@@ -366,9 +367,10 @@ mod tests {
                     .unwrap();
                 }
             }
-            assert!(s
-                .start_hook_execution(t, &p.preview_id, "fixture", "test", 1, &[])
-                .is_err());
+            assert!(
+                s.start_hook_execution(t, &p.preview_id, "fixture", "test", 1, &[])
+                    .is_err()
+            );
         }
         assert!(s.preview_hook(t, h, &[]).is_err());
         s.transact(|c| {
@@ -382,17 +384,20 @@ mod tests {
         })
         .unwrap();
         let p = s.preview_hook(t, h, &[]).unwrap();
-        assert!(s
-            .start_hook_execution(t, &p.preview_id, "fixture", "test", 0, &[])
-            .is_err());
+        assert!(
+            s.start_hook_execution(t, &p.preview_id, "fixture", "test", 0, &[])
+                .is_err()
+        );
         let other = s.transact(|c| c.create_text_work("Other work")).unwrap();
-        assert!(s
-            .start_hook_execution(other, &p.preview_id, "fixture", "test", 1, &[])
-            .is_err());
+        assert!(
+            s.start_hook_execution(other, &p.preview_id, "fixture", "test", 1, &[])
+                .is_err()
+        );
         s.connection.execute_batch("CREATE TRIGGER injected_hook_failure BEFORE INSERT ON hook_provenance BEGIN SELECT RAISE(ABORT,'fixture'); END;").unwrap();
-        assert!(s
-            .start_hook_execution(t, &p.preview_id, "fixture", "test", 1, &[])
-            .is_err());
+        assert!(
+            s.start_hook_execution(t, &p.preview_id, "fixture", "test", 1, &[])
+                .is_err()
+        );
         drop(s);
         let mut s = SqliteStore::open(&path).unwrap();
         assert_eq!(s.read().unwrap().runs_for_task(t).unwrap().count(), 1);
@@ -442,9 +447,10 @@ mod tests {
             )
         })
         .unwrap();
-        assert!(s
-            .start_hook_execution(t, &p.preview_id, "fixture", "test", 1, &[])
-            .is_err());
+        assert!(
+            s.start_hook_execution(t, &p.preview_id, "fixture", "test", 1, &[])
+                .is_err()
+        );
         let p = s.preview_hook(t, h, &[]).unwrap();
         let b = s
             .transact(|c| {
@@ -454,18 +460,20 @@ mod tests {
             })
             .unwrap();
         assert!(s.preview_hook(t, h, &[]).is_err());
-        assert!(s
-            .start_hook_execution(t, &p.preview_id, "fixture", "test", 1, &[])
-            .is_err());
+        assert!(
+            s.start_hook_execution(t, &p.preview_id, "fixture", "test", 1, &[])
+                .is_err()
+        );
         s.connection
             .execute(
                 "DELETE FROM assignments WHERE task_id=?1 AND agent_id=?2",
                 params![t.to_string(), b.to_string()],
             )
             .unwrap();
-        assert!(s
-            .start_hook_execution(t, &p.preview_id, "fixture", "test", 1, &[])
-            .is_err());
+        assert!(
+            s.start_hook_execution(t, &p.preview_id, "fixture", "test", 1, &[])
+                .is_err()
+        );
         let p = s.preview_hook(t, h, &[]).unwrap();
         s.connection
             .execute(
@@ -479,9 +487,10 @@ mod tests {
                 [t.to_string()],
             )
             .unwrap();
-        assert!(s
-            .start_hook_execution(t, &p.preview_id, "fixture", "test", 1, &[])
-            .is_err());
+        assert!(
+            s.start_hook_execution(t, &p.preview_id, "fixture", "test", 1, &[])
+                .is_err()
+        );
         let p = s.preview_hook(t, h, &[]).unwrap();
         let e = s
             .start_execution(t, a, "Saved work", "fixture", "test")
@@ -489,9 +498,10 @@ mod tests {
         assert!(s.preview_hook(t, h, &[]).is_err());
         s.finish_execution(e.run, Some("Second result"), None)
             .unwrap();
-        assert!(s
-            .start_hook_execution(t, &p.preview_id, "fixture", "test", 1, &[])
-            .is_err());
+        assert!(
+            s.start_hook_execution(t, &p.preview_id, "fixture", "test", 1, &[])
+                .is_err()
+        );
         let latest = s.preview_hook(t, h, &[]).unwrap();
         assert_eq!(latest.source_run_id, e.run.to_string());
         assert_eq!(latest.expected_runs, 2);
@@ -551,9 +561,10 @@ mod tests {
             .unwrap();
         // Neither the original nor a refreshed count renews old source consent.
         for count in [1, 2] {
-            assert!(s
-                .start_hook_execution(t, &second.preview_id, "fixture", "test", count, &[])
-                .is_err());
+            assert!(
+                s.start_hook_execution(t, &second.preview_id, "fixture", "test", count, &[])
+                    .is_err()
+            );
         }
         assert_eq!(s.read().unwrap().runs_for_task(t).unwrap().count(), 2);
         assert_eq!(s.hook_provenance().unwrap().len(), 1);
