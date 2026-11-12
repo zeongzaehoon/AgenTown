@@ -456,6 +456,14 @@ fn show_execution(database: &str, id: &str) -> PyResult<ExecutionRecord> {
         .map(execution_record)
         .map_err(error)
 }
+#[pyfunction]
+fn show_execution_read_only(database: &str, id: &str) -> PyResult<ExecutionRecord> {
+    SqliteStore::open(database)
+        .map_err(error)?
+        .execution_read_only(run_id(id)?)
+        .map(execution_record)
+        .map_err(error)
+}
 type HistoryRecord = (
     Vec<AgentRecord>,
     Vec<(TaskRecord, Vec<RunRecord>)>,
@@ -507,6 +515,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(start_execution, m)?)?;
     m.add_function(wrap_pyfunction!(finish_execution, m)?)?;
     m.add_function(wrap_pyfunction!(show_execution, m)?)?;
+    m.add_function(wrap_pyfunction!(show_execution_read_only, m)?)?;
     m.add_function(wrap_pyfunction!(recover_executions, m)?)?;
     m.add_function(wrap_pyfunction!(start_run, m)?)?;
     m.add_function(wrap_pyfunction!(finish_run, m)?)?;

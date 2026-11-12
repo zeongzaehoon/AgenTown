@@ -731,3 +731,57 @@ consent before retrying. Provider failure is a recorded attempt, not reusable
 consent. Deterministic MCP/native fixtures require no credentials. Live provider
 calls remain skipped under the user policy; live behavior and result quality
 are unverified.
+
+## Read-only saved Loop and session inspection v1
+
+Launch `agentown-mcp --database /absolute/path/company.sqlite` against an existing
+product store. Saved Loop configuration and recorded sessions use the existing
+native queries; no credentials or model configuration are required for inspection.
+This runnable client lists both enabled and disabled policies and inspects sessions:
+
+```python
+import asyncio
+from fastmcp import Client
+from fastmcp.client.transports import StdioTransport
+
+async def inspect_loops():
+    transport = StdioTransport(command="agentown-mcp", args=[
+        "--database", "/absolute/path/company.sqlite"])
+    async with Client(transport) as client:
+        print((await client.call_tool("list_loops_v1", {})).data)
+        print((await client.call_tool("inspect_loop_sessions_v1", {})).data)
+
+asyncio.run(inspect_loops())
+```
+
+Empty responses are `{"schema_version":1,"loops":[]}` and
+`{"schema_version":1,"sessions":[],"attempts":[]}`. Policies include stable `id`,
+`name`, `enabled`, `task_id`, `max_iterations` and `interval_seconds`, in native
+stable ID order. Enabled means saved configuration, not authorization to run.
+
+Sessions include `schema_version: 1`, stable `session_id`, immutable `preview`,
+`state`, `provider`, `model`, `started_at`, `expires_at`, `admitted` and `next_at`.
+The preview retains its opaque `preview_id`, policy/task/employee identities,
+original policy name, `policy_enabled: true`, saved `input`, limits,
+`expected_runs` and `created_at`, even after configuration changes. Session states
+are `active`, `complete`, `failed`, `stopped`, `expired`, `stale` or `restarted`.
+Attempts include `schema_version: 1`, `session_id`, `run_id`, `ordinal`,
+`admitted_at` and typed `execution` (input, provider, model, deadline, nullable
+output/error, and quality `unverified`). Timestamps are Unix milliseconds;
+intervals are seconds. Native session and attempt admission order is retained.
+
+Both tools are read-only, idempotent and closed-world. They never construct a
+provider, initialize LoopService, recover sessions or expired execution leases,
+create previews, or authorize dispatch. In particular, a foreign runtime's active
+session stays active when inspected. Reads occur separately: an active execution
+owner can advance between queries, so the response is recorded observations,
+not a transactionally consistent execution snapshot. Links for sessions created
+after the session read are omitted until the next inspection. Poll again for
+new results; inspection never retries execution.
+
+Deterministic tests: `python -m pytest python/tests/test_mcp.py -k loop -q` in the
+product test environment with native bindings. Coverage includes empty/populated
+typed responses, saved limits, immutable previews, linked success/failure and
+active results, terminal states, reopen persistence and unchanged SQLite bytes.
+Supervisor consolidated verification remains pending. Live LLM calls are skipped
+under user policy, not passed.

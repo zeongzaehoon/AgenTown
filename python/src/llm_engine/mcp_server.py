@@ -85,6 +85,63 @@ class Hooks(Record):
     hooks: list[Hook]
 
 
+class LoopPolicy(Record):
+    id: UUID
+    name: str
+    enabled: bool
+    task_id: UUID
+    max_iterations: int
+    interval_seconds: int
+
+
+class Loops(Record):
+    schema_version: Literal[1] = 1
+    loops: list[LoopPolicy]
+
+
+class LoopPreview(Record):
+    schema_version: Literal[1] = 1
+    preview_id: str
+    policy_id: UUID
+    policy_name: str
+    policy_enabled: Literal[True]
+    task_id: UUID
+    agent_id: UUID
+    input: str
+    max_iterations: int
+    interval_seconds: int
+    expected_runs: int
+    created_at: int
+
+
+class LoopSession(Record):
+    schema_version: Literal[1] = 1
+    session_id: UUID
+    preview: LoopPreview
+    state: Literal["active", "stopped", "restarted", "stale", "failed", "expired", "complete"]
+    provider: str
+    model: str
+    started_at: int
+    expires_at: int
+    admitted: int
+    next_at: int
+
+
+class LoopAttempt(Record):
+    schema_version: Literal[1] = 1
+    session_id: UUID
+    run_id: UUID
+    ordinal: int
+    admitted_at: int
+    execution: Execution
+
+
+class LoopInspection(Record):
+    schema_version: Literal[1] = 1
+    sessions: list[LoopSession]
+    attempts: list[LoopAttempt]
+
+
 class HookProvenance(Record):
     schema_version: Literal[1] = 1
     run_id: UUID
@@ -235,6 +292,28 @@ def create_server(database: str, *, provider_factory=None, auth=None) -> FastMCP
     def list_hooks_v1() -> Hooks:
         """List saved Hook configuration, including disabled Hooks; does not execute."""
         return Hooks(hooks=[Hook(**row) for row in query(_native.list_hooks)])
+
+    @server.tool(annotations=annotations)
+    def list_loops_v1() -> Loops:
+        """List saved Loop policies, including disabled policies; does not activate them."""
+        return Loops(loops=[LoopPolicy(**row) for row in query(_native.list_loops)])
+
+    @server.tool(annotations=annotations)
+    def inspect_loop_sessions_v1() -> LoopInspection:
+        """Read recorded sessions, immutable previews and linked results without recovery.
+
+        Does not initialize an execution owner, create previews or authorize dispatch.
+        Active owners may continue writing between these native read queries.
+        """
+        sessions = query(_native.loop_sessions)
+        session_ids = {row["session_id"] for row in sessions}
+        links = [row for row in query(_native.loop_attempts)
+                 if row["session_id"] in session_ids]
+        attempts = [LoopAttempt(**row, execution=Execution(**record(
+            query(_native.show_execution_read_only, row["run_id"]))))
+            for row in links]
+        return LoopInspection(sessions=[LoopSession(**row) for row in sessions],
+                              attempts=attempts)
 
     @server.tool(annotations=mutations)
     def preview_skill_work_v1(task_id: str, skill_id: str) -> SkillPreview:

@@ -34,5 +34,17 @@ def provider_factory(model, provider):
 
 
 if __name__ == "__main__":
+    if "--inspect-only" in sys.argv:
+        from llm_engine import _native
+        from llm_engine.loop_execution import LoopService
+
+        def forbidden(*args, **kwargs):
+            raise AssertionError("Inspection must not initialize, recover or dispatch")
+
+        LoopService.__init__ = forbidden
+        LoopService.initialize = forbidden
+        for name in ("recover_loop_sessions", "recover_executions", "history_snapshot", "show_execution",
+                     "preview_loop", "start_loop_session", "admit_loop_attempt"):
+            setattr(_native, name, forbidden)
     create_server(sys.argv[1], provider_factory=provider_factory).run(
         transport="stdio", show_banner=False)

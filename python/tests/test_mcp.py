@@ -93,10 +93,12 @@ async def discover(client):
                           "create_employee_v1", "save_text_work_v1",
                           "execute_text_work_v1", "get_work_history_v1", "list_skills_v1",
                           "preview_skill_work_v1", "execute_skill_work_v1", "list_hooks_v1",
-                          "preview_hook_work_v1", "execute_hook_work_v1"}
+                          "preview_hook_work_v1", "execute_hook_work_v1",
+                          "list_loops_v1", "inspect_loop_sessions_v1"}
     for name, tool in tools.items():
         assert tool.annotations.readOnlyHint == (name in {
-            "list_agents", "get_agent", "list_tasks", "get_task", "list_skills_v1", "list_hooks_v1"})
+            "list_agents", "get_agent", "list_tasks", "get_task", "list_skills_v1", "list_hooks_v1",
+            "list_loops_v1", "inspect_loop_sessions_v1"})
         assert tool.outputSchema
         jsonschema.Draft202012Validator.check_schema(tool.outputSchema)
         if name.endswith("_v1"):
@@ -222,12 +224,13 @@ async def test_team_assignment_inspection(cli, tmp_path, server_processes):
 
 
 @asynccontextmanager
-async def fixture_session(database, *, forbid_provider=False):
+async def fixture_session(database, *, forbid_provider=False, inspect_only=False):
     with anyio.fail_after(30):
         async with stdio.stdio_client(StdioServerParameters(
             command=sys.executable,
             args=[str(Path(__file__).with_name("mcp_fixture_server.py")), str(database),
-                  *(["--forbid-provider"] if forbid_provider else [])],
+                  *(["--forbid-provider"] if forbid_provider else []),
+                  *(["--inspect-only"] if inspect_only else [])],
             cwd=str(database.parent),
         )) as streams:
             async with ClientSession(*streams) as client:
@@ -699,3 +702,84 @@ async def test_hook_consent_protocol_and_dispatch_count(cli, tmp_path, server_pr
         tools = await discover(client)
         assert await call(client, tools, "get_work_history_v1", {"task_id": work["id"]}) == history
         assert count() == 3
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("state", ["active", "complete", "failed", "stopped", "restarted", "stale"])
+async def test_loop_inspection_without_execution_side_effects(cli, tmp_path, server_processes, state):
+    from llm_engine import _native
+
+    cli("agent", "list")
+    database = tmp_path / "product.sqlite"
+    db = str(database)
+    async with fixture_session(database, forbid_provider=True, inspect_only=True) as client:
+        tools = await discover(client)
+        for name in ("list_loops_v1", "inspect_loop_sessions_v1"):
+            assert tools[name].annotations.idempotentHint
+            assert not tools[name].annotations.openWorldHint
+            assert tools[name].inputSchema["properties"] == {}
+        assert await call(client, tools, "list_loops_v1") == {"schema_version": 1, "loops": []}
+        assert await call(client, tools, "inspect_loop_sessions_v1") == {
+            "schema_version": 1, "sessions": [], "attempts": []}
+
+    employee = _native.create_agent(db, "Writer")[0]
+    work = _native.create_assigned_work(db, "Saved loop input", employee)[0]
+    policy = _native.create_loop(db, "Bounded", work, 1, 60)
+    disabled = _native.create_loop(db, "Disabled", work, 3, 120)
+    enabled = _native.set_loop_enabled(db, policy["id"], True)
+    preview = _native.preview_loop(db, policy["id"])
+    started = _native.start_loop_session(db, preview["preview_id"], 0,
+                                         "fixture", "fixture-model", "foreign-runtime")
+    sid = started["session_id"]
+    before_admission = database.read_bytes()
+    async with fixture_session(database, forbid_provider=True, inspect_only=True) as client:
+        tools = await discover(client)
+        assert await call(client, tools, "list_loops_v1") == {
+            "schema_version": 1, "loops": sorted([enabled, disabled], key=lambda r: r["id"])}
+        assert await call(client, tools, "inspect_loop_sessions_v1") == {
+            "schema_version": 1, "sessions": [started], "attempts": []}
+    assert database.read_bytes() == before_admission
+    row = _native.admit_loop_attempt(db, sid, "foreign-runtime")
+    if state in {"complete", "failed"}:
+        _native.finish_execution(db, row[0], "Recorded output" if state == "complete" else None,
+                                 "provider_error" if state == "failed" else None)
+        assert _native.admit_loop_attempt(db, sid, "foreign-runtime") is None
+    elif state == "stopped":
+        _native.stop_loop_session(db, sid)
+    elif state == "restarted":
+        _native.recover_loop_sessions(db, "replacement-runtime")
+    elif state == "stale":
+        _native.update_loop(db, policy["id"], "Changed", work, 2, 120)
+        assert _native.admit_loop_attempt(db, sid, "foreign-runtime") is None
+
+    # Subsequent configuration edits must never rewrite the saved preview.
+    _native.update_loop(db, policy["id"], "Later name", work, 4, 180)
+    edited = _native.set_loop_enabled(db, policy["id"], False)
+    expected_sessions = _native.loop_sessions(db)
+    assert expected_sessions[0]["state"] == state
+    assert expected_sessions[0]["preview"] == preview
+    expected_execution = _native.show_execution_read_only(db, row[0])
+    before = database.read_bytes()
+    inspection = None
+    for _ in range(2):  # A fresh MCP process reopens the same SQLite store.
+        async with fixture_session(database, forbid_provider=True, inspect_only=True) as client:
+            tools = await discover(client)
+            assert await call(client, tools, "list_loops_v1") == {
+                "schema_version": 1, "loops": sorted([edited, disabled], key=lambda r: r["id"])}
+            current = await call(client, tools, "inspect_loop_sessions_v1")
+            assert current["sessions"] == expected_sessions
+            assert current["sessions"][0]["preview"]["max_iterations"] == 1
+            assert current["sessions"][0]["preview"]["interval_seconds"] == 60
+            attempt = current["attempts"][0]
+            assert {k: v for k, v in attempt.items() if k != "execution"} == _native.loop_attempts(db)[0]
+            assert attempt["session_id"] == sid and attempt["run_id"] == row[0]
+            assert attempt["execution"]["input"] == preview["input"]
+            assert attempt["execution"]["output"] == expected_execution[5]
+            assert attempt["execution"]["error"] == expected_execution[6]
+            assert attempt["execution"]["quality"] == "unverified"
+            if inspection is not None:
+                assert current == inspection
+            inspection = current
+        assert database.read_bytes() == before
+        assert _native.show_execution_read_only(db, row[0]) == expected_execution
+    assert not Path(db + ".dispatches").exists()

@@ -153,6 +153,11 @@ impl SqliteStore {
         self.recover_executions()?;
         get(&self.connection, id)
     }
+    /// Inspect a persisted execution without recovering leases or changing Run state.
+    /// Callers that need current lifecycle state must use `execution` instead.
+    pub fn execution_read_only(&self, id: RunId) -> Result<Execution, StorageError> {
+        get(&self.connection, id)
+    }
     pub fn start_execution(
         &mut self,
         task: TaskId,
@@ -363,23 +368,17 @@ mod tests {
             .start_execution(t, a, "Summarize: hello", "test", "fixture")
             .unwrap();
         let mut other = SqliteStore::open(&path).unwrap();
-        assert!(
-            other
-                .start_execution(t, a, "duplicate", "test", "fixture")
-                .is_err()
-        );
-        assert!(
-            other
-                .transact(|c| c.finish_run(first.run, RunOutcome::Failure, now().unwrap()))
-                .is_err()
-        );
+        assert!(other
+            .start_execution(t, a, "duplicate", "test", "fixture")
+            .is_err());
+        assert!(other
+            .transact(|c| c.finish_run(first.run, RunOutcome::Failure, now().unwrap()))
+            .is_err());
         // Inject failure after result write, during terminal Run write.
         store.connection.execute_batch("CREATE TRIGGER fail_finish BEFORE UPDATE ON runs BEGIN SELECT RAISE(ABORT,'injected'); END;").unwrap();
-        assert!(
-            store
-                .finish_execution(first.run, Some("result"), None)
-                .is_err()
-        );
+        assert!(store
+            .finish_execution(first.run, Some("result"), None)
+            .is_err());
         drop(store);
         let mut store = SqliteStore::open(&path).unwrap();
         assert_eq!(store.execution(first.run).unwrap(), first);
@@ -394,16 +393,12 @@ mod tests {
         let finished = store
             .finish_execution(first.run, Some("result"), None)
             .unwrap();
-        assert!(
-            store
-                .finish_execution(first.run, Some("late"), None)
-                .is_err()
-        );
-        assert!(
-            store
-                .finish_execution(first.run, None, Some("secret error"))
-                .is_err()
-        );
+        assert!(store
+            .finish_execution(first.run, Some("late"), None)
+            .is_err());
+        assert!(store
+            .finish_execution(first.run, None, Some("secret error"))
+            .is_err());
         let retry = store
             .start_execution(t, a, "Draft next", "test", "fixture")
             .unwrap();
@@ -442,23 +437,17 @@ mod tests {
         let run = store
             .start_execution(t, a, "original", "test", "model")
             .unwrap();
-        assert!(
-            store
-                .finish_execution(run.run, Some("partial"), Some("output_limit"))
-                .is_err()
-        );
-        assert!(
-            store
-                .finish_execution(run.run, None, Some("output_limit: private provider detail"))
-                .is_err()
-        );
+        assert!(store
+            .finish_execution(run.run, Some("partial"), Some("output_limit"))
+            .is_err());
+        assert!(store
+            .finish_execution(run.run, None, Some("output_limit: private provider detail"))
+            .is_err());
         assert_eq!(store.execution(run.run).unwrap(), run);
         store.connection.execute_batch("CREATE TRIGGER fail_limit BEFORE UPDATE ON runs BEGIN SELECT RAISE(ABORT,'injected'); END;").unwrap();
-        assert!(
-            store
-                .finish_execution(run.run, None, Some("output_limit"))
-                .is_err()
-        );
+        assert!(store
+            .finish_execution(run.run, None, Some("output_limit"))
+            .is_err());
         drop(store);
         let mut store = SqliteStore::open(&path).unwrap();
         assert_eq!(store.execution(run.run).unwrap(), run);
@@ -546,6 +535,35 @@ mod tests {
         );
     }
     #[test]
+    fn read_only_execution_never_recovers_a_lease() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("db");
+        let mut store = SqliteStore::open(&path).unwrap();
+        let (a, t) = seed(&mut store);
+        let run = store
+            .start_execution(t, a, "input", "test", "fixture")
+            .unwrap();
+        let before = std::fs::read(&path).unwrap();
+        let inspected = store.execution_read_only(run.run).unwrap();
+        assert_eq!(inspected, run);
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+        assert_eq!(
+            store.read().unwrap().run(run.run).unwrap().state(),
+            RunState::Active
+        );
+        let (recovered, executions) = store
+            .execution_snapshot_at(RunTimestamp::from_unix_millis(run.deadline).unwrap())
+            .unwrap();
+        assert!(matches!(
+            recovered.run(run.run).unwrap().state(),
+            RunState::Finished {
+                outcome: RunOutcome::Interruption,
+                ..
+            }
+        ));
+        assert_eq!(executions[0].error.as_deref(), Some("interrupted"));
+    }
+    #[test]
     fn stale_recovery_never_resends_and_rejects_late_response() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("db");
@@ -599,11 +617,9 @@ mod tests {
         assert_eq!(ReadOnlyStore::open(&path).unwrap().read().unwrap(), old);
         let mut store = SqliteStore::open(&path).unwrap();
         assert_eq!(store.read().unwrap(), old);
-        assert!(
-            store
-                .start_execution(t, a, "input", "test", "fixture")
-                .is_ok()
-        );
+        assert!(store
+            .start_execution(t, a, "input", "test", "fixture")
+            .is_ok());
     }
 }
 
@@ -654,24 +670,20 @@ mod integrity_tests {
                 ("run".into(), retry.run.to_string())
             ]
         );
-        assert!(
-            store
-                .connection
-                .execute(
-                    "UPDATE executions SET input='changed' WHERE run_id=?1",
-                    [first.run.to_string()]
-                )
-                .is_err()
-        );
-        assert!(
-            store
-                .connection
-                .execute(
-                    "DELETE FROM executions WHERE run_id=?1",
-                    [first.run.to_string()]
-                )
-                .is_err()
-        );
+        assert!(store
+            .connection
+            .execute(
+                "UPDATE executions SET input='changed' WHERE run_id=?1",
+                [first.run.to_string()]
+            )
+            .is_err());
+        assert!(store
+            .connection
+            .execute(
+                "DELETE FROM executions WHERE run_id=?1",
+                [first.run.to_string()]
+            )
+            .is_err());
         // Corrupt fixture bypasses SQL protection; opening must reject, never repair.
         store
             .connection
@@ -713,20 +725,16 @@ mod web_admission_tests {
         let first = store
             .start_execution_guarded(task, agent, "Draft text", "test", "model", Some(0))
             .unwrap();
-        assert!(
-            other
-                .start_execution_guarded(task, agent, "Draft text", "test", "model", Some(0))
-                .is_err()
-        );
+        assert!(other
+            .start_execution_guarded(task, agent, "Draft text", "test", "model", Some(0))
+            .is_err());
         store
             .finish_execution(first.run, Some("response"), None)
             .unwrap();
         // Even a duplicate arriving after completion is not a new explicit retry.
-        assert!(
-            other
-                .start_execution_guarded(task, agent, "Draft text", "test", "model", Some(0))
-                .is_err()
-        );
+        assert!(other
+            .start_execution_guarded(task, agent, "Draft text", "test", "model", Some(0))
+            .is_err());
         drop(store);
         let mut reopened = SqliteStore::open(&path).unwrap();
         assert_eq!(
@@ -763,11 +771,9 @@ mod mcp_tests {
             })
             .unwrap();
         // Missing assignment must not create an attempt or source record.
-        assert!(
-            store
-                .start_mcp_execution(task, "test", "model", 0, false, "codex")
-                .is_err()
-        );
+        assert!(store
+            .start_mcp_execution(task, "test", "model", 0, false, "codex")
+            .is_err());
         store.transact(|c| c.assign(task, agent)).unwrap();
         for (provider, model, source, expected) in [
             ("", "model", "codex", 0),
@@ -776,11 +782,9 @@ mod mcp_tests {
             ("test", "model", "codex\n", 0),
             ("test", "model", "codex", 1),
         ] {
-            assert!(
-                store
-                    .start_mcp_execution(task, provider, model, expected, false, source)
-                    .is_err()
-            );
+            assert!(store
+                .start_mcp_execution(task, provider, model, expected, false, source)
+                .is_err());
             let (core, executions) = store.execution_snapshot().unwrap();
             assert_eq!(core.task(task).unwrap().title(), "Saved input");
             assert_eq!(
@@ -791,11 +795,9 @@ mod mcp_tests {
             assert!(executions.is_empty());
             assert!(store.execution_sources().unwrap().is_empty());
         }
-        assert!(
-            store
-                .start_mcp_execution(task, "test", "model", 0, false, "codex")
-                .is_ok()
-        );
+        assert!(store
+            .start_mcp_execution(task, "test", "model", 0, false, "codex")
+            .is_ok());
     }
 
     #[test]
@@ -812,11 +814,9 @@ mod mcp_tests {
             })
             .unwrap();
         store.connection.execute_batch("CREATE TRIGGER fail_source BEFORE INSERT ON execution_sources BEGIN SELECT RAISE(ABORT,'injected'); END;").unwrap();
-        assert!(
-            store
-                .start_mcp_execution(task, "test", "model", 0, false, "codex")
-                .is_err()
-        );
+        assert!(store
+            .start_mcp_execution(task, "test", "model", 0, false, "codex")
+            .is_err());
         drop(store);
         let mut store = SqliteStore::open(&path).unwrap();
         assert_eq!(store.read().unwrap().runs().len(), 0);
@@ -830,29 +830,21 @@ mod mcp_tests {
             .unwrap();
         assert_eq!(first.input, "Saved input");
         let mut other = SqliteStore::open(&path).unwrap();
-        assert!(
-            other
-                .start_mcp_execution(task, "test", "model", 0, false, "codex")
-                .is_err()
-        );
-        assert!(
-            other
-                .start_mcp_execution(task, "test", "model", 1, true, "codex")
-                .is_err()
-        );
+        assert!(other
+            .start_mcp_execution(task, "test", "model", 0, false, "codex")
+            .is_err());
+        assert!(other
+            .start_mcp_execution(task, "test", "model", 1, true, "codex")
+            .is_err());
         store
             .finish_execution(first.run, None, Some("provider_error"))
             .unwrap();
-        assert!(
-            other
-                .start_mcp_execution(task, "test", "model", 0, true, "codex")
-                .is_err()
-        );
-        assert!(
-            other
-                .start_mcp_execution(task, "test", "model", 1, false, "codex")
-                .is_err()
-        );
+        assert!(other
+            .start_mcp_execution(task, "test", "model", 0, true, "codex")
+            .is_err());
+        assert!(other
+            .start_mcp_execution(task, "test", "model", 1, false, "codex")
+            .is_err());
         let retry = other
             .start_mcp_execution(task, "test", "model", 1, true, "claude-code")
             .unwrap();
