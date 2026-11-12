@@ -248,6 +248,37 @@ manual visual/form interaction evidence separate from these API-driven checks.
 Implementation-stage evidence and outstanding validation are recorded in
 [evidence/c25-t2/implementation.md](evidence/c25-t2/implementation.md).
 
+### GitHub Release publication
+
+`.github/workflows/release-macos.yml` is the release boundary. Pushing a version
+tag such as `v0.1.0` starts a fresh `macos-14` build, runs the deterministic
+helper tests, assembles the complete bundled service, mounts the produced DMG,
+and exercises install, first launch, restart, reinstall, persistence and owned
+process cleanup through `desktop/check_dmg.py`. Only after those checks pass does
+the workflow create a GitHub Release and upload the architecture-labelled DMG
+and `SHA256SUMS.txt`. Build and installed-check logs remain attached to the
+workflow run as evidence; they are not release downloads.
+
+The release workflow intentionally labels the image `unsigned`. It does not
+claim Developer ID signing, hardened-runtime signing, notarization or Gatekeeper
+approval. Add those steps only when Apple credentials are configured and their
+result is independently verified. A failed build or installed-app check prevents
+publication. Re-running a failed tag workflow does not replace an existing app
+or touch user data. GitHub repository settings must allow Actions to write
+repository contents so the built-in token can create the Release.
+
+Release operators create a release only from a clean, pushed commit whose
+version matches `desktop/tauri.conf.json` and `desktop/Cargo.toml`, then push the
+matching annotated tag:
+
+```sh
+git tag -a v0.1.0 -m "AgenTown v0.1.0"
+git push origin v0.1.0
+```
+
+Monitor the **macOS desktop release** workflow. The downloadable file appears at
+<https://github.com/zeongzaehoon/AgenTown/releases> only after both jobs pass.
+
 ## Windows NSIS delivery (C25-T3)
 
 On a Windows x64 build host with the development prerequisites above, including

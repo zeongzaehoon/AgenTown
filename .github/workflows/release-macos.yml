@@ -1,0 +1,68 @@
+name: macOS desktop release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos:
+    runs-on: macos-14
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: astral-sh/setup-uv@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Tauri build CLI
+        run: cargo install tauri-cli --version '^2' --locked
+      - name: Check deterministic packaging helpers
+        run: python3.13 desktop/tests/test_build.py
+      - name: Build and validate unsigned DMG
+        run: |
+          mkdir -p release-evidence release-assets
+          python3.13 desktop/build.py 2>&1 | tee release-evidence/build.txt
+          dmg=$(find desktop/target/release/bundle/dmg -maxdepth 1 -name 'AgenTown-unsigned-*.dmg' -print -quit)
+          test -n "$dmg"
+          python3.13 desktop/check_dmg.py "$dmg" 2>&1 | tee release-evidence/installed.txt
+          version=${GITHUB_REF_NAME#v}
+          arch=$(uname -m)
+          output="release-assets/AgenTown-${version}-macOS-${arch}-unsigned.dmg"
+          mv "$dmg" "$output"
+          shasum -a 256 "$output" > release-assets/SHA256SUMS.txt
+      - name: Retain release assets and verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agentown-macos-release
+          path: |
+            release-assets/
+            release-evidence/
+          if-no-files-found: warn
+
+  publish:
+    needs: build-macos
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: agentown-macos-release
+          path: release
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test -n "$(find release/release-assets -maxdepth 1 -name '*.dmg' -print -quit)"
+          gh release create "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --title "AgenTown $GITHUB_REF_NAME" \
+            --generate-notes \
+            release/release-assets/*

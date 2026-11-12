@@ -65,3 +65,13 @@ uv run --directory python --locked agentown-web --help
 Build frontend assets before building or testing installed Python packages. Historical files in `docs/evidence/` retain the paths that existed when they were recorded.
 
 Desktop source build and owned-service lifecycle: see [desktop instructions](docs/desktop.md).
+
+## Download for macOS
+
+Versioned macOS disk images are published on the
+[GitHub Releases page](https://github.com/zeongzaehoon/AgenTown/releases).
+The current release pipeline builds and tests an unsigned Intel macOS image on a
+fresh GitHub runner and publishes its `SHA256SUMS.txt` alongside it. Apple
+Silicon can run that image through Rosetta; a native Apple Silicon image can be
+built locally with the desktop instructions. Because the download is not yet
+Developer ID signed or notarized, macOS may require an explicit user override.
