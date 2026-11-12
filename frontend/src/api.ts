@@ -18,6 +18,7 @@ export interface Employee { id: string; name: string }
 export interface Attempt {
   id: string; state: 'active' | 'finished'; outcome: string | null;
   started?: number | null; ended?: number | null; participants: string[]; provider?: string; model?: string;
+  declared_source?: string | null;
   hook?: HookProvenance; skill?: SkillProvenance; input?: string;
   output?: string | null; error?: string | null; quality?: 'unverified';
 }

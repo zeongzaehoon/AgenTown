@@ -55,6 +55,8 @@ function AttemptResult({ attempt, work, number, latest }: {attempt: Attempt; wor
   return <details data-attempt-id={attempt.id} open={open} onToggle={event => setOpen(event.currentTarget.open)}>
     <summary>Attempt {number} · {attempt.output != null ? 'Result available · Unverified' : attempt.error === 'output_limit' ? 'Failed — response reached the output limit' : attempt.error || attempt.state}</summary>
     <p>{['anthropic', 'openai', 'bedrock', 'xai'].includes(attempt.provider || '') ? (attempt.output != null ? 'Real provider response' : 'Real provider request') : attempt.provider ? 'Test response — not live validation' : 'Caller-reported attempt — no provider request'} · {attempt.model || 'No model'}</p>
+    <p>Caller-declared source (unverified): {attempt.declared_source ?? 'Unknown / not recorded'}</p>
+    <p>This caller-declared attribution does not establish authenticated identity, Loop ownership or provider verification.</p>
     <p>Recorded start: <RecordedTime value={attempt.started} /></p>
     <p>{attempt.outcome === 'interruption' || attempt.error === 'interrupted' ? 'Interruption recorded: ' : 'Recorded end: '}
       {attempt.state === 'active' && attempt.ended == null ? 'No recorded end — attempt is active.' : <RecordedTime value={attempt.ended} />}

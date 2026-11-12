@@ -1317,3 +1317,38 @@ Temporary artifacts for this invocation are
 These are fixture results, not live provider evidence. Browser validation and
 consolidated checks remain pending the supervisor gate; live LLM tests are skipped
 under the user policy, not passed.
+
+
+### Inspect saved-work caller attribution (C35-T2)
+
+Launch the product against an existing database containing saved attempts:
+
+```sh
+agentown-web --database /path/to/product.db --port 8765
+```
+
+Open http://127.0.0.1:8765, choose a request in **Saved work**, and expand
+its **Attempt** summaries. Tab to each summary and press Enter or Space to
+expand or collapse it. Every attempt displays **Caller-declared source
+(unverified)** from that attempt's recorded metadata. Ordinary, Skill and Hook
+attempts may have different sources; the saved Skill/Hook provenance remains
+available alongside it. Missing metadata, including older history, displays
+**Unknown / not recorded**. Source text is displayed literally, including markup.
+This attribution establishes neither authenticated identity, Loop ownership nor
+provider verification. It does not change the existing result quality labels.
+
+Leave multiple attempts expanded through a history refresh: their expansion and
+keyboard focus remain in place. Opening history and polling only inspect data;
+they do not execute work. No API keys or provider calls are needed to inspect
+existing history. The deterministic App test named `caller-declared attribution`
+covers per-attempt sources, literal markup, null/omitted metadata and polling
+retention without execution requests. In a prepared frontend environment run:
+
+```sh
+cd frontend
+npx vitest run src/App.test.tsx -t 'caller-declared attribution'
+```
+
+Browser interaction and consolidated checks for this change are pending supervisor
+verification. Live provider calls are skipped under the current user policy, not
+passed.

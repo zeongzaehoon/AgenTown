@@ -924,3 +924,42 @@ test('uncertain execution requires explicit history refresh before retry', async
   fireEvent.click(retry());
   await waitFor(() => expect(submissions).toBe(2));
 });
+
+
+test('caller-declared attribution stays per attempt, safe and unverified across polling', async () => {
+  const skill = {run_id: 'skill', preview_id: 'preview', skill_id: 's', skill_name: 'Saved skill', instructions: 'Instructions', input: 'Text', admitted_at: 1};
+  const sources = ['ordinary-client', 'skill-client', '<img src=x onerror="unsafe()"><script>unsafe()</script>', null, undefined];
+  const f = fixture({...initial(), work: [{id: 'w', input: 'Saved attribution', status: 'pending', assignees: [], attempts: sources.map((source, i) => ({
+    id: `attribution-${i}`, state: 'finished', outcome: 'reported_success', participants: [],
+    ...(source === undefined ? {} : {declared_source: source}),
+    ...(i === 1 ? {skill} : {}),
+    ...(i === 2 ? {hook: {...skill, hook_id: 'h', hook_name: 'Saved hook', event: 'run_succeeded', agent_id: 'e', source_run_id: 'previous', source_outcome: 'reported_success'}} : {}),
+  }))}]});
+  const user = userEvent.setup();
+  render(<App />); await connected();
+  expect(document.querySelectorAll('details[data-attempt-id]')).toHaveLength(5);
+  // History is newest first; match expectations by persisted attempt identity.
+  const details = sources.map((_, i) => document.querySelector<HTMLDetailsElement>(`details[data-attempt-id="attribution-${i}"]`)!);
+  for (const [i, detail] of details.entries()) {
+    const summary = detail.querySelector('summary')!;
+    summary.focus();
+    if (!detail.open) await user.click(summary);
+    expect(detail.open).toBe(true);
+    expect(detail.textContent).toContain(`Caller-declared source (unverified): ${sources[i] ?? 'Unknown / not recorded'}`);
+    expect(detail.textContent).toContain('does not establish authenticated identity, Loop ownership or provider verification');
+    expect(document.activeElement).toBe(summary);
+  }
+  expect(within(details[1]).getByRole('heading', {name: 'Saved Skill provenance'})).toBeTruthy();
+  expect(within(details[2]).getByRole('heading', {name: 'Saved Hook provenance'})).toBeTruthy();
+  expect(document.querySelector('#detail img, #detail script')).toBeNull();
+  const focused = document.activeElement;
+  const before = f.calls.length;
+  await waitFor(() => expect(f.calls.length).toBeGreaterThan(before), {timeout: 2000});
+  details.forEach((detail, i) => {
+    expect(document.querySelector(`[data-attempt-id="attribution-${i}"]`)).toBe(detail);
+    expect(detail.open).toBe(true);
+    expect(detail.textContent).toContain(`Caller-declared source (unverified): ${sources[i] ?? 'Unknown / not recorded'}`);
+  });
+  expect(document.activeElement).toBe(focused);
+  expect(f.calls.every(call => call.path === '/api/state')).toBe(true);
+});
