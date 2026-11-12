@@ -1571,3 +1571,40 @@ CompanyOverview/Teams tests. With dependencies available, run
 `cd frontend && npx vitest run src/TeamRooms.test.tsx src/CompanyOverview.test.tsx src/Teams.test.tsx`
 and `npx tsc --noEmit`. Supervisor checks and browser validation are pending at
 implementation handoff. Live LLM calls are skipped under the user policy.
+
+### Open saved work from a team room
+
+Launch `agentown-web --database PATH --port 8765`, open
+`http://127.0.0.1:8765`, and inspect Company overview. Use a database with saved
+work assigned to team members. Under **Saved member assignments**, each card
+shows the Task ID, its recorded status and the assigned members in that room
+with employee IDs. These are member assignments, not team-owned work. A Task
+shared by multiple members appears once within that room; a shared employee’s
+work can appear in several rooms. Do not sum room counts. Results are unverified;
+caller-reported active attempts do not prove a provider request.
+
+Type an unsaved work draft, edit a team name/membership selection and open
+Configuration to type unsaved Skill instructions. Select an employee’s work,
+enter an excluding search and choose a different outcome filter. Tab to a room’s
+**Open member assignment: … · Task ID: … · Team ID: …** card and press Enter
+or Space. **Saved work** receives focus with that exact Task selected; employee,
+search and outcome filters clear. All three drafts and the draft employee
+assignment remain intact. Repeat with Tasks having identical input text and
+check their distinct IDs. Opening cards never saves, assigns or executes work.
+
+Loading team rooms, unavailable rooms/company data, rooms without saved member
+assignments, and stale snapshots have distinct messages. Disconnect and refresh
+to inspect the retained stale cards; they remain available for saved-history
+navigation. Reconnect and refresh company data to remove obsolete assignments.
+Refresh team rooms separately after changing membership. Unavailable members
+retain their IDs and can still have saved assignments; membership does not
+imply execution or collaboration.
+
+Deterministic coverage: `cd frontend && npx vitest run src/TeamRooms.test.tsx
+src/CompanyOverview.test.tsx src/App.test.tsx` (enter the command on one line),
+then `npx tsc --noEmit`. The implementation workspace has no installed frontend
+dependencies, so execution is pending supervisor verification. The supervisor
+runs the declared frontend profile (frontend tests/build and ordinary Python
+checks), subject to its periodic full-check policy. Browser validation is pending;
+no browser or fresh-install evidence is claimed for this slice. Live LLM calls
+remain skipped, not passed.

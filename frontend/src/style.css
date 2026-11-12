@@ -42,3 +42,8 @@
 .team-room { min-width: 0; border: 2px solid #73836d; background: #fffdf6; padding: 16px; }
 .team-room h4 { margin: 0; font-size: 1.1rem; overflow-wrap: anywhere; }
 @media (prefers-reduced-motion: reduce) { .team-rooms * { animation: none !important; transition: none !important; scroll-behavior: auto; } }
+
+.room-work-cards { list-style: none; padding: 0; display: grid; gap: 12px; }
+.room-work-cards li { min-width: 0; border: 1px solid #73836d; border-radius: 8px; padding: 12px; background: #fff; }
+.room-work-cards button { margin-top: 0; text-align: left; overflow-wrap: anywhere; max-width: 100%; }
+.team-room h5 { font-size: 1rem; margin-bottom: 8px; }

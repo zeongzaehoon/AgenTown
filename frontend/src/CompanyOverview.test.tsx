@@ -130,3 +130,17 @@ test('office characters and list share selection by identity with keyboard and s
   expect(screen.getAllByText('Stale snapshot · No assigned work.')).toHaveLength(3);
   expect(document.activeElement).toBe(list);
 });
+
+test('team room cards forward the exact saved Task identity through overview navigation', async () => {
+  vi.stubGlobal('fetch', vi.fn(async (path: string) => {
+    if (path === '/api/teams') return new Response(JSON.stringify({teams: [{id: 'team', name: 'Editors', members: ['a', 'b']}]}));
+    if (path === '/api/config/v1/skills') return new Response('{"skills":[]}');
+    if (path === '/api/loops/v1') return new Response('{"schema_version":1,"control":{"state":"available","can_control":true,"message":""},"sessions":[],"attempts":[]}');
+    throw new Error(`Unexpected request ${path}`);
+  }));
+  const open = vi.fn(); const user = userEvent.setup();
+  render(<CompanyOverview workspace={workspace()} connected error="" onOpenWork={open} />);
+  const card = await screen.findByRole('button', {name: 'Open member assignment: shared · Task ID: shared · Team ID: team'});
+  card.focus(); await user.keyboard('{Enter}');
+  expect(open).toHaveBeenCalledExactlyOnceWith('shared');
+});

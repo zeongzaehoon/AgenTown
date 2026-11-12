@@ -45,7 +45,7 @@ export function CompanyOverview({workspace, connected, error, onOpenWork, select
         <span className="workstation-monitor" aria-hidden="true">▣</span><strong>{client.name}</strong><span>Open client setup</span>
       </button>)}</div>
     </section>
-    <TeamRooms workspace={workspace} connected={connected} selectedEmployee={selectedEmployee} onSelectEmployee={onSelectTeamMember ?? onSelectEmployee} onOpenTeam={onOpenTeam} />
+    <TeamRooms onOpenWork={onOpenWork} workspace={workspace} connected={connected} selectedEmployee={selectedEmployee} onSelectEmployee={onSelectTeamMember ?? onSelectEmployee} onOpenTeam={onOpenTeam} />
     <SkillBooks onOpenSkill={onOpenSkill} />
     <OverviewLoops workspace={workspace} onOpenWork={onOpenWork} />
     {workspace && <>

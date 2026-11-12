@@ -2,9 +2,9 @@ import { useEffect, useRef, useState } from 'react';
 import { classifyWork, listTeams, type Team, type Workspace, type WorkOutcome } from './api';
 
 /** Membership is a persisted grouping, never an assignment or execution signal. */
-export function TeamRooms({workspace, connected, selectedEmployee, onSelectEmployee, onOpenTeam}: {
+export function TeamRooms({workspace, connected, selectedEmployee, onSelectEmployee, onOpenTeam, onOpenWork}: {
   workspace: Workspace | null; connected: boolean; selectedEmployee: string;
-  onSelectEmployee?: (id: string) => void; onOpenTeam?: (id: string) => void;
+  onSelectEmployee?: (id: string) => void; onOpenTeam?: (id: string) => void; onOpenWork?: (id: string) => void;
 }) {
   const [teams, setTeams] = useState<Team[] | null>(null);
   const [busy, setBusy] = useState(true);
@@ -53,6 +53,24 @@ export function TeamRooms({workspace, connected, selectedEmployee, onSelectEmplo
           <p>Active may include caller-reported attempts without a provider request. Other includes blocked and cancelled work.</p>
         </div>;
       })}</div>
+      <h5>Saved member assignments</h5>
+      <p>Cards are assigned to this room’s members, not owned by the team. Shared assignments appear in every relevant room. Opening a card only inspects saved work.</p>
+      {!workspace ? <p>Member assignments unavailable — company data has not loaded.</p> : (() => {
+        const members = new Set(team.members);
+        const assigned = [...new Map(workspace.work.filter(work => work.assignees.some(id => members.has(id))).map(work => [work.id, work])).values()];
+        return <>
+          {!connected && <p>Stale member assignments — showing the last successful company snapshot.</p>}
+          {!assigned.length ? <p>No saved work assigned to this room’s members.</p> : <ul className="room-work-cards" aria-label={`Member assignments · Team ID: ${team.id}`}>
+            {assigned.map(work => <li key={work.id}>
+              <button type="button" disabled={!onOpenWork} aria-controls="employee-work"
+                aria-label={`Open member assignment: ${work.input.slice(0, 55)} · Task ID: ${work.id} · Team ID: ${team.id}`}
+                onClick={() => onOpenWork?.(work.id)}>{work.input.slice(0, 120)} · Task ID: {work.id}</button>
+              <p>Recorded status: {classifyWork(work).label}</p>
+              <p>Assigned members in this room: {[...new Set(work.assignees)].filter(id => members.has(id)).map(id => `${workspace.employees.find(employee => employee.id === id)?.name ?? 'Unavailable employee'} · ID: ${id}`).join('; ')}</p>
+            </li>)}
+          </ul>}
+        </>;
+      })()}
     </section>)}</div>
   </section>;
 }

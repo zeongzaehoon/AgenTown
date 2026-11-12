@@ -98,6 +98,24 @@ test('App opens exact team repeatedly, focuses selector and retains per-team and
   expect((screen.getByLabelText('Assign to') as HTMLSelectElement).value).toBe('b');
   expect((screen.getByLabelText('Team name') as HTMLInputElement).value).toBe('Keep team draft');
   expect((screen.getByLabelText('Alex · Employee ID: b') as HTMLInputElement).checked).toBe(true);
+  await user.click(screen.getByRole('button', {name: 'Open configuration'}));
+  await waitFor(() => expect((screen.getByLabelText('Instructions') as HTMLTextAreaElement).disabled).toBe(false));
+  fireEvent.change(screen.getByLabelText('Instructions'), {target: {value: 'Keep configuration draft'}});
+  fireEvent.change(screen.getByLabelText('Search saved work'), {target: {value: 'exclude all'}});
+  fireEvent.change(screen.getByLabelText('Current outcome'), {target: {value: 'failed'}});
+  const card = screen.getByRole('button', {name: 'Open member assignment: Result · Task ID: r · Team ID: t1'});
+  card.focus(); await user.keyboard(' ');
+  expect((screen.getByLabelText('Saved work') as HTMLSelectElement).value).toBe('r');
+  expect(document.activeElement).toBe(screen.getByLabelText('Saved work'));
+  expect((screen.getByLabelText('Search saved work') as HTMLInputElement).value).toBe('');
+  expect((screen.getByLabelText('Current outcome') as HTMLSelectElement).value).toBe('all');
+  expect(screen.getByText('Showing work for all employees.')).toBeTruthy();
+  expect((screen.getByLabelText('Instructions') as HTMLTextAreaElement).value).toBe('Keep configuration draft');
+  expect((screen.getByLabelText('What would you like help with?') as HTMLTextAreaElement).value).toBe('Keep work draft');
+  expect((screen.getByLabelText('Assign to') as HTMLSelectElement).value).toBe('b');
+  expect((screen.getByLabelText('Team name') as HTMLInputElement).value).toBe('Keep team draft');
+  card.focus(); await user.keyboard('{Enter}');
+  expect(document.activeElement).toBe(screen.getByLabelText('Saved work'));
   snapshot = teams.filter(team => team.id !== 't1');
   await user.click(screen.getByRole('button', {name: 'Refresh teams'}));
   expect(await screen.findByText(/The selected team is unavailable/)).toBeTruthy();
@@ -126,4 +144,33 @@ test('invalid team responses show unavailable or preserve the last valid snapsho
   fireEvent.click(screen.getByRole('button', {name: 'Refresh team rooms'}));
   expect(await screen.findByText(/Team rooms are stale/)).toBeTruthy();
   expect(screen.getByRole('region', {name: 'Team room: Editors · ID: t1'})).toBeTruthy();
+});
+
+
+test('assignment cards deduplicate Task identities, preserve shared attribution and navigate stale snapshots by keyboard', async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => response({teams: [{id: 't', name: 'Room', members: ['a', 'b', 'missing']}, teams[1], teams[2]]})));
+  const open = vi.fn(); const user = userEvent.setup();
+  const data = {...workspace, work: [workspace.work[0], workspace.work[0], {...workspace.work[1], input: 'Shared work'}, {id: 'missing-work', input: 'Unavailable assignment', status: 'blocked', assignees: ['missing'], attempts: []}]} satisfies Workspace;
+  const view = render(<TeamRooms workspace={data} connected selectedEmployee="" onOpenWork={open} />);
+  const room = await screen.findByRole('region', {name: 'Team room: Room · ID: t'});
+  const cards = within(room).getByRole('list', {name: 'Member assignments · Team ID: t'});
+  expect(within(cards).getAllByRole('listitem')).toHaveLength(3);
+  expect(within(cards).getByText('Assigned members in this room: Alex · ID: a; Alex · ID: b')).toBeTruthy();
+  expect(within(cards).getByText('Assigned members in this room: Unavailable employee · ID: missing')).toBeTruthy();
+  expect(within(cards).getByText('Recorded status: Result available · Unverified')).toBeTruthy();
+  expect(within(cards).getByText('Recorded status: Blocked')).toBeTruthy();
+  expect(screen.getByText('No saved work assigned to this room’s members.')).toBeTruthy();
+  expect(screen.getAllByRole('button', {name: /Open member assignment: Shared work · Task ID: w/})).toHaveLength(2);
+  const target = within(cards).getByRole('button', {name: 'Open member assignment: Shared work · Task ID: r · Team ID: t'});
+  target.focus(); await user.keyboard('{Enter}'); expect(open).toHaveBeenLastCalledWith('r');
+  view.rerender(<TeamRooms workspace={data} connected={false} selectedEmployee="" onOpenWork={open} />);
+  expect(within(room).getByText(/Stale member assignments/)).toBeTruthy();
+  expect(document.activeElement).toBe(target);
+  await user.keyboard(' '); expect(open).toHaveBeenLastCalledWith('r');
+  view.rerender(<TeamRooms workspace={{...data, work: []}} connected selectedEmployee="" onOpenWork={open} />);
+  expect(within(room).queryByRole('list')).toBeNull();
+  expect(within(room).getByText('No saved work assigned to this room’s members.')).toBeTruthy();
+  view.rerender(<TeamRooms workspace={null} connected={false} selectedEmployee="" onOpenWork={open} />);
+  expect(within(room).getByText(/Member assignments unavailable/)).toBeTruthy();
+  expect(within(room).queryByText('No saved work assigned to this room’s members.')).toBeNull();
 });
