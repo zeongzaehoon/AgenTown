@@ -675,10 +675,59 @@ These fields come from native immutable admission provenance joined by Run ID.
 Editing or disabling the Hook or Skill changes discovery but preserves the saved
 snapshot, including its source Run and outcome, across database/server reopen.
 History retains lease recovery and quality `unverified`. These reads authorize no
-execution; MCP Hook preview and execution are deferred to the next Task.
+execution; use the explicit Hook preview and consent tools below to authorize one follow-up.
 
 Deterministic coverage: `python -m pytest python/tests/test_mcp.py -k hook -q`
 in the installed product test environment. Tests use actual stdio processes and
 SQLite for empty/disabled/team discovery, typed schemas, both source outcomes,
 ordinary/legacy nulls, edits and reopen, with provider construction forbidden.
 Supervisor checks remain pending. Live provider calls are skipped, not passed.
+
+
+## Explicit employee Hook follow-up v1
+
+With `agentown-mcp --database PATH`, use `list_hooks_v1` to discover saved
+configuration and `get_work_history_v1` to inspect the Task's latest attempt.
+The Task must have exactly one assigned employee, a latest terminal attempt,
+and an enabled employee Hook whose event matches that attempt (`run_completed`
+for reported success or `run_failed` for failure), referencing an enabled Skill.
+Save configuration through the existing product configuration screen or CLI.
+Normal server provider configuration is required only for execution.
+
+Send these MCP tool calls through a connected client (replace the IDs and model):
+
+```json
+{"name":"preview_hook_work_v1","arguments":{"task_id":"TASK_UUID","hook_id":"HOOK_UUID"}}
+```
+
+Review the returned `input`, `instructions`, employee, Hook and Skill identities,
+`event`, `source_run_id`, `source_outcome`, `preview_id` and `expected_runs` with
+the user. Input is composed by Rust from saved work and Skill instructions;
+the client cannot override it. Only after explicit consent, send:
+
+```json
+{"name":"execute_hook_work_v1","arguments":{"task_id":"TASK_UUID","preview_id":"RETURNED_PREVIEW_ID","expected_runs":1,"provider":"anthropic","model":"CONFIGURED_MODEL","declared_source":"codex"}}
+```
+
+Copy `expected_runs` from the preview rather than assuming the example's value.
+Preview persists a single-use record, so its annotations are non-read-only and
+non-idempotent, with `openWorldHint: false`; it never constructs or dispatches a
+provider. Execution is non-read-only, non-idempotent and `openWorldHint: true`:
+it may incur provider charges. Neither tool activates automatic Hook dispatch
+or Loops. Each follow-up needs separate preview and explicit consent.
+
+`declared_source` is untrusted caller metadata, never authentication or authority.
+Rust bounds it to 80 UTF-8 bytes, rejects blank/control/known-secret values, and
+commits it with the admitted Run, Hook provenance and consumed preview in one
+transaction. Existing native callers may omit it. `get_work_history_v1` retains
+caller and immutable Hook/source snapshots after success, provider failure and
+reopening the database; quality remains unverified.
+
+Disabled/unmatched Hooks, changed configuration (even changed back), wrong Task,
+stale source/count and consumed previews are rejected before provider dispatch.
+Concurrent consent admits at most one follow-up. After an error or uncertain
+response, inspect history first; obtain a fresh preview and renewed explicit
+consent before retrying. Provider failure is a recorded attempt, not reusable
+consent. Deterministic MCP/native fixtures require no credentials. Live provider
+calls remain skipped under the user policy; live behavior and result quality
+are unverified.

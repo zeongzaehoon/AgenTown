@@ -106,6 +106,26 @@ class HookProvenance(Record):
     admitted_at: int
 
 
+class HookPreview(Record):
+    schema_version: Literal[1] = 1
+    preview_id: str
+    task_id: UUID
+    hook_id: UUID
+    hook_name: str
+    hook_enabled: Literal[True]
+    target_kind: Literal["agent"]
+    agent_id: UUID
+    event: Literal["run_completed", "run_failed"]
+    source_run_id: UUID
+    source_outcome: Literal["reported_success", "failure"]
+    skill_id: UUID
+    skill_name: str
+    skill_enabled: Literal[True]
+    instructions: str
+    input: str
+    expected_runs: int
+
+
 class SkillPreview(Record):
     schema_version: Literal[1] = 1
     preview_id: str
@@ -245,6 +265,42 @@ def create_server(database: str, *, provider_factory=None, auth=None) -> FastMCP
         except Exception:
             raise ToolError("Provider configuration unavailable; configure the server environment.") from None
         row = query(_native.start_skill_execution, task_id, preview_id, provider,
+                    model, expected_runs, runtime_secrets(), declared_source)
+        try:
+            return Execution(**await finish_text(database, row, adapter))
+        except Exception:
+            raise ToolError("Execution could not be finalized; inspect persisted history before retrying.") from None
+
+    @server.tool(annotations=mutations)
+    def preview_hook_work_v1(task_id: str, hook_id: str) -> HookPreview:
+        """Preview Rust-composed saved work and one eligible employee Hook against the latest terminal attempt without provider I/O.
+
+        Persists an opaque single-use consent preview. Show input to the user before
+        explicitly executing; previewing alone never authorizes provider dispatch.
+        """
+        safe_text(task_id, hook_id)
+        return HookPreview(**query(_native.preview_hook, task_id, hook_id, runtime_secrets()))
+
+    @server.tool(annotations=execution_annotations)
+    async def execute_hook_work_v1(
+        task_id: str, preview_id: str,
+        provider: Literal["anthropic", "openai", "bedrock", "xai"], model: str,
+        declared_source: Annotated[str, Field(min_length=1, max_length=80)],
+        expected_runs: Annotated[int, Field(ge=0)],
+    ) -> Execution:
+        """Explicitly authorize one preview. COSTLY: may charge the configured provider.
+
+        Non-idempotent. Every retry needs a fresh preview and explicit user consent
+        to its composed input and expected_runs. Caller metadata is untrusted;
+        credentials come only from server configuration. No client instructions.
+        Does not activate automatic Hook dispatch or Loops.
+        """
+        safe_text(task_id, preview_id, model, declared_source)
+        try:
+            adapter = provider_factory(model, provider)
+        except Exception:
+            raise ToolError("Provider configuration unavailable; configure the server environment.") from None
+        row = query(_native.start_hook_execution, task_id, preview_id, provider,
                     model, expected_runs, runtime_secrets(), declared_source)
         try:
             return Execution(**await finish_text(database, row, adapter))

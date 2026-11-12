@@ -92,7 +92,8 @@ async def discover(client):
     assert set(tools) == {"list_agents", "get_agent", "list_tasks", "get_task",
                           "create_employee_v1", "save_text_work_v1",
                           "execute_text_work_v1", "get_work_history_v1", "list_skills_v1",
-                          "preview_skill_work_v1", "execute_skill_work_v1", "list_hooks_v1"}
+                          "preview_skill_work_v1", "execute_skill_work_v1", "list_hooks_v1",
+                          "preview_hook_work_v1", "execute_hook_work_v1"}
     for name, tool in tools.items():
         assert tool.annotations.readOnlyHint == (name in {
             "list_agents", "get_agent", "list_tasks", "get_task", "list_skills_v1", "list_hooks_v1"})
@@ -499,8 +500,6 @@ async def test_skill_consent_protocol_and_dispatch_count(cli, tmp_path, server_p
         tools = await discover(client)
         assert await call(client, tools, "get_work_history_v1", {"task_id": work["id"]}) == history
         assert count() == 3
-
-
 @pytest.mark.anyio
 @pytest.mark.parametrize("failed,event,outcome", [
     (False, "run_completed", "reported_success"), (True, "run_failed", "failure"),
@@ -575,3 +574,128 @@ async def test_hook_discovery_and_immutable_history(
             "schema_version": 1, "hooks": sorted([edited, disabled], key=lambda r: r["id"])}
         assert await call(client, tools, "get_work_history_v1", {"task_id": work}) == history
     assert not Path(db + ".dispatches").exists()
+
+
+@pytest.mark.anyio
+async def test_hook_consent_protocol_and_dispatch_count(cli, tmp_path, server_processes):
+    from llm_engine import _native
+
+    cli("agent", "list")
+    database = tmp_path / "product.sqlite"
+    db = str(database)
+    employee = cli("agent", "create", "Writer")
+    work = cli("task", "create", "Saved work")
+    other = cli("task", "create", "Other work")
+    for item in (work, other):
+        cli("task", "assign", item["id"], employee["id"])
+    skill = _native.create_skill(db, "Concise", "Use one sentence.")
+    _native.set_skill_enabled(db, skill["id"], True)
+    hook = _native.create_hook(db, "Follow up", skill["id"], "agent", employee["id"], "run_completed")
+    _native.set_hook_enabled(db, hook["id"], True)
+    source = _native.start_web_execution(db, work["id"], "fixture", "fixture", 0)
+    _native.finish_execution(db, source[0], "Source result", None)
+    preview_args = {"task_id": work["id"], "hook_id": hook["id"]}
+    dispatches = Path(db + ".dispatches")
+
+    def count():
+        return len(dispatches.read_text().splitlines()) if dispatches.exists() else 0
+
+    # A preview must work even when constructing a provider is forbidden.
+    async with fixture_session(database, forbid_provider=True) as client:
+        tools = await discover(client)
+        preview = await call(client, tools, "preview_hook_work_v1", preview_args)
+        assert preview["input"] == "Skill instructions:\nUse one sentence.\n\nWork:\nSaved work"
+        assert preview["expected_runs"] == 1
+        assert preview["source_run_id"] == source[0]
+        assert preview["event"] == "run_completed"
+        assert count() == 0
+
+    async with fixture_session(database) as client:
+        tools = await discover(client)
+        execute = tools["execute_hook_work_v1"]
+        assert not execute.annotations.readOnlyHint
+        assert not execute.annotations.idempotentHint
+        assert execute.annotations.openWorldHint
+        assert "COSTLY" in execute.description
+        assert not tools["preview_hook_work_v1"].annotations.openWorldHint
+        assert set(execute.inputSchema["properties"]) == {
+            "task_id", "preview_id", "expected_runs", "provider", "model", "declared_source"}
+        args = {"task_id": work["id"], "preview_id": preview["preview_id"],
+                "expected_runs": 1, "provider": "anthropic", "model": "fixture",
+                "declared_source": "codex"}
+
+        async def reject(**changes):
+            before = count()
+            assert (await client.call_tool("execute_hook_work_v1", {**args, **changes})).isError
+            assert count() == before
+
+        await reject(task_id=other["id"])
+        await reject(expected_runs=0)
+        await reject(declared_source="é" * 41)
+        await reject(declared_source="bad\nsource")
+        await reject(declared_source=" ")
+        await reject(preview_id="not-a-preview")
+        _native.update_skill(db, skill["id"], "Concise", "Changed instructions.")
+        await reject()
+        preview = await call(client, tools, "preview_hook_work_v1", preview_args)
+        args["preview_id"] = preview["preview_id"]
+        _native.set_skill_enabled(db, skill["id"], False)
+        await reject()
+        assert (await client.call_tool("preview_hook_work_v1", preview_args)).isError
+        _native.set_skill_enabled(db, skill["id"], True)
+        await reject()  # re-enabling must not resurrect consent
+        preview = await call(client, tools, "preview_hook_work_v1", preview_args)
+        args["preview_id"] = preview["preview_id"]
+        _native.set_hook_enabled(db, hook["id"], False)
+        await reject()
+        assert (await client.call_tool("preview_hook_work_v1", preview_args)).isError
+        _native.set_hook_enabled(db, hook["id"], True)
+        await reject()
+        preview = await call(client, tools, "preview_hook_work_v1", preview_args)
+        args["preview_id"] = preview["preview_id"]
+        first = await call(client, tools, "execute_hook_work_v1", args)
+        assert first["output"] == "Fixture result: " + preview["input"]
+        assert count() == 1
+        await reject()  # consumed
+        await reject(expected_runs=0)
+        stale = await call(client, tools, "preview_hook_work_v1", preview_args)
+        fresh = await call(client, tools, "preview_hook_work_v1", preview_args)
+        args.update(preview_id=fresh["preview_id"], expected_runs=2, model="failure",
+                    declared_source="cursor")
+        failure = await call(client, tools, "execute_hook_work_v1", args)
+        assert failure["error"] == "provider_error"
+        assert count() == 2
+        await reject(preview_id=stale["preview_id"])
+        # Failed source now requires a matching failure Hook, without automatic dispatch.
+        assert (await client.call_tool("preview_hook_work_v1", preview_args)).isError
+        _native.update_hook(db, hook["id"], "Follow up", skill["id"], "agent", employee["id"], "run_failed")
+        fresh = await call(client, tools, "preview_hook_work_v1", preview_args)
+        args.update(preview_id=fresh["preview_id"], expected_runs=3, model="slow")
+        # Two actual stdio server processes race the same persisted consent.
+        async with fixture_session(database) as second:
+            results = []
+
+            async def execute_once(connection):
+                results.append(await connection.call_tool("execute_hook_work_v1", args))
+
+            async with anyio.create_task_group() as group:
+                group.start_soon(execute_once, client)
+                group.start_soon(execute_once, second)
+            assert sum(not result.isError for result in results) == 1
+        assert count() == 3
+        history = await call(client, tools, "get_work_history_v1", {"task_id": work["id"]})
+        assert len(history["attempts"]) == 4
+        attempts = {row["id"]: row for row in history["attempts"]}
+        assert attempts[str(first["run_id"])]["declared_source"] == "codex"
+        assert attempts[str(failure["run_id"])]["declared_source"] == "cursor"
+        assert attempts[str(first["run_id"])]["hook"]["input"] == first["input"]
+        assert attempts[str(failure["run_id"])]["hook"]["input"] == failure["input"]
+        assert attempts[source[0]]["hook"] is None
+        assert all(row["hook"]["hook_id"] == hook["id"]
+                   for row in history["attempts"] if row["id"] != source[0])
+        _native.update_skill(db, skill["id"], "Later edit", "Later instructions.")
+        _native.set_skill_enabled(db, skill["id"], False)
+    async with fixture_session(database, forbid_provider=True) as client:
+        tools = await discover(client)
+        assert await call(client, tools, "get_work_history_v1", {"task_id": work["id"]}) == history
+        assert count() == 3
