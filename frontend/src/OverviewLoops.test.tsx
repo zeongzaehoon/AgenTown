@@ -63,7 +63,8 @@ test('unavailable initial inspection, absent linked IDs and late response cleanu
   await act(async () => { await vi.advanceTimersByTimeAsync(800); });
   expect(screen.getByText(/Unavailable employee/)).toBeTruthy();
   expect(screen.getByText(/Linked work is unavailable/)).toBeTruthy();
-  expect(screen.queryByRole('button')).toBeNull();
+  expect(screen.queryByRole('button', {name: /Open work:/})).toBeNull();
+  expect(screen.getByRole('button', {name: 'Stop Loop s from overview'})).toBeTruthy();
   view.unmount();
   let signal: AbortSignal | undefined;
   let resolve!: (value: Response) => void;
@@ -82,6 +83,10 @@ test('App linked-work navigation clears filters explicitly, preserves drafts and
   vi.useFakeTimers();
   const { App } = await import('./App');
   const fetcher = vi.fn(async (path: string, init?: RequestInit) => {
+    if (path === '/api/loops/v1/stop') {
+      expect(init?.method).toBe('POST'); expect(JSON.parse(init?.body as string)).toEqual({session_id: 's'});
+      return new Response('{}');
+    }
     if (path === '/api/state') return new Response(JSON.stringify(workspace));
     expect(init?.method).toBe('GET');
     expect(init?.body).toBeUndefined();
@@ -95,6 +100,12 @@ test('App linked-work navigation clears filters explicitly, preserves drafts and
   render(<App />);
   await act(async () => {});
   fireEvent.change(screen.getByLabelText('What would you like help with?'), {target: {value: 'Keep my draft'}});
+  const stop = screen.getByRole('button', {name: 'Stop Loop s from overview'});
+  stop.focus();
+  await act(async () => { fireEvent.click(stop); fireEvent.click(stop); });
+  expect(document.activeElement).toBe(stop);
+  expect((screen.getByLabelText('What would you like help with?') as HTMLTextAreaElement).value).toBe('Keep my draft');
+  expect(fetcher.mock.calls.filter(([path]) => path === '/api/loops/v1/stop')).toHaveLength(1);
   fireEvent.change(screen.getByLabelText('Search saved work'), {target: {value: 'hidden'}});
   await act(async () => { await vi.advanceTimersByTimeAsync(800); });
   expect((screen.getByLabelText('Search saved work') as HTMLInputElement).value).toBe('hidden');
@@ -119,9 +130,103 @@ test('competing owner remains connected for inspection and navigation with unver
   render(<OverviewLoops workspace={workspace} onOpenWork={open} />);
   const button = await screen.findByRole('button', {name: /Open work:/});
   expect(screen.getByText('Showing recorded Loop sessions.')).toBeTruthy();
-  expect(screen.getByText(/another server owns execution/)).toBeTruthy();
+  expect(screen.getByLabelText('Overview Loop authority').textContent).toContain('another server owns execution');
   expect(screen.getByText(/Caller-declared source \(unverified\): claude-code/)).toBeTruthy();
   fireEvent.click(button);
   expect(open).toHaveBeenCalledWith('t');
   expect(fetcher).toHaveBeenCalledTimes(1);
+});
+
+
+test('explicit stop without linked work ignores a pre-stop poll and requires post-stop inspection', async () => {
+  vi.useFakeTimers();
+  let resolvePoll!: (response: Response) => void;
+  let resolveStop!: (response: Response) => void;
+  let reads = 0;
+  const fetcher = vi.fn((path: string, init?: RequestInit) => {
+    if (path.endsWith('/stop')) {
+      expect(init?.method).toBe('POST');
+      expect(JSON.parse(init?.body as string)).toEqual({session_id: 's'});
+      return new Promise<Response>(resolve => { resolveStop = resolve; });
+    }
+    expect(init?.method).toBe('GET');
+    ++reads;
+    if (reads === 2) return new Promise<Response>(resolve => { resolvePoll = resolve; });
+    return Promise.resolve(new Response(JSON.stringify(initial())));
+  });
+  vi.stubGlobal('fetch', fetcher);
+  render(<OverviewLoops workspace={null} onOpenWork={vi.fn()} />);
+  await act(async () => {});
+  const button = screen.getByRole('button', {name: 'Stop Loop s from overview'});
+  button.focus();
+  await act(async () => { await vi.advanceTimersByTimeAsync(800); });
+  fireEvent.click(button); fireEvent.click(button);
+  await act(async () => { resolvePoll(new Response(JSON.stringify(initial()))); });
+  expect(button.getAttribute('aria-disabled')).toBe('true');
+  await act(async () => { await vi.advanceTimersByTimeAsync(1600); });
+  expect(reads).toBe(2);
+  await act(async () => { resolveStop(new Response('{}')); });
+  expect(document.activeElement).toBe(button);
+  expect(button.getAttribute('aria-disabled')).toBe('true');
+  expect(screen.getByLabelText('Overview Loop stop outcome').textContent).toContain('Local cancellation requested');
+  fireEvent.click(button);
+  expect(fetcher.mock.calls.filter(([path]) => path.endsWith('/stop'))).toHaveLength(1);
+  await act(async () => { fireEvent.click(screen.getByRole('button', {name: 'Inspect Loop sessions again'})); });
+  expect(button.getAttribute('aria-disabled')).toBe('false');
+  expect(fetcher.mock.calls.filter(([path]) => path.endsWith('/stop'))).toHaveLength(1);
+});
+
+test.each(['race', 'ambiguous'])('%s stop failure never retries and refreshes authority before consent', async kind => {
+  vi.useFakeTimers();
+  let inspection = initial();
+  const fetcher = vi.fn(async (path: string) => {
+    if (!path.endsWith('/stop')) return new Response(JSON.stringify(inspection));
+    if (kind === 'ambiguous') throw new Error('offline');
+    inspection = {...initial(), control: {state: 'competing_owner', can_control: false, message: ''}};
+    return new Response(JSON.stringify({error: 'Ownership changed', control: inspection.control}), {status: 409});
+  });
+  vi.stubGlobal('fetch', fetcher);
+  render(<OverviewLoops workspace={workspace} onOpenWork={vi.fn()} />);
+  await act(async () => {});
+  const button = screen.getByRole('button', {name: 'Stop Loop s from overview'});
+  await act(async () => { fireEvent.click(button); });
+  expect(screen.getByLabelText('Overview Loop stop outcome').textContent).toContain('not confirmed');
+  expect(button.getAttribute('aria-disabled')).toBe('true');
+  fireEvent.click(button);
+  await act(async () => { await vi.advanceTimersByTimeAsync(1600); });
+  expect(button.getAttribute('aria-disabled')).toBe(kind === 'race' ? 'true' : 'false');
+  expect(fetcher.mock.calls.filter(([path]) => path.endsWith('/stop'))).toHaveLength(1);
+});
+
+test('terminal, ungranted, stale and unavailable inspection prevents stop', async () => {
+  vi.useFakeTimers();
+  let value = initial();
+  let fail = false;
+  let hang = false;
+  const fetcher = vi.fn(async (_path: string) => {
+    if (fail) throw new Error('offline');
+    if (hang) return new Promise<Response>(() => {});
+    return new Response(JSON.stringify(value));
+  });
+  vi.stubGlobal('fetch', fetcher);
+  render(<OverviewLoops workspace={workspace} onOpenWork={vi.fn()} />);
+  await act(async () => {});
+  const button = screen.getByRole('button', {name: 'Stop Loop s from overview'});
+  for (const state of ['complete', 'stopped', 'failed', 'expired', 'restarted', 'stale']) {
+    value = {...initial(), sessions: [{...session, state}]};
+    await act(async () => { await vi.advanceTimersByTimeAsync(800); });
+    expect(button.getAttribute('aria-disabled')).toBe('true'); fireEvent.click(button);
+  }
+  value = {...initial(), control: {state: 'available', can_control: false, message: ''}};
+  await act(async () => { await vi.advanceTimersByTimeAsync(800); });
+  expect(button.getAttribute('aria-disabled')).toBe('true'); fireEvent.click(button);
+  fail = true;
+  await act(async () => { await vi.advanceTimersByTimeAsync(800); });
+  expect(button.getAttribute('aria-disabled')).toBe('true'); fireEvent.click(button);
+  fail = false; value = initial();
+  await act(async () => { await vi.advanceTimersByTimeAsync(800); });
+  hang = true;
+  await act(async () => { await vi.advanceTimersByTimeAsync(2400); });
+  expect(button.getAttribute('aria-disabled')).toBe('true'); fireEvent.click(button);
+  expect(fetcher.mock.calls.every(call => !String(call[0]).endsWith('/stop'))).toBe(true);
 });

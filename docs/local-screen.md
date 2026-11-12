@@ -1352,3 +1352,59 @@ npx vitest run src/App.test.tsx -t 'caller-declared attribution'
 Browser interaction and consolidated checks for this change are pending supervisor
 verification. Live provider calls are skipped under the current user policy, not
 passed.
+
+### Stop from Company overview (C36-T1)
+
+Build/package the updated frontend using the steps above, then launch:
+
+```sh
+agentown-web --database /path/to/product.db --port 8765
+```
+
+Open http://127.0.0.1:8765 and Company overview. For a credential-free exercise,
+use the existing C29/C30 browser-server fixture with a fresh product database,
+create saved work and an enabled Loop (two attempts, 60-second interval), then
+preview and explicitly authorize it from saved work. Fixture responses are test
+results, not live LLM evidence. Return to Company overview while it is active.
+
+1. Enter an unsaved work draft. In **Bounded Loop activity**, Tab to **Stop Loop
+   <session ID> from overview** and press Enter once. The action names the exact
+   session and posts only `{session_id}` to `/api/loops/v1/stop`. Linked-work
+   navigation and even loaded linked work are unnecessary for stopping.
+2. During submission, repeated clicks/Enter cannot submit another request.
+   The button remains focusable with `aria-disabled` so focus is retained while
+   its explanation changes. The draft stays intact. The status announcement
+   reports the request outcome without claiming confirmed remote cancellation.
+3. Inspection is polled every 800 ms. Data older than 2.4 seconds, failed or
+   unavailable inspection, terminal sessions and missing local authority prevent
+   stopping. Read the adjacent explanation and ownership recovery instructions.
+   **Inspect Loop sessions again** explicitly refreshes without mutating anything.
+4. If ownership changes or the connection fails during Stop, inspect again before
+   another explicit attempt. A response already in flight before Stop cannot
+   restore eligibility. A successful inspection begun after the request settles
+   is required. Polling and navigation never automatically retry Stop.
+5. After local cancellation is requested, inspect the recorded session/attempts.
+   Remote completion may remain unknown. A terminal session cannot be stopped.
+   A competing owner requires stopping through its MCP/web server or shutting
+   that owner down before inspecting and explicitly retrying locally.
+
+Deterministic fixture evidence is in `frontend/src/OverviewLoops.test.tsx`:
+component cases cover stale in-flight inspection, duplicate clicks, absent linked
+work, terminal/stale/unavailable/ungranted control, competing ownership and
+ambiguous failures. Its App case preserves draft and keyboard focus across Stop,
+then navigates to saved work without another mutation. To run in a prepared tree:
+
+```sh
+cd frontend
+npx tsc --noEmit
+npx vitest run src/OverviewLoops.test.tsx
+```
+
+Implementation checks used a temporary copy of frontend sources and the existing
+repository dependency tree because this isolated workspace has no node_modules.
+TypeScript passed. The first scoped test run found an ambiguous ownership-text
+selector (7 passed, 1 failed); it was changed to select the named authority status.
+The final scoped run passed all 8 tests with `--configLoader runner` (avoiding
+a bundled-config cache write into the read-only shared dependency tree). Browser
+interaction and the applicable consolidated supervisor verification profile
+remain pending this handoff. Live LLM calls are skipped, not passed.

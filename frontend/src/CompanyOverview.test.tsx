@@ -35,7 +35,8 @@ test('mixed recorded categories count by ID, deduplicate assignments and retain 
   expect(cards[2].textContent).toContain('No assigned work.');
   expect(screen.getByText(/Execution setup needed/)).toBeTruthy();
   expect(screen.getByText(/Shared work appears for each employee/)).toBeTruthy();
-  expect(screen.getAllByRole('button')).toHaveLength(2);
+  expect(screen.getAllByRole('button', {name: /^Open work:/})).toHaveLength(2);
+  expect(screen.getByRole('button', {name: 'Inspect Loop sessions again'})).toBeTruthy();
   fireEvent.click(screen.getByRole('button', {name: /Open work: unassigned/}));
   expect(open).toHaveBeenCalledWith('unassigned');
 });
