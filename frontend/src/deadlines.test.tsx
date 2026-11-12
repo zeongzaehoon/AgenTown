@@ -53,13 +53,20 @@ for (const path of ['/api/state', '/api/employees', '/api/work', '/api/work/w/ex
       expect((screen.getByLabelText('Employee name') as HTMLInputElement).value).toBe('Unsaved employee');
       expect(screen.getByText('Original saved work', {selector: 'pre'})).toBeTruthy();
       if (path !== '/api/state') {
-        expect(button(target).disabled).toBe(path.endsWith('/execute'));
+        expect(button(target).disabled).toBe(true);
         expect(document.body.textContent).toContain('does not prove provider cancellation');
         expect(calls.filter(url => url === path)).toHaveLength(1);
       }
       stall = false;
       fireEvent.click(button('Refresh connection')); await flush();
       expect(document.querySelector('#connection')!.textContent).toContain('Connected');
+      if (path === '/api/employees' || path === '/api/work') {
+        expect(button(target).disabled).toBe(true);
+        expect(button('I inspected employees and saved work').disabled).toBe(false);
+        expect(calls.filter(url => url === path)).toHaveLength(1);
+        fireEvent.click(button('I inspected employees and saved work'));
+        expect(button(target).disabled).toBe(false);
+      }
       await act(async () => {
         for (const resolve of late) resolve((phase === 'fetch' ? new Response('{"id":"late","employees":[],"work":[]}') : {id: 'late', employees: [], work: []}) as never);
       });
@@ -167,6 +174,7 @@ for (const path of ['/api/work', '/api/work/w/execute']) {
     expect(document.querySelector('#connection')!.textContent).toContain('timed out');
     stalled = false;
     fireEvent.click(button('Refresh connection')); await flush();
+    if (path === '/api/work') fireEvent.click(button('I inspected employees and saved work'));
     expect(button(target).disabled).toBe(false);
     expect(calls.filter(url => url !== '/api/state')).toEqual([path]);
   });

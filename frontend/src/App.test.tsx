@@ -630,6 +630,15 @@ test('loaded draft stays protected during pending and rejected saving until expl
   expect(draftInput().value).toBe(text);
   expectLeaveProtection(true);
   fireEvent.click(screen.getByRole('button', {name: 'Save work'}));
+  expect(submissions).toHaveLength(1); // Uncertain creation cannot be retried before inspection.
+  fireEvent.click(screen.getByRole('button', {name: 'Refresh connection'}));
+  const inspected = screen.getByRole('button', {name: 'I inspected employees and saved work'}) as HTMLButtonElement;
+  await waitFor(() => expect(inspected.disabled).toBe(false));
+  expect(draftInput().value).toBe(text);
+  expectLeaveProtection(true);
+  fireEvent.click(inspected);
+  fireEvent.click(screen.getByRole('button', {name: 'Save work'}));
+  expect(submissions).toHaveLength(2);
   expectLeaveProtection(true);
   await act(async () => settle(new Response(JSON.stringify({id: 'saved'}))));
   expect(draftInput().value).toBe('');

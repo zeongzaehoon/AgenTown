@@ -2005,3 +2005,52 @@ retained drafts and mutation counts before and after explicit recovery.
 This implementation workspace has no frontend test dependencies; these checks
 and browser validation are pending supervisor verification. Live LLM validation
 is skipped, not passed.
+
+### Employee and work creation recovery (C54-T1)
+
+Use an **existing, initialized deterministic fixture database** containing employees
+and saved work. From the prepared product environment, launch:
+
+```sh
+agentown-web --database /absolute/path/to/existing-fixture.sqlite3 --port 8765
+```
+
+Open http://127.0.0.1:8765. Creation, saving and refresh require no credentials;
+do not execute work or call a live provider for this reproduction.
+
+1. Select saved history, choose an employee, and enter both an employee-name draft
+   and work-request draft. Override the response to POST `/api/employees` or
+   `/api/work` with `null`, `[]`, `{}`, `{"id":1}`, `{"id":true}`,
+   `{"id":{}}`, `{"id":""}` or `{"id":"  "}`. Also try unreadable JSON
+   and a response delayed beyond 15 seconds. The request may already have created
+   a record, so inspect the actual fixture database through the screen.
+2. Explicitly submit the affected form. Both creation buttons become blocked after
+   uncertainty. Names, request text, assigned employee and selected history remain.
+   A valid response requires an object with a nonblank string ID. Rapid double
+   clicks issue one mutation. Edit the employee name during a delayed valid
+   employee response: that newer name must remain after success.
+3. Allow polling to run. Recovery remains visible and requests are never replayed.
+   Restore valid responses and use Tab/Enter to activate **Refresh connection**.
+   A failed refresh cannot enable inspection confirmation. A successful refresh
+   reads current state without resubmitting either creation request.
+4. Inspect the employee list and saved work for a possible already-created record.
+   Activate **I inspected employees and saved work** with Tab/Enter. Only then
+   decide whether a new explicit submission is necessary. Confirmation itself
+   issues no mutation. Valid new submissions work normally and double clicks
+   still produce only one request. Use Network to verify counts for each endpoint.
+
+Focused checks, when frontend dependencies are available:
+
+```sh
+cd frontend
+npm exec -- tsc --noEmit
+npm exec -- vitest run src/creation-recovery.test.tsx src/deadlines.test.tsx
+```
+
+The interaction matrix covers malformed/unreadable responses for both endpoints,
+retained drafts/selection, polling, failed and keyboard recovery, explicit new
+submission counts, and in-flight employee-name edits. Deadline tests cover stalled
+headers/body, late responses and retained drafts for both creation endpoints.
+This implementation workspace lacks frontend dependencies and test executables;
+these checks and browser validation are pending supervisor verification. Live
+provider validation is skipped, not passed.

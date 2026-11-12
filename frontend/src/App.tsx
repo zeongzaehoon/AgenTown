@@ -95,12 +95,23 @@ function AttemptResult({ attempt, work, number, latest }: {attempt: Attempt; wor
   </details>;
 }
 
+function creationId(value: unknown): string {
+  if (!value || typeof value !== 'object' || Array.isArray(value) ||
+      !('id' in value) || typeof value.id !== 'string' || !value.id.trim()) {
+    throw new Error('Invalid creation response.');
+  }
+  return value.id;
+}
+
 export function App() {
   const [state, setState] = useState<Workspace | null>(null);
   const [connected, setConnected] = useState(false);
   const [connectionError, setConnectionError] = useState('');
   const [notice, setNotice] = useState('');
   const [inspectionRequired, setInspectionRequired] = useState(false);
+  const [creationRecovery, setCreationRecovery] = useState<'refresh' | 'inspect' | null>(null);
+  const creationBlocked = useRef(false);
+  const recoveryVersion = useRef(0);
   const [selected, setSelected] = useState('');
   const [search, setSearch] = useState('');
   const [clientRequest, setClientRequest] = useState<OpenClientRequest | null>(null);
@@ -207,7 +218,7 @@ export function App() {
   }
 
   async function mutate(key: string, action: (signal: AbortSignal) => Promise<void>) {
-    if (!connected || locks.current.has(key)) return;
+    if (!connected || locks.current.has(key) || ((key === 'employee' || key === 'work') && creationBlocked.current)) return;
     locks.current.add(key); setBusy(new Set(locks.current)); setNotice('');
     const controller = new AbortController();
     mutations.current.add(controller);
@@ -215,7 +226,11 @@ export function App() {
     catch (error) {
       if (controller.signal.aborted) return;
       if (key === 'work' && error instanceof WorkInputError) { setServerInputError(error.message); pendingFocus.current = 'input'; }
-      else { setNotice((error as Error).message); if (key !== 'employee' && key !== 'work') setInspectionRequired(true); }
+      else if (key === 'employee' || key === 'work') {
+        creationBlocked.current = true; ++recoveryVersion.current;
+        setCreationRecovery('refresh');
+        setNotice((error as Error).message);
+      } else { setNotice((error as Error).message); setInspectionRequired(true); }
     }
     finally {
       // Always inspect server state after uncertain delivery, never replay a request.
@@ -272,7 +287,21 @@ export function App() {
     <main id="main">
       <p id="connection" role="status" aria-live="polite">{connected ? `Connected · ${work ? workStatus(work) : 'Ready for your first work'}` : connectionError ? `${state ? 'Disconnected — displayed history may be out of date.' : 'Workspace unavailable.'} ${connectionError}` : 'Connecting to your workspace…'}</p>
       <p id="configuration">{state && (state.configuration || `Provider: ${state.provider} · Model: ${state.model} · ${['anthropic', 'openai', 'bedrock', 'xai'].includes(state.provider) ? 'Real provider requests' : 'Test responses — not live validation'}`)}</p>
-      <p id="notice" role="alert">{notice}</p><button id="refresh" type="button" onClick={() => { void refresh().then(ok => { if (ok) setInspectionRequired(false); }); }}>Refresh connection</button>
+      <p id="notice" role="alert">{notice}</p><button id="refresh" type="button" onClick={() => {
+        const version = recoveryVersion.current;
+        void refresh().then(ok => {
+          if (ok) {
+            setInspectionRequired(false);
+            if (creationBlocked.current && version === recoveryVersion.current && !locks.current.has('employee') && !locks.current.has('work')) setCreationRecovery('inspect');
+          }
+        });
+      }}>Refresh connection</button>
+      {creationRecovery && <section aria-label="Creation recovery">
+        <p role="alert">Creation may already have occurred. Your drafts and previous selection are retained. Choose Refresh connection, then inspect employees and saved work before another submission. Polling does not clear this state; nothing is automatically resent.</p>
+        <button type="button" disabled={creationRecovery !== 'inspect' || !connected} onClick={() => {
+          creationBlocked.current = false; setCreationRecovery(null); setNotice('Inspection confirmed. Review your drafts before explicitly submitting again.');
+        }}>I inspected employees and saved work</button>
+      </section>}
       <CompanyOverview onSelectTeamMember={id => { setViewEmployee(id); setSearch(''); setOutcome('all'); searchRef.current?.focus(); }} onOpenTeam={id => setTeamRequest({id})} onOpenClient={id => setClientRequest({id})} onOpenSkill={id => setConfigurationRequest({kind: 'skills', id})} onOpenHook={id => setConfigurationRequest({kind: 'hooks', id})} onOpenLoop={id => setConfigurationRequest({kind: 'loops', id})} workspace={state} connected={connected} error={connectionError} selectedEmployee={viewEmployee} onSelectEmployee={setViewEmployee} onOpenWork={id => {
         setViewEmployee(''); setSearch(''); setOutcome('all'); setSelected(id); historyRef.current?.focus();
       }} />
@@ -283,17 +312,17 @@ export function App() {
         <p id="employees-empty" hidden={!!state?.employees.length}>No employees yet. Create your first one.</p>
         <ul id="employees">{state?.employees.map(e => <li key={e.id}>{e.name}</li>)}</ul>
         <form id="employee-form" onSubmit={event => {event.preventDefault(); void mutate('employee', async signal => {
-          const saved = await api<{id: string}>('/api/employees', {name}, signal);
+          const id = creationId(await api<unknown>('/api/employees', {name}, signal));
           if (signal.aborted) return;
-          setEmployee(saved.id); setName(previous => previous === name ? '' : previous); pendingFocus.current = 'input';
+          setEmployee(id); setName(previous => previous === name ? '' : previous); pendingFocus.current = 'input';
         });}}>
           <label htmlFor="name">Employee name</label><input id="name" name="name" required maxLength={200} autoComplete="off" value={name} onChange={e => setName(e.target.value)} />
-          <button disabled={!connected || busy.has('employee')}>Create employee</button>
+          <button disabled={!!creationRecovery || !connected || busy.has('employee')}>Create employee</button>
         </form></section>
         <section><h2>2. Give them work</h2><form id="work-form" onSubmit={event => {event.preventDefault(); if (!assignee || replacement) return; setInputTouched(true); if (workInputError(input, assignee)) { inputRef.current?.focus(); return; } void mutate('work', async signal => {
-          const saved = await api<{id: string}>('/api/work', {input, employee: assignee}, signal);
+          const id = creationId(await api<unknown>('/api/work', {input, employee: assignee}, signal));
           if (signal.aborted) return;
-          setSelected(saved.id); setInput(''); setInputTouched(false); setServerInputError(''); pendingFocus.current = 'execute';
+          setSelected(id); setInput(''); setInputTouched(false); setServerInputError(''); pendingFocus.current = 'execute';
         });}}>
           <label htmlFor="employee">Assign to</label><select id="employee" required disabled={busy.has('work')} value={assignee} onChange={e => { setEmployee(e.target.value); setServerInputError(''); }}><option value="">Select an employee</option>{state?.employees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}</select>
           <label htmlFor="input">What would you like help with?</label><p id="input-help">Save work creates separate work without executing it. Retry resends the original saved text, including when you have edited this draft.</p>
@@ -301,7 +330,7 @@ export function App() {
           <p id="input-unsaved" role="status" aria-live="polite">{hasUnsavedDraft ? 'Unsaved request. Save work or clear this text before leaving. Reloading or closing this page can lose your draft.' : ''}</p>
           <p id="input-limits">Enter nonblank text up to 100,000 UTF-8 bytes. Saving also has a 120,000-byte limit after text escaping. Shorten or split requests that exceed either limit; pasting keeps your full draft.</p>
           <p id="input-error" role="status" aria-live="polite">{inputError}</p>
-          <button disabled={!connected || busy.has('work') || !!replacement || !assignee}>Save work</button>
+          <button disabled={!!creationRecovery || !connected || busy.has('work') || !!replacement || !assignee}>Save work</button>
         </form><p role="status" aria-live="polite" aria-atomic="true">{draftNotice}</p></section></aside>
         <section id="employee-work" className="history"><h2>3. Work &amp; results</h2>
           <p id="empty" hidden={!!state?.work.length}>No work yet. Your saved work and results will appear here.</p>
