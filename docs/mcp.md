@@ -785,3 +785,88 @@ typed responses, saved limits, immutable previews, linked success/failure and
 active results, terminal states, reopen persistence and unchanged SQLite bytes.
 Supervisor consolidated verification remains pending. Live LLM calls are skipped
 under user policy, not passed.
+
+## Explicit bounded Loop execution v1
+
+Use the same `agentown-mcp --database /absolute/path/company.sqlite` entry point.
+The server environment supplies provider credentials; tool arguments never accept
+keys. Inspection and preview work without provider configuration. Save and enable
+a Loop and assign its Task to an employee in the product first.
+
+1. Call `list_loops_v1`, then `preview_loop_v1({"policy_id":"…"})`.
+   Preview persists opaque single-use consent but sends zero provider requests.
+2. Show the returned saved `input`, `max_iterations`, `interval_seconds` and
+   `expected_runs` to the user. Obtain explicit consent for those bounds and the
+   provider/model. Never infer consent from an enabled policy or tool discovery.
+3. Call `start_loop_v1` with `preview_id`, the preview's `expected_runs`,
+   `provider`, an explicit `model`, and `declared_source` (1–80 UTF-8 bytes).
+   Example arguments:
+   `{"preview_id":"…","expected_runs":0,"provider":"anthropic","model":"YOUR_MODEL","declared_source":"claude-desktop"}`.
+   This costly, non-idempotent action returns a session immediately. Caller source
+   is untrusted declared metadata, not authenticated identity; it is stored with
+   activation and survives reopening.
+4. Poll `inspect_loop_sessions_v1` at a modest interval (for example once a
+   second). Match `session_id`; inspect `admitted`, state, linked attempt IDs and
+   each execution's output/error. There is no estimated percentage. Provider
+   failures terminate the bounded session; quality remains `unverified`.
+5. Call `stop_loop_v1({"session_id":"…"})` through the owning server. Poll again
+   for the final attempt outcome. Stop is repeatable for that owner's sessions.
+
+Native Rust admission remains the sole authority for timing, iteration bounds,
+Task attempt counts, changed configuration and single-use consent. Stale or
+already consumed previews fail before another provider request. After uncertain
+transport responses, inspect history before obtaining fresh preview and explicit
+consent; never blindly retry activation. No input or limits supplied by a caller
+can replace the saved preview.
+
+One execution service owns a product database at a time. The web product takes
+ownership at startup; MCP takes it on the first execution operation. Discovery,
+preview and polling do not take ownership or recover another runtime's work.
+If web or another MCP server is the live owner, activation/stop from a competing
+service fails safely. It cannot recover, terminate or consume consent belonging
+to that live owner. Shut down the owning service before changing execution
+clients; this slice does not forward execution requests between clients.
+
+On normal stdio/HTTP server shutdown, the shared LoopService stops local sessions,
+cancels workers and waits for interrupted attempts to be persisted before
+releasing ownership. A new exclusive owner recovers abandoned active sessions as
+terminal history. Restart never automatically replays provider calls; running
+again requires a fresh preview and explicit consent. A forced process kill may
+leave an active record until a later exclusive owner recovers it. Read-only
+inspection deliberately does not recover it.
+
+Stop/shutdown prevents new admission and attempts local cancellation of an
+already admitted request. It cannot revoke an already sent remote request;
+remote completion and charges may remain unknown. Rust bounds admissions, not
+provider-side cancellation. A broken transport or killed process does not prove
+that a provider request was cancelled.
+
+Deterministic stdio transport tests in `python/tests/test_mcp.py` cover zero-dispatch
+preview, stale/duplicate consent, bounded success/failure, polling, stop, shutdown,
+reopen provenance and web/MCP ownership exclusion. In-process contract tests live
+in `python/tests/test_mcp_loop_transport.py`; service tests in
+`python/tests/test_loop_execution.py` and `python/tests/test_loop_service_ownership.py`
+cover admission and cancellation races and ownership release ordering. Run these
+in the product test environment after integrating/rebuilding native bindings:
+
+```sh
+python -m pytest python/tests/test_mcp.py -k 'loop or web_owner' -q
+python -m pytest python/tests/test_mcp_loop_transport.py python/tests/test_loop_execution.py python/tests/test_loop_service_ownership.py -q
+```
+
+Consolidated
+supervisor and browser verification are pending; live provider tests stay skipped.
+
+### Native integration boundary
+
+The Python service retains the native handle returned by
+`acquire_loop_execution_owner(database)` until its workers finish cancellation.
+`recover_loop_sessions(owner)`,
+`start_loop_session(owner, preview_id, expected_runs, provider, model, secrets=[], declared_source=None)`,
+`admit_loop_attempt(owner, session_id, secrets=[])` and
+`stop_loop_session(owner, session_id)` require that handle. Rust generates the
+runtime identity and validates session ownership inside native transitions.
+Acquisition excludes competing services/processes before recovery; failure leaves
+consent and sessions untouched. The handle has idempotent `close()`.
+Session records include nullable `declared_source` for historical records.
+There is no unsafe Python fallback if these native contracts are unavailable.

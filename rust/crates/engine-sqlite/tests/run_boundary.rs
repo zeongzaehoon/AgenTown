@@ -318,7 +318,7 @@ fn v2_migration_and_failure_after_run_ddl_preserve_every_existing_record() {
         assert_eq!(
             sql.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
                 .unwrap(),
-            9
+            10
         );
     }
 }

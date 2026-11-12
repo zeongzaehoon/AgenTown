@@ -81,8 +81,8 @@ fn domain_errors_roll_back_entire_batches() {
 #[test]
 fn unsupported_versions_and_foreign_databases_are_unchanged() {
     let dir = tempfile::tempdir().unwrap();
-    // Version 9 is the supported Loop schema; 10 is the next unknown version.
-    for version in [-1, 10, 999] {
+    // Version 10 supports Loop caller provenance; 11 is the next unknown version.
+    for version in [-1, 11, 999] {
         let path = dir.path().join(format!("v{version}.sqlite3"));
         let mut store = SqliteStore::open(&path).unwrap();
         store.transact(|c| c.create_agent("Retain me")).unwrap();
@@ -278,6 +278,6 @@ fn incremental_writes_preserve_references_and_skip_net_noops() {
     assert_eq!(
         sql.query_row("PRAGMA user_version", [], |r| r.get::<_, i32>(0))
             .unwrap(),
-        9
+        10
     );
 }

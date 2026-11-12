@@ -94,7 +94,8 @@ async def discover(client):
                           "execute_text_work_v1", "get_work_history_v1", "list_skills_v1",
                           "preview_skill_work_v1", "execute_skill_work_v1", "list_hooks_v1",
                           "preview_hook_work_v1", "execute_hook_work_v1",
-                          "list_loops_v1", "inspect_loop_sessions_v1"}
+                          "list_loops_v1", "inspect_loop_sessions_v1",
+                          "preview_loop_v1", "start_loop_v1", "stop_loop_v1"}
     for name, tool in tools.items():
         assert tool.annotations.readOnlyHint == (name in {
             "list_agents", "get_agent", "list_tasks", "get_task", "list_skills_v1", "list_hooks_v1",
@@ -728,8 +729,9 @@ async def test_loop_inspection_without_execution_side_effects(cli, tmp_path, ser
     disabled = _native.create_loop(db, "Disabled", work, 3, 120)
     enabled = _native.set_loop_enabled(db, policy["id"], True)
     preview = _native.preview_loop(db, policy["id"])
-    started = _native.start_loop_session(db, preview["preview_id"], 0,
-                                         "fixture", "fixture-model", "foreign-runtime")
+    owner = _native.acquire_loop_execution_owner(db)
+    started = _native.start_loop_session(owner, preview["preview_id"], 0,
+                                         "fixture", "fixture-model")
     sid = started["session_id"]
     before_admission = database.read_bytes()
     async with fixture_session(database, forbid_provider=True, inspect_only=True) as client:
@@ -739,18 +741,20 @@ async def test_loop_inspection_without_execution_side_effects(cli, tmp_path, ser
         assert await call(client, tools, "inspect_loop_sessions_v1") == {
             "schema_version": 1, "sessions": [started], "attempts": []}
     assert database.read_bytes() == before_admission
-    row = _native.admit_loop_attempt(db, sid, "foreign-runtime")
+    row = _native.admit_loop_attempt(owner, sid)
     if state in {"complete", "failed"}:
         _native.finish_execution(db, row[0], "Recorded output" if state == "complete" else None,
                                  "provider_error" if state == "failed" else None)
-        assert _native.admit_loop_attempt(db, sid, "foreign-runtime") is None
+        assert _native.admit_loop_attempt(owner, sid) is None
     elif state == "stopped":
-        _native.stop_loop_session(db, sid)
+        _native.stop_loop_session(owner, sid)
     elif state == "restarted":
-        _native.recover_loop_sessions(db, "replacement-runtime")
+        owner.close()
+        owner = _native.acquire_loop_execution_owner(db)
+        _native.recover_loop_sessions(owner)
     elif state == "stale":
         _native.update_loop(db, policy["id"], "Changed", work, 2, 120)
-        assert _native.admit_loop_attempt(db, sid, "foreign-runtime") is None
+        assert _native.admit_loop_attempt(owner, sid) is None
 
     # Subsequent configuration edits must never rewrite the saved preview.
     _native.update_loop(db, policy["id"], "Later name", work, 4, 180)
@@ -782,4 +786,116 @@ async def test_loop_inspection_without_execution_side_effects(cli, tmp_path, ser
             inspection = current
         assert database.read_bytes() == before
         assert _native.show_execution_read_only(db, row[0]) == expected_execution
+    owner.close()
     assert not Path(db + ".dispatches").exists()
+
+
+async def poll_loop(client, tools, sid, *, terminal=True):
+    with anyio.fail_after(5):
+        while True:
+            state = await call(client, tools, "inspect_loop_sessions_v1")
+            saved = next(s for s in state["sessions"] if s["session_id"] == sid)
+            ready = saved["state"] != "active" if terminal else bool(state["attempts"])
+            if ready:
+                return state
+            await anyio.sleep(0.01)
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("model,expected", [("fixture", "complete"), ("failure", "failed"),
+                                           ("slow", "stopped"), ("shutdown", "stopped")])
+async def test_loop_explicit_consent_progress_stop_shutdown(
+        cli, tmp_path, server_processes, model, expected):
+    from llm_engine import _native
+
+    cli("agent", "list")
+    database = tmp_path / "product.sqlite"
+    db = str(database)
+    employee = _native.create_agent(db, "Writer")[0]
+    work = _native.create_assigned_work(db, "Saved loop input", employee)[0]
+    policy = _native.create_loop(db, "Bounded", work, 1 if model == "fixture" else 2, 60)
+    _native.set_loop_enabled(db, policy["id"], True)
+    dispatch_log = Path(db + ".dispatches")
+    count = lambda: len(dispatch_log.read_text().splitlines()) if dispatch_log.exists() else 0
+    async with fixture_session(database) as client:
+        tools = await discover(client)
+        assert tools["preview_loop_v1"].annotations.openWorldHint is False
+        assert tools["start_loop_v1"].annotations.openWorldHint is True
+        assert tools["start_loop_v1"].annotations.idempotentHint is False
+        preview = await call(client, tools, "preview_loop_v1", {"policy_id": policy["id"]})
+        assert preview["input"] == "Saved loop input"
+        assert count() == 0
+        payload = {"preview_id": preview["preview_id"], "expected_runs": preview["expected_runs"],
+                   "provider": "anthropic", "model": "slow" if model == "shutdown" else model,
+                   "declared_source": "fixture-untrusted-caller"}
+        # Editing configuration invalidates saved consent before any dispatch.
+        _native.update_loop(db, policy["id"], "Updated", work, policy["max_iterations"], 60)
+        assert (await client.call_tool("start_loop_v1", payload)).isError
+        assert count() == 0
+        preview = await call(client, tools, "preview_loop_v1", {"policy_id": policy["id"]})
+        payload.update(preview_id=preview["preview_id"], expected_runs=preview["expected_runs"])
+        assert (await client.call_tool("start_loop_v1", {**payload, "declared_source": "한" * 30})).isError
+        assert count() == 0
+        started = await call(client, tools, "start_loop_v1", payload)
+        sid = started["session_id"]
+        assert started["declared_source"] == payload["declared_source"]
+        assert (await client.call_tool("start_loop_v1", payload)).isError
+        state = await poll_loop(client, tools, sid, terminal=model in {"fixture", "failure"})
+        if model == "slow":
+            stopped = await call(client, tools, "stop_loop_v1", {"session_id": sid})
+            assert stopped["state"] == "stopped"
+            assert (await call(client, tools, "stop_loop_v1", {"session_id": sid}))["state"] == "stopped"
+        assert count() == 1
+    # Shutdown awaits cancellation before releasing ownership; reopening only reads.
+    async with fixture_session(database, forbid_provider=True, inspect_only=True) as client:
+        tools = await discover(client)
+        state = await call(client, tools, "inspect_loop_sessions_v1")
+        assert state["sessions"][0]["state"] == expected
+        assert state["sessions"][0]["admitted"] == count() == 1
+        assert state["sessions"][0]["declared_source"] == payload["declared_source"]
+        attempt = state["attempts"][0]
+        assert attempt["session_id"] == sid
+        assert attempt["execution"]["error"] == (None if model == "fixture" else
+                                                    "provider_error" if model == "failure" else "interrupted")
+
+
+@pytest.mark.anyio
+async def test_web_owner_blocks_mcp_activation_without_consuming_preview(
+        cli, tmp_path, server_processes):
+    from llm_engine import _native
+    from llm_engine.loop_execution import LoopService
+    from test_loop_execution import FixtureProvider
+
+    cli("agent", "list")
+    database = tmp_path / "product.sqlite"
+    db = str(database)
+    agent = _native.create_agent(db, "Writer")[0]
+    work = _native.create_assigned_work(db, "Saved input", agent)[0]
+    policy = _native.create_loop(db, "Bounded", work, 2, 60)
+    _native.set_loop_enabled(db, policy["id"], True)
+    web_owner = LoopService(db, FixtureProvider(), "fixture")
+    web_owner.initialize()
+    try:
+        async with fixture_session(database) as client:
+            tools = await discover(client)
+            preview = await call(client, tools, "preview_loop_v1", {"policy_id": policy["id"]})
+            payload = {"preview_id": preview["preview_id"], "expected_runs": 0,
+                       "provider": "anthropic", "model": "slow", "declared_source": "mcp-fixture"}
+            assert (await client.call_tool("start_loop_v1", payload)).isError
+            assert _native.loop_sessions(db) == []
+            assert not Path(db + ".dispatches").exists()
+            await web_owner.close()
+            started = await call(client, tools, "start_loop_v1", payload)
+            sid = started["session_id"]
+            await poll_loop(client, tools, sid, terminal=False)
+            competing = LoopService(db, FixtureProvider(), "fixture")
+            with pytest.raises(ValueError):
+                competing.initialize()
+            with pytest.raises(ValueError):
+                competing.stop(sid)
+            assert competing.inspect()['sessions'][0]['state'] == 'active'
+            assert competing.provider.calls == 0
+            await competing.close()
+            assert (await call(client, tools, "stop_loop_v1", {"session_id": sid}))["state"] == "stopped"
+    finally:
+        await web_owner.close()

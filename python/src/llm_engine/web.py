@@ -298,7 +298,6 @@ def create_app(database, model=None, *, port=8765, provider=None, provider_name=
 
     async def loop_api(request):
         try:
-            loops.initialize()
             action = request.path_params.get("action")
             if request.method == "GET":
                 return response(loops.inspect())

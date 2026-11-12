@@ -1,5 +1,6 @@
 """Typed MCP adapter. Rust owns admission, persistence and domain validation."""
 import argparse
+from contextlib import asynccontextmanager
 from pathlib import Path
 import sys
 from typing import Annotated, Literal
@@ -11,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .execution import configured_provider, finish_text, record
 from .providers import runtime_secrets
+from .loop_execution import LoopService
 
 from . import _native
 
@@ -125,6 +127,7 @@ class LoopSession(Record):
     expires_at: int
     admitted: int
     next_at: int
+    declared_source: str | None = None
 
 
 class LoopAttempt(Record):
@@ -239,9 +242,28 @@ def create_server(database: str, *, provider_factory=None, auth=None) -> FastMCP
     # The client cannot select a different database through tool arguments.
     database = str(Path(database).absolute())
     _native.query_agents(database)  # validate the entire store before serving
-    server = FastMCP("AgenTown", version="0.2.0", mask_error_details=True, auth=auth)
+    loops = None
+
+    @asynccontextmanager
+    async def lifespan(server):
+        nonlocal loops
+        loops = None
+        try:
+            yield
+        finally:
+            if loops is not None:
+                await loops.close()
+
+    server = FastMCP("AgenTown", version="0.2.0", mask_error_details=True,
+                     auth=auth, lifespan=lifespan)
     annotations = {"readOnlyHint": True, "destructiveHint": False,
                    "idempotentHint": True, "openWorldHint": False}
+
+    def loop_service():
+        nonlocal loops
+        if loops is None:
+            loops = LoopService(database, None, None)
+        return loops
 
     provider_factory = provider_factory or configured_provider
     mutations = {"readOnlyHint": False, "destructiveHint": False,
@@ -259,7 +281,7 @@ def create_server(database: str, *, provider_factory=None, auth=None) -> FastMCP
             # Do not echo database paths, user input or provider exception messages.
             message = str(exc).lower()
             category = next((word for word in ("schema", "invalid", "unknown", "stale",
-                "consent", "active", "duplicate", "assigned") if word in message), "storage")
+                "consent", "owner", "active", "duplicate", "assigned") if word in message), "storage")
             raise ToolError(f"Operation rejected ({category}); inspect work history and configuration.") from None
 
     @server.tool(annotations=annotations)
@@ -314,6 +336,58 @@ def create_server(database: str, *, provider_factory=None, auth=None) -> FastMCP
             for row in links]
         return LoopInspection(sessions=[LoopSession(**row) for row in sessions],
                               attempts=attempts)
+
+    @server.tool(annotations=mutations)
+    def preview_loop_v1(policy_id: str) -> LoopPreview:
+        """Preview saved Loop input and bounds without execution or ownership.
+
+        Persists single-use consent. Show the input, maximum iterations, interval
+        and expected_runs to the user before requesting explicit activation.
+        """
+        safe_text(policy_id)
+        return LoopPreview(**query(_native.preview_loop, policy_id, runtime_secrets()))
+
+    @server.tool(annotations=execution_annotations)
+    async def start_loop_v1(
+        preview_id: str,
+        provider: Literal["anthropic", "openai", "bedrock", "xai"], model: str,
+        declared_source: Annotated[str, Field(min_length=1, max_length=80)],
+        expected_runs: Annotated[int, Field(ge=0, strict=True)],
+    ) -> LoopSession:
+        """Explicitly authorize one bounded preview. COSTLY, non-idempotent.
+
+        Returns immediately; poll inspect_loop_sessions_v1 for persisted progress.
+        Consent covers saved input and bounds, never indefinite execution. A live
+        web/MCP execution owner rejects activation without consuming consent.
+        declared_source is untrusted metadata. Credentials remain server-side.
+        """
+        safe_text(preview_id, model, declared_source)
+        if len(declared_source.encode("utf-8")) > 80:
+            raise ToolError("Operation rejected (invalid); declared source must fit 80 UTF-8 bytes.")
+        try:
+            adapter = provider_factory(model, provider)
+        except Exception:
+            raise ToolError("Provider configuration unavailable; configure the server environment.") from None
+        try:
+            return LoopSession(**loop_service().start(preview_id, expected_runs, declared_source,
+                                            provider=adapter, model=model))
+        except (ValueError, OSError):
+            raise ToolError("Loop activation rejected; inspect history, consent and execution ownership. "
+                            "A live web or MCP owner must shut down before another service starts Loops.") from None
+
+    @server.tool(annotations={**mutations, "idempotentHint": True, "destructiveHint": True})
+    async def stop_loop_v1(session_id: str) -> LoopSession:
+        """Stop a session through its execution owner and attempt local cancellation.
+
+        Prevents further admission; an already sent provider request may still
+        complete remotely or incur charges. Poll recorded attempts for outcome.
+        Cannot stop a different live service's sessions.
+        """
+        safe_text(session_id)
+        try:
+            return LoopSession(**loop_service().stop(session_id))
+        except (ValueError, OSError):
+            raise ToolError("Loop stop rejected; inspect sessions and use their execution owner.") from None
 
     @server.tool(annotations=mutations)
     def preview_skill_work_v1(task_id: str, skill_id: str) -> SkillPreview:

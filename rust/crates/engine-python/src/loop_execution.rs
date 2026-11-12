@@ -1,10 +1,36 @@
 //! Thin Loop interface. Runtime ownership is supplied by the execution service.
 use super::*;
 use llm_engine_core::{LoopPolicyId, LoopSessionId};
-use llm_engine_sqlite::{LoopPreview, LoopSession};
+use llm_engine_sqlite::{LoopExecutionOwner, LoopPreview, LoopSession};
 use pyo3::types::PyDict;
 fn rejected(_: impl std::fmt::Display) -> PyErr {
     error("loop command rejected; refresh and explicitly preview/start again")
+}
+/// Explicitly close only after execution workers have joined/cancelled.
+#[pyclass]
+struct LoopOwner {
+    inner: Option<LoopExecutionOwner>,
+}
+#[pymethods]
+impl LoopOwner {
+    fn close(&mut self) {
+        self.inner.take();
+    }
+}
+impl LoopOwner {
+    fn get(&self) -> PyResult<&LoopExecutionOwner> {
+        self.inner
+            .as_ref()
+            .ok_or_else(|| rejected("closed execution owner"))
+    }
+}
+#[pyfunction]
+fn acquire_loop_execution_owner(database: &str) -> PyResult<LoopOwner> {
+    Ok(LoopOwner {
+        inner: Some(LoopExecutionOwner::acquire(database).map_err(|_| {
+            error("Loop execution ownership unavailable; another execution service may be active")
+        })?),
+    })
 }
 fn preview_record(py: Python<'_>, p: LoopPreview) -> PyResult<Py<PyDict>> {
     let d = PyDict::new(py);
@@ -34,6 +60,7 @@ fn session_record(py: Python<'_>, s: LoopSession) -> PyResult<Py<PyDict>> {
     d.set_item("expires_at", s.expires_at)?;
     d.set_item("admitted", s.admitted)?;
     d.set_item("next_at", s.next_at)?;
+    d.set_item("declared_source", s.declared_source)?;
     Ok(d.unbind())
 }
 #[pyfunction]
@@ -54,62 +81,61 @@ fn preview_loop(
     preview_record(py, p)
 }
 #[pyfunction]
-#[pyo3(signature=(database,preview_id,expected_runs,provider,model,runtime_id,secrets=Vec::new()))]
+#[pyo3(signature=(owner,preview_id,expected_runs,provider,model,secrets=Vec::new(),declared_source=None))]
 fn start_loop_session(
     py: Python<'_>,
-    database: &str,
+    owner: &LoopOwner,
     preview_id: &str,
     expected_runs: usize,
     provider: &str,
     model: &str,
-    runtime_id: &str,
     secrets: Vec<String>,
+    declared_source: Option<&str>,
 ) -> PyResult<Py<PyDict>> {
-    let s = SqliteStore::open(database)
-        .map_err(rejected)?
-        .start_loop_session(
-            preview_id,
-            expected_runs,
-            provider,
-            model,
-            runtime_id,
-            &secrets,
-        )
-        .map_err(rejected)?;
-    session_record(py, s)
+    session_record(
+        py,
+        owner
+            .get()?
+            .start(
+                preview_id,
+                expected_runs,
+                provider,
+                model,
+                &secrets,
+                declared_source,
+            )
+            .map_err(rejected)?,
+    )
 }
 #[pyfunction]
-#[pyo3(signature=(database,session_id,runtime_id,secrets=Vec::new()))]
+#[pyo3(signature=(owner,session_id,secrets=Vec::new()))]
 fn admit_loop_attempt(
-    database: &str,
+    owner: &LoopOwner,
     session_id: &str,
-    runtime_id: &str,
     secrets: Vec<String>,
 ) -> PyResult<Option<ExecutionRecord>> {
-    SqliteStore::open(database)
-        .map_err(rejected)?
-        .admit_loop_attempt(
+    owner
+        .get()?
+        .admit(
             session_id.parse::<LoopSessionId>().map_err(rejected)?,
-            runtime_id,
             &secrets,
         )
         .map(|e| e.map(execution_record))
         .map_err(rejected)
 }
 #[pyfunction]
-fn stop_loop_session(py: Python<'_>, database: &str, session_id: &str) -> PyResult<Py<PyDict>> {
-    let s = SqliteStore::open(database)
-        .map_err(rejected)?
-        .stop_loop_session(session_id.parse::<LoopSessionId>().map_err(rejected)?)
-        .map_err(rejected)?;
-    session_record(py, s)
+fn stop_loop_session(py: Python<'_>, owner: &LoopOwner, session_id: &str) -> PyResult<Py<PyDict>> {
+    session_record(
+        py,
+        owner
+            .get()?
+            .stop(session_id.parse::<LoopSessionId>().map_err(rejected)?)
+            .map_err(rejected)?,
+    )
 }
 #[pyfunction]
-fn recover_loop_sessions(database: &str, runtime_id: &str) -> PyResult<()> {
-    SqliteStore::open(database)
-        .map_err(rejected)?
-        .recover_loop_sessions(runtime_id)
-        .map_err(rejected)
+fn recover_loop_sessions(owner: &LoopOwner) -> PyResult<()> {
+    owner.get()?.recover().map_err(rejected)
 }
 #[pyfunction]
 fn loop_sessions(py: Python<'_>, database: &str) -> PyResult<Vec<Py<PyDict>>> {
@@ -140,6 +166,8 @@ fn loop_attempts(py: Python<'_>, database: &str) -> PyResult<Vec<Py<PyDict>>> {
         .collect()
 }
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_class::<LoopOwner>()?;
+    m.add_function(wrap_pyfunction!(acquire_loop_execution_owner, m)?)?;
     m.add_function(wrap_pyfunction!(preview_loop, m)?)?;
     m.add_function(wrap_pyfunction!(start_loop_session, m)?)?;
     m.add_function(wrap_pyfunction!(admit_loop_attempt, m)?)?;

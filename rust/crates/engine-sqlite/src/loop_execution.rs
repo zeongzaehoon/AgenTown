@@ -28,6 +28,8 @@ pub struct LoopSession {
     pub expires_at: i64,
     pub admitted: u32,
     pub next_at: i64,
+    /// Untrusted caller declaration, never an authenticated identity.
+    pub declared_source: Option<String>,
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LoopAttempt {
@@ -84,6 +86,11 @@ fn session(db: &Connection, id: LoopSessionId) -> Result<LoopSession, StorageErr
         expires_at: expires,
         admitted,
         next_at: next,
+        declared_source: db.query_row(
+            "SELECT declared_source FROM loop_sessions WHERE id=?1",
+            [id.to_string()],
+            |r| r.get(0),
+        )?,
     })
 }
 fn fresh(db: &Connection, p: &LoopPreview, count: usize) -> Result<bool, StorageError> {
@@ -141,25 +148,7 @@ impl SqliteStore {
         tx.commit()?;
         Ok(p)
     }
-    pub fn start_loop_session(
-        &mut self,
-        preview_id: &str,
-        expected_runs: usize,
-        provider: &str,
-        model: &str,
-        runtime_id: &str,
-        secrets: &[String],
-    ) -> Result<LoopSession, StorageError> {
-        self.start_loop_at(
-            preview_id,
-            expected_runs,
-            provider,
-            model,
-            runtime_id,
-            secrets,
-            execution::now()?.unix_millis(),
-        )
-    }
+    #[cfg(test)]
     fn start_loop_at(
         &mut self,
         pid: &str,
@@ -170,6 +159,25 @@ impl SqliteStore {
         secrets: &[String],
         now: i64,
     ) -> Result<LoopSession, StorageError> {
+        self.start_loop_at_source(pid, count, provider, model, runtime, secrets, now, None)
+    }
+    pub(super) fn start_loop_at_source(
+        &mut self,
+        pid: &str,
+        count: usize,
+        provider: &str,
+        model: &str,
+        runtime: &str,
+        secrets: &[String],
+        now: i64,
+        declared_source: Option<&str>,
+    ) -> Result<LoopSession, StorageError> {
+        if let Some(source) = declared_source {
+            safe(&[(source, 80)], secrets)?;
+            if source != source.trim() || source.chars().any(char::is_control) {
+                return Err(rejected());
+            }
+        }
         safe(&[(provider, 80), (model, 200), (runtime, 120)], secrets)?;
         if [provider, model, runtime]
             .iter()
@@ -200,14 +208,14 @@ impl SqliteStore {
         let expires = now
             + (i64::from(p.interval_seconds) * 1000 + 120_000) * i64::from(p.max_iterations)
             + 120_000;
-        tx.execute("INSERT INTO loop_sessions(id,preview_id,task_id,runtime_id,provider,model,state,started_at,expires_at,next_at) VALUES (?1,?2,?3,?4,?5,?6,'active',?7,?8,?7)",params![id.to_string(),pid,p.task_id.to_string(),runtime,provider,model,now,expires])?;
+        tx.execute("INSERT INTO loop_sessions(id,preview_id,task_id,runtime_id,provider,model,state,started_at,expires_at,next_at,declared_source) VALUES (?1,?2,?3,?4,?5,?6,'active',?7,?8,?7,?9)",params![id.to_string(),pid,p.task_id.to_string(),runtime,provider,model,now,expires,declared_source])?;
         let s = session(&tx, id)?;
         tx.commit()?;
         Ok(s)
     }
     /// Runtime token is generated once per execution-service process, never reused
     /// after restart. Call recover_loop_sessions at startup before serving requests.
-    pub fn recover_loop_sessions(&mut self, runtime_id: &str) -> Result<(), StorageError> {
+    pub(crate) fn recover_loop_sessions(&mut self, runtime_id: &str) -> Result<(), StorageError> {
         safe(&[(runtime_id, 120)], &[])?;
         let tx = self
             .connection
@@ -219,7 +227,10 @@ impl SqliteStore {
         tx.commit()?;
         Ok(())
     }
-    pub fn stop_loop_session(&mut self, id: LoopSessionId) -> Result<LoopSession, StorageError> {
+    pub(crate) fn stop_loop_session(
+        &mut self,
+        id: LoopSessionId,
+    ) -> Result<LoopSession, StorageError> {
         let tx = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -228,7 +239,7 @@ impl SqliteStore {
         tx.commit()?;
         Ok(s)
     }
-    pub fn admit_loop_attempt(
+    pub(crate) fn admit_loop_attempt(
         &mut self,
         id: LoopSessionId,
         runtime: &str,
@@ -246,7 +257,7 @@ impl SqliteStore {
         let tx = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        execution::recover(&tx, RunTimestamp::from_unix_millis(now)?)?;
+
         let s = session(&tx, id)?;
         if s.state != "active" {
             tx.commit()?;
@@ -257,6 +268,10 @@ impl SqliteStore {
             [id.to_string()],
             |r| r.get(0),
         )?;
+        if owner != runtime {
+            return Err(rejected());
+        }
+        execution::recover(&tx, RunTimestamp::from_unix_millis(now)?)?;
         let failed:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM loop_attempts a JOIN executions e ON a.run_id=e.run_id WHERE a.session_id=?1 AND e.error IS NOT NULL)",[id.to_string()],|r|r.get(0))?;
         let active: bool = tx.query_row(
             "SELECT EXISTS(SELECT 1 FROM runs WHERE task_id=?1 AND outcome IS NULL)",
@@ -272,9 +287,7 @@ impl SqliteStore {
             active,
             failed,
         );
-        let terminal = if owner != runtime {
-            Some("restarted")
-        } else if !fresh(
+        let terminal = if !fresh(
             &tx,
             &s.preview,
             s.preview.expected_runs + s.admitted as usize,

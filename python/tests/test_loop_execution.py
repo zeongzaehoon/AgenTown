@@ -100,6 +100,7 @@ def test_stop_interval_failure_and_restart(saved, when):
         service = LoopService(db, provider, 'fixture-model')
         preview = _native.preview_loop(db, policy(2))
         session = service.start(preview['preview_id'], 0)
+        owner = service.owner
         sid = session['session_id']
         worker = service.workers[sid]
         if when == 'before_dispatch':
@@ -110,11 +111,13 @@ def test_stop_interval_failure_and_restart(saved, when):
             await asyncio.wait_for(provider.entered.wait(), 2)
             if when == 'restart':
                 replacement = LoopService(db, provider, 'fixture-model')
+                with pytest.raises(ValueError):
+                    replacement.initialize()
+                assert replacement.inspect()['sessions'][0]['state'] == 'active'
+                assert not worker.done() and provider.calls == 1
+                await service.close()
                 replacement.initialize()
-                assert replacement.inspect()['sessions'][0]['state'] == 'restarted'
-                # A real crash loses local tasks; emulate local cancellation only.
-                worker.cancel()
-                await asyncio.gather(worker, return_exceptions=True)
+                assert replacement.inspect()['sessions'][0]['state'] == 'stopped'
                 await replacement.close()
             elif when == 'during_dispatch':
                 result = service.stop(sid)
@@ -130,7 +133,7 @@ def test_stop_interval_failure_and_restart(saved, when):
                 # Worker has finalized the first call and Rust refuses admission
                 # during the interval, even for duplicate immediate requests.
                 for _ in range(3):
-                    assert _native.admit_loop_attempt(db, sid, service.runtime_id) is None
+                    assert _native.admit_loop_attempt(service.owner, sid) is None
                 assert service.inspect()['sessions'][0]['admitted'] == 1
                 service.stop(sid)
                 await asyncio.gather(worker, return_exceptions=True)
@@ -138,7 +141,9 @@ def test_stop_interval_failure_and_restart(saved, when):
         terminal = service.inspect()['sessions'][0]['state']
         assert terminal != 'active'
         with pytest.raises(ValueError):
-            _native.admit_loop_attempt(db, sid, service.runtime_id)
+            # Retain the native handle so restart also verifies that released
+            # authority is rejected, rather than passing the cleared None field.
+            _native.admit_loop_attempt(owner, sid)
         await service.close()
         reopened = LoopService(db, provider, 'fixture-model')
         reopened.initialize()
