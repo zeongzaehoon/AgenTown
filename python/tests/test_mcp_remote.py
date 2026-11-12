@@ -72,7 +72,7 @@ def test_authenticated_workflow_and_isolation(cli, tmp_path, signing):
         assert init.status_code == 200
         assert init.json()["result"]["serverInfo"]["name"] == "AgenTown"
         tools = rpc("tools/list", bearer=valid).json()["result"]["tools"]
-        assert len(tools) == 9
+        assert len(tools) == 11
         for tool in tools:
             assert "database" not in tool["inputSchema"].get("properties", {})
         metadata = client.get("/.well-known/oauth-protected-resource/mcp")

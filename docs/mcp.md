@@ -585,3 +585,56 @@ instructions surviving edits and a fresh server process. Run in a product test
 environment with native bindings: `python -m pytest python/tests/test_mcp.py -q`.
 Live provider validation is skipped under the user policy; supervisor checks are
 pending for this change.
+
+
+## Preview and explicitly execute one saved Skill
+
+Run `agentown-mcp --database /absolute/path/company.sqlite` from the installed
+Python environment (initialize that database with `agentown --database PATH agent
+list` first). Save and assign work using the workflow above; create and enable a
+Skill in the product configuration screen. No new provider SDK or configuration
+is required. Send these calls through your connected MCP client:
+
+```text
+list_skills_v1({})
+preview_skill_work_v1({"task_id":"TASK_UUID","skill_id":"SKILL_UUID"})
+```
+
+The preview returns `schema_version: 1`, `task_id`, `skill_id`, Rust-composed
+`input`, an opaque `preview_id`, and `expected_runs`. Present that exact input to
+the user and obtain explicit authorization before execution. Previewing persists
+consent state: it is a non-read-only, non-idempotent, closed-world mutation, but
+never constructs a provider or dispatches a request. Only one enabled Skill and
+one assigned employee are supported. No client-composed instruction field exists.
+
+After authorization, substitute the returned preview ID and count:
+
+```text
+execute_skill_work_v1({"task_id":"TASK_UUID","preview_id":"RETURNED_PREVIEW_ID","expected_runs":0,"provider":"anthropic","model":"YOUR_MODEL","declared_source":"codex"})
+get_work_history_v1({"task_id":"TASK_UUID"})
+```
+
+Execution is **costly, non-idempotent and open-world**. The call itself explicitly
+authorizes exactly one preview; there is no automatic retry. Credentials are
+accepted only through the server's existing environment configuration, never
+as tool arguments. `declared_source` is untrusted caller metadata, bounded to
+80 UTF-8 bytes without control characters; it is not authenticated identity.
+Rust commits it in the same transaction as Run creation, immutable Skill
+provenance and preview consumption. Existing non-MCP Skill callers retain their
+behavior and have no declared caller label.
+
+Changed work, assignment or Skill configuration (including disable/re-enable),
+a wrong Task, consumed preview, stale attempt count or concurrent duplicate
+consent is rejected before provider dispatch. After any ambiguous response,
+inspect history first. Every retry requires a **fresh preview**, presentation of
+its input, renewed explicit user authorization and its returned attempt count;
+never replay consent blindly. Configuration failure before admission does not
+consume the preview. Once admitted, provider success and failure both retain the
+caller label and Skill snapshot in `get_work_history_v1`, across server restarts
+and later Skill edits. Quality remains `unverified`.
+
+Deterministic coverage: `python -m pytest python/tests/test_mcp.py -k skill`
+after building native bindings and installing the locked product dependencies.
+The fixture exercises real stdio MCP and SQLite with a dispatch counter, success,
+provider failure and concurrent consent. Live provider validation is skipped,
+not passed; fixture output does not demonstrate a real model response.

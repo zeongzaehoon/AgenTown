@@ -30,7 +30,7 @@ fn preview_skill(
     Ok(d.unbind())
 }
 #[pyfunction]
-#[pyo3(signature=(database, task, preview_id, provider, model, expected_runs, secrets=Vec::new()))]
+#[pyo3(signature=(database, task, preview_id, provider, model, expected_runs, secrets=Vec::new(), declared_source=None))]
 fn start_skill_execution(
     database: &str,
     task: &str,
@@ -39,11 +39,20 @@ fn start_skill_execution(
     model: &str,
     expected_runs: usize,
     secrets: Vec<String>,
+    declared_source: Option<&str>,
 ) -> PyResult<ExecutionRecord> {
     let task = task.parse::<TaskId>().map_err(rejected)?;
     SqliteStore::open(database)
         .map_err(rejected)?
-        .start_skill_execution(task, preview_id, provider, model, expected_runs, &secrets)
+        .start_skill_execution_with_source(
+            task,
+            preview_id,
+            provider,
+            model,
+            expected_runs,
+            &secrets,
+            declared_source,
+        )
         .map(execution_record)
         .map_err(rejected)
 }

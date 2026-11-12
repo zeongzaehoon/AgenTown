@@ -70,6 +70,15 @@ class Skills(Record):
     skills: list[Skill]
 
 
+class SkillPreview(Record):
+    schema_version: Literal[1] = 1
+    preview_id: str
+    task_id: UUID
+    skill_id: UUID
+    input: str
+    expected_runs: int
+
+
 class SkillProvenance(Record):
     schema_version: Literal[1] = 1
     run_id: UUID
@@ -164,6 +173,41 @@ def create_server(database: str, *, provider_factory=None, auth=None) -> FastMCP
         """List saved Skill IDs, names and enabled configuration; does not execute."""
         return Skills(skills=[Skill(id=row["id"], name=row["name"], enabled=row["enabled"])
                               for row in query(_native.list_skills)])
+
+    @server.tool(annotations=mutations)
+    def preview_skill_work_v1(task_id: str, skill_id: str) -> SkillPreview:
+        """Preview Rust-composed saved work and one enabled Skill without provider I/O.
+
+        Persists an opaque single-use consent preview. Show input to the user before
+        explicitly executing; previewing alone never authorizes provider dispatch.
+        """
+        safe_text(task_id, skill_id)
+        return SkillPreview(**query(_native.preview_skill, task_id, skill_id, runtime_secrets()))
+
+    @server.tool(annotations=execution_annotations)
+    async def execute_skill_work_v1(
+        task_id: str, preview_id: str,
+        provider: Literal["anthropic", "openai", "bedrock", "xai"], model: str,
+        declared_source: Annotated[str, Field(min_length=1, max_length=80)],
+        expected_runs: Annotated[int, Field(ge=0)],
+    ) -> Execution:
+        """Explicitly authorize one preview. COSTLY: may charge the configured provider.
+
+        Non-idempotent. Every retry needs a fresh preview and explicit user consent
+        to its composed input and expected_runs. Caller metadata is untrusted;
+        credentials come only from server configuration. No client instructions.
+        """
+        safe_text(task_id, preview_id, model, declared_source)
+        try:
+            adapter = provider_factory(model, provider)
+        except Exception:
+            raise ToolError("Provider configuration unavailable; configure the server environment.") from None
+        row = query(_native.start_skill_execution, task_id, preview_id, provider,
+                    model, expected_runs, runtime_secrets(), declared_source)
+        try:
+            return Execution(**await finish_text(database, row, adapter))
+        except Exception:
+            raise ToolError("Execution could not be finalized; inspect persisted history before retrying.") from None
 
     @server.tool(annotations=mutations)
     def create_employee_v1(name: str) -> EmployeeCreated:
