@@ -6,6 +6,7 @@ import http.client
 import json
 import os
 import signal
+import shutil
 import shlex
 import subprocess
 import sys
@@ -160,25 +161,41 @@ def main() -> None:
             saved = api(port, "POST", "/api/employees",
                         {"name": "Desktop restart evidence"})
             employee_id = saved["id"]
+            saved_work = api(port, "POST", "/api/work",
+                             {"employee": employee_id, "input": "DMG saved work evidence"})
             print(f"assembled-app-ready shell={process.pid} owned-service={owned[0]}")
         finally:
             stop(process, owned)
 
-        process, owned, port = launch(executable, root, environment)
-        try:
+        def verify_saved(port, phase):
+            state = api(port, "POST", "/api/state", {})
             wait_until(
                 lambda: (api(port, "GET", "/_desktop/rendered") or {}).get("rendered"),
-                20, "React workspace did not render after app restart",
+                20, f"React workspace did not render after {phase}",
             )
-            state = api(port, "POST", "/api/state", {})
-            employees = state.get("employees", [])
-            if not any(employee.get("id") == employee_id and
-                       employee.get("name") == "Desktop restart evidence"
-                       for employee in employees):
-                raise RuntimeError("Saved desktop record was not retained after app restart")
-            print(f"assembled-app-restart-persistence=true employee-id={employee_id} employee-name=Desktop restart evidence")
-        finally:
-            stop(process, owned)
+            if not any(row.get("id") == employee_id and row.get("name") == "Desktop restart evidence"
+                       for row in state["employees"]):
+                raise RuntimeError(f"Employee changed after {phase}")
+            work = next((row for row in state["work"] if row["id"] == saved_work["id"]), None)
+            if work is None or work["input"] != "DMG saved work evidence" or employee_id not in work["assignees"]:
+                raise RuntimeError(f"Saved work changed after {phase}")
+            print(json.dumps({"phase": phase, "employee": {"id": employee_id, "name": "Desktop restart evidence"}, "work": work}), flush=True)
+
+        for phase in ("restart", "app-only-reinstall", "service-interruption-recovery"):
+            if phase == "app-only-reinstall":
+                shutil.rmtree(copied)
+                subprocess.run(["/usr/bin/ditto", str(source), str(copied)], check=True)
+            process, owned, port = launch(executable, root, environment)
+            try:
+                verify_saved(port, phase)
+                if phase == "app-only-reinstall" and "--delivery" in sys.argv:
+                    os.kill(owned[0], signal.SIGKILL)
+                    wait_until(lambda: not children(process.pid), 10,
+                               "Interrupted service was not reaped by its owner")
+                    print("interrupted-service-observed=true shell-relaunch=automatic",
+                          flush=True)
+            finally:
+                stop(process, owned)
         print("assembled-app-clean-shutdown=true copied-outside-checkout=true empty-path=true")
 
 

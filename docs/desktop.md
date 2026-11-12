@@ -197,3 +197,57 @@ skipped under the current user policy, never recorded as passed.
 
 Resource mapping follows the official [Tauri resource guide](https://v2.tauri.app/develop/resources/)
 and [configuration reference](https://v2.tauri.app/reference/config/).
+
+## Unsigned macOS DMG delivery (C25-T2)
+
+`python3.13 desktop/build.py` now also packages the assembled macOS app with
+Apple's built-in `hdiutil`. No third-party DMG layout tool is required. The image
+contains `AgenTown.app` (including `Contents/Resources/service`) and an Applications
+shortcut. It is a compressed HFS+ image, verified by `hdiutil verify`. This is
+unsigned local distribution, separate from Developer ID signing, notarization,
+Gatekeeper approval or publication. It does not alter installed applications or
+service settings. Repeating the command replaces only the exact generated
+architecture-specific DMG in the target build directory.
+
+To package an existing complete bundle without rebuilding, use:
+
+```sh
+python3.13 desktop/package_dmg.py
+# Or choose an output path explicitly:
+python3.13 desktop/package_dmg.py /absolute/AgenTown.app /absolute/AgenTown-test.dmg
+```
+
+Default output is `desktop/target/release/bundle/dmg/AgenTown-unsigned-arm64.dmg`
+on Apple Silicon (`x86_64` on Intel). Packaging prints the absolute artifact path,
+SHA-256, OS version and architecture. Reproducible means the documented procedure;
+DMG timestamps and generated identifiers do not imply byte-identical builds.
+Apple's local `hdiutil create -help` documents the selected `-srcfolder`, `-fs`
+and `-format` options; the existing Tauri resource/configuration references above
+continue to define the app resource mapping.
+
+In a graphical macOS login, retain actual output of these commands:
+
+```sh
+python3.13 desktop/build.py > docs/evidence/c25-t2/build.txt 2>&1
+python3.13 desktop/check_dmg.py desktop/target/release/bundle/dmg/AgenTown-unsigned-arm64.dmg > docs/evidence/c25-t2/installed.txt 2>&1
+```
+
+The delivery check mounts the actual image read-only, uses `ditto` to install into
+an isolated writable temporary directory outside the checkout, and launches with
+an empty PATH and temporary `CFFIXED_USER_HOME`. It retains that same home while
+quitting/relaunching and removing only the test app before reinstalling from the
+mounted image. It compares employee ID/name and saved work ID/text/assignee on
+each launch. Work is saved through the app-owned API, not executed. Each launch
+requires the React rendered signal; the first also observes the native window.
+It interrupts only the recorded owned service, confirms that child is reaped,
+terminates the isolated shell, then reopens the app and verifies retained
+records. The native unexpected-service error remains covered by the shell's
+actionable-error path; the automated delivery check does not require macOS
+Accessibility or Screen Recording permission. Each shutdown requires
+owned-service exit.
+The image is detached in a finally block. Temporary test data is removed only
+when the isolated test completes; ordinary user data is never targeted. Keep
+manual visual/form interaction evidence separate from these API-driven checks.
+
+Implementation-stage evidence and outstanding validation are recorded in
+[evidence/c25-t2/implementation.md](evidence/c25-t2/implementation.md).

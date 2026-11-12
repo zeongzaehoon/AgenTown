@@ -85,6 +85,8 @@ def main():
         print("Desktop executable: desktop/target/release/agentown-desktop.exe (keep service/ beside it)")
     else:
         run("cargo", "tauri", "build", "--bundles", "app", cwd=DESKTOP)
+        if sys.platform == "darwin":
+            run(sys.executable, DESKTOP / "package_dmg.py")
         print("Unsigned desktop build: desktop/target/release/bundle/")
     # Tauri has copied the service into the assembled artifact. Remove staging
     # inputs and generated schemas so a successful build leaves the source
