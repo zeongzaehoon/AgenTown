@@ -4,9 +4,10 @@ Skills, Hook bindings and Loop policies belong to the product SQLite database.
 They start disabled. Enabling means **configuration enabled** only: creating,
 editing and enabling never invokes a provider, runs a command, dispatches an
 event, schedules work, creates a Run or reads `.agents`/`.harness` files.
-A later execution adapter will need a separate explicit admission/consent
-boundary, runtime event semantics, limits and execution evidence. These records
-are not that adapter. A Hook may reference a disabled Skill.
+Execution requires a separate explicit preview and admission/consent boundary;
+configuration operations never cross it. See the single-Skill and terminal-Hook
+flows below. Loop execution remains unsupported. A Hook may reference a disabled
+Skill, but such a Hook cannot be previewed for execution.
 
 Python imports come from `llm_engine.configuration`. Each kind (`skill`, `hook`,
 `loop`) has `create_<kind>(database, **fields)`, `update_<kind>(database, id,
@@ -131,4 +132,24 @@ runnable requests. `POST /api/work/{task}/skill-preview` accepts exactly
 `{"skill_id":"<enabled Skill ID>"}` and never invokes a provider. The returned
 combined `input` must be reviewed before sending `preview_id` and `expected_runs`
 to `POST /api/work/{task}/execute`. A fresh preview is required for each retry.
-Hooks and Loops have no runtime dispatch in this slice.
+Hook configuration and terminal events never dispatch work automatically.
+The explicit terminal-Hook flow below is a separate consent boundary; Loop
+execution remains unsupported.
+
+### Explicit terminal-Hook execution
+
+`POST /api/work/{task}/hook-preview` accepts exactly `{"hook_id":"<Hook ID>"}`.
+It previews the enabled Skill plus saved work for an enabled employee Hook whose
+`run_completed` or `run_failed` event matches the latest saved terminal attempt.
+Preview is available without provider configuration and never calls a provider.
+The returned `preview_id` is submitted as `hook_preview_id`, together with
+`expected_runs`, to the existing execute endpoint only after explicit inspection
+and consent. Skill `preview_id` and Hook `hook_preview_id` cannot be combined.
+Invalid or stale previews/consent return 409; oversized preview requests return
+413; unavailable preview storage returns 503. Configuration endpoints retain their
+existing status semantics.
+
+See [runnable Hook requests and provenance](text-execution.md#explicit-terminal-hook-follow-up-c28-t1).
+Configuration mutations and terminal events remain inert. Team targets and
+`task_created` remain valid configuration records but are unsupported for this
+execution flow. No automatic chains or Loop scheduler are enabled.

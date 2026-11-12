@@ -68,7 +68,7 @@ fn writable_migration_preserves_v1_and_read_only_never_migrates() {
     assert_eq!(
         sql.query_row("PRAGMA user_version", [], |r| r.get::<_, i32>(0))
             .unwrap(),
-        7
+        8
     );
 }
 

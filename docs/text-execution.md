@@ -97,7 +97,7 @@ SDK adapters. Anthropic remains the default. See [configuration and limits](prov
 
 The HTTP API can preview one enabled Skill with saved work, without provider
 configuration or a provider call. Enabling a Skill alone does not execute it.
-Hooks and Loops remain inert. The preview's `input` is composed by Rust; clients
+Hook configuration and Loops remain inert. The preview's `input` is composed by Rust; clients
 must display it before explicitly submitting its opaque `preview_id`. Clients
 must not construct an execution input from local Skill text.
 
@@ -160,3 +160,79 @@ provenance. Ordinary execution still sends only `expected_runs`. Configuration
 records are polled; changed server configuration also invalidates admission even
 before the next screen refresh. Unknown submission outcomes require an explicit
 history refresh and a new preview, with no automatic resend.
+
+## Explicit terminal-Hook follow-up (C28-T1)
+
+Prerequisite: the C27 saved-Skill flow and integrated C28 native bindings. Launch
+`agentown-web --database /tmp/agentown-hook.sqlite --provider anthropic --model YOUR_MODEL`.
+The HTTP flow selects an enabled employee-target Hook for the latest saved
+terminal attempt on the same work. `run_completed` matches reported provider
+success; `run_failed` matches failure. Provider success still has
+`quality: unverified`. A terminal event alone never starts a follow-up.
+Team targets, `task_created` dispatch, Loops and automatic chains are unsupported.
+The Hook work-screen controls belong to the subsequent C28-T2 UI slice.
+
+Use the employee, task and enabled Skill creation requests above, against this
+server. Set `base`, `employee`, `task` and `skill` to their returned values.
+Create and enable the employee Hook (no execution occurs):
+
+```sh
+hook=$(jq -n --arg employee "$employee" --arg skill "$skill" '{name:"Follow up",skill_id:$skill,target_kind:"agent",target_id:$employee,event:"run_completed"}' | curl -fsS "$base/api/config/v1/hooks" -H "Origin: $base" -H 'Content-Type: application/json' --data-binary @- | jq -r .id)
+curl -fsS -X PUT "$base/api/config/v1/hooks/$hook/enabled" -H "Origin: $base" -H 'Content-Type: application/json' -d '{"enabled":true}'
+```
+
+A fresh work item has no terminal attempt and cannot match a Hook. If intentionally
+configured to make a provider call, explicitly create the initial attempt below;
+otherwise skip it under the live-test waiver. Never substitute a fixture response
+as live provider evidence.
+
+```sh
+# Provider-calling step: only for an intentionally configured live exercise.
+curl -sS "$base/api/work/$task/execute" -H "Origin: $base" -H 'Content-Type: application/json' -d '{"expected_runs":0}'
+```
+
+For an initial failure, configure a `run_failed` Hook instead. Inspect history to
+choose the event matching the actual latest saved outcome. Preview and inspect
+the complete native response, including source Run, Hook/Skill snapshots and
+combined input; the preview requires no provider configuration or I/O:
+
+```sh
+jq -n --arg hook "$hook" '{hook_id:$hook}' | curl -fsS "$base/api/work/$task/hook-preview" -H "Origin: $base" -H 'Content-Type: application/json' --data-binary @- > /tmp/agentown-hook-preview.json
+jq . /tmp/agentown-hook-preview.json
+# Explicit consent after inspection; this request can call the provider once.
+# Skip while live calls are waived and credentials are unavailable.
+jq '{hook_preview_id:.preview_id,expected_runs}' /tmp/agentown-hook-preview.json | curl -sS "$base/api/work/$task/execute" -H "Origin: $base" -H 'Content-Type: application/json' --data-binary @-
+# Inspect immutable attempt provenance; repeat after restarting the same server.
+curl -fsS "$base/api/state" -H "Origin: $base" -H 'Content-Type: application/json' -d '{}' | jq '.work[].attempts[] | {id,outcome,quality,input,hook}'
+```
+
+Admission accepts exactly `hook_preview_id` and `expected_runs`. Mixing Skill
+`preview_id` and Hook consent, or supplying input/snapshot overrides, is rejected.
+Rust revalidates the current assignment, latest source attempt, event and enabled
+Hook/Skill snapshots and consumes the preview in the same transaction that creates
+one attempt. Stale, changed, disabled, wrong-task, consumed and simultaneous
+duplicate requests return HTTP 409 without provider I/O. Refresh history and
+request a fresh preview before any explicit retry. Unknown HTTP outcomes require
+history inspection rather than an automatic resend.
+
+The execution response's `hook` and history's `attempt.hook` expose the immutable
+native provenance keyed by resulting `run_id`, including `hook_id`,
+`source_run_id` and Skill `instructions`. Subsequent edits cannot rewrite the
+admitted snapshot. Provider failure retains the attempt and its provenance;
+restart never resubmits it. HTTP responses and persisted provider output retain
+the existing configured-secret redaction, and preview/admission reject configured
+secrets before saving composed input.
+
+After native integration, deterministic acceptance can be run with:
+
+```sh
+cd python
+python -m pytest tests/test_hook_execution.py tests/test_skill_execution.py tests/test_web.py tests/test_configuration.py
+```
+
+These fixtures exercise success/failure matching, missing terminal source,
+unsupported targets/events, disabled configuration, changed snapshots/assignment/
+source, wrong-task and consumed consent, concurrent duplicates, failure provenance,
+restart and secret rejection. They never contact a real provider. This worker's
+local checks and pending integration gates are recorded in
+[evidence](evidence/c28-t1/ai-developer.md).

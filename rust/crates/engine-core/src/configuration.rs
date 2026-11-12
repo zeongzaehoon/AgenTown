@@ -371,3 +371,42 @@ impl Core {
         Ok(input)
     }
 }
+
+impl Core {
+    /// Explicit terminal-event matching only; never dispatches or starts work.
+    /// The storage adapter supplies the latest saved Run and rechecks it at admission.
+    pub fn match_employee_hook(
+        &self,
+        task: TaskId,
+        hook: HookId,
+        source: RunId,
+    ) -> Result<SkillId, DomainError> {
+        let reject = || DomainError::InvalidConfiguration("Hook does not match saved attempt");
+        let h = self.hook(hook)?;
+        let run = self.run(source)?;
+        let HookTarget::Agent(agent) = h.target() else {
+            return Err(reject());
+        };
+        let event = match run.state() {
+            RunState::Finished {
+                outcome: RunOutcome::ReportedSuccess,
+                ..
+            } => HookEvent::RunCompleted,
+            RunState::Finished {
+                outcome: RunOutcome::Failure,
+                ..
+            } => HookEvent::RunFailed,
+            _ => return Err(reject()),
+        };
+        if !h.enabled()
+            || !self.skill(h.skill_id())?.enabled()
+            || run.task() != task
+            || h.event() != event
+            || self.task(task)?.assignees().collect::<Vec<_>>() != vec![agent]
+            || run.participants().collect::<Vec<_>>() != vec![agent]
+        {
+            return Err(reject());
+        }
+        Ok(h.skill_id())
+    }
+}

@@ -110,6 +110,7 @@ def create_app(database, model=None, *, port=8765, provider=None, provider_name=
             agents, tasks, executions = _native.history_snapshot(database)
             results = {row[0]: record(row) for row in executions}
             skill_provenance = {item["run_id"]: item for item in _native.skill_provenance(database)}
+            hook_provenance = {item["run_id"]: item for item in _native.hook_provenance(database)}
             employees = [dict(zip(("id", "name"), a)) for a in agents]
             work = []
             for task, runs in tasks:
@@ -123,6 +124,9 @@ def create_app(database, model=None, *, port=8765, provider=None, provider_name=
                         provenance = skill_provenance.get(run[0])
                         if provenance is not None:
                             attempt["skill"] = provenance
+                        hook = hook_provenance.get(run[0])
+                        if hook is not None:
+                            attempt["hook"] = hook
                     attempts.append(attempt)
                 item["attempts"] = sorted(attempts, key=lambda a: (a["started"], a["id"]))
                 work.append(item)
@@ -216,6 +220,21 @@ def create_app(database, model=None, *, port=8765, provider=None, provider_name=
         except OSError:
             return response({"error": "Preview storage unavailable. Check database access and compatibility."}, 503)
 
+    async def hook_preview(request):
+        try:
+            data = await body(request)
+            if (data.keys() != {"hook_id"} or type(data["hook_id"]) is not str
+                    or not 1 <= len(data["hook_id"]) <= 100):
+                raise ValueError("hook")
+            return response(_native.preview_hook(
+                database, request.path_params["task"], data["hook_id"], runtime_secrets()))
+        except RequestTooLarge:
+            return response({"error": "Preview request exceeds 120,000 bytes."}, 413)
+        except (ValueError, KeyError, TypeError, OverflowError, UnicodeError):
+            return response({"error": "Hook preview unavailable. Select an enabled employee Hook and Skill matching the latest saved terminal attempt and assigned employee. Team targets and task-created dispatch are unsupported. Remove configured credentials from work and instructions."}, 409)
+        except OSError:
+            return response({"error": "Preview storage unavailable. Check database access and compatibility."}, 503)
+
     async def execute(request):
         if configuration:
             return response({"error": configuration}, 409)
@@ -224,7 +243,15 @@ def create_app(database, model=None, *, port=8765, provider=None, provider_name=
             count = data["expected_runs"]
             if type(count) is not int or count < 0:
                 raise ValueError("count")
-            if "preview_id" in data:
+            if "hook_preview_id" in data:
+                if (data.keys() != {"expected_runs", "hook_preview_id"}
+                        or type(data["hook_preview_id"]) is not str
+                        or not 1 <= len(data["hook_preview_id"]) <= 100):
+                    raise ValueError("hook preview")
+                row = _native.start_hook_execution(
+                    database, request.path_params["task"], data["hook_preview_id"],
+                    provider.name, model, count, runtime_secrets())
+            elif "preview_id" in data:
                 if (data.keys() != {"expected_runs", "preview_id"}
                         or type(data["preview_id"]) is not str
                         or not 1 <= len(data["preview_id"]) <= 100):
@@ -245,6 +272,11 @@ def create_app(database, model=None, *, port=8765, provider=None, provider_name=
             if "preview_id" in data:
                 result["skill"] = next(item for item in _native.skill_provenance(database)
                                        if item["run_id"] == row[0])
+            if "hook_preview_id" in data:
+                result["hook"] = next((item for item in _native.hook_provenance(database)
+                                       if item["run_id"] == row[0]), None)
+                if result["hook"] is None:
+                    raise ValueError("missing Hook provenance")
             return response(result)
         except (ValueError, OSError):
             return response({"error": "The response could not be saved or the attempt expired. Refresh history before deciding to retry."}, 409)
@@ -257,6 +289,7 @@ def create_app(database, model=None, *, port=8765, provider=None, provider_name=
         Route("/api/teams", teams, methods=["GET", "POST"]),
         Route("/api/teams/{team}/members", team_members, methods=["POST"]),
         Route("/api/work", work, methods=["POST"]),
+        Route("/api/work/{task}/hook-preview", hook_preview, methods=["POST"]),
         Route("/api/work/{task}/skill-preview", skill_preview, methods=["POST"]),
         Route("/api/work/{task}/execute", execute, methods=["POST"]),
         Mount("/static", StaticFiles(directory=ASSETS, check_dir=False))])
