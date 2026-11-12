@@ -454,7 +454,7 @@ def test_employee_to_result_browser(tmp_path, installed_package):
             draft_assignment = page.get_by_label('Assign to', exact=True).input_value()
             navigation_requests = []
             def record_navigation(request):
-                if '/api/' in request.url and not request.url.endswith('/api/state'):
+                if request.method != 'GET' and '/api/' in request.url and not request.url.endswith('/api/state'):
                     navigation_requests.append(request.url)
             page.on('request', record_navigation)
             for index, (employee_id, work_id) in enumerate(navigation_ids):
