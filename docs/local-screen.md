@@ -1842,3 +1842,60 @@ string values retain the generic error advice/status label without crashing;
 only own dictionary entries select specialized text. The focused App interaction
 regressions also verify retained selection/draft and externally added work after
 refresh, with no mutation replay.
+
+### Malformed saved Skill/Hook configuration (C50-T1)
+
+Start with an existing database:
+
+```sh
+agentown-web --database /ABSOLUTE/PATH/workspace.sqlite3 --port 8765
+```
+
+Open http://127.0.0.1:8765 and select saved work assigned to one employee.
+For Hook preview, use work whose latest attempt finished with reported success.
+No provider credentials are needed for configuration or preview. In browser response
+overrides, use these deterministic GET responses (replace `EMPLOYEE_ID` with the
+saved work's assignee ID):
+
+- `/api/config/v1/skills`:
+  `{"skills":[{"id":"fixture-s","name":"Concise","instructions":"Be concise.","enabled":true}]}`
+- `/api/config/v1/hooks`:
+  `{"hooks":[{"id":"fixture-h","name":"Follow up","skill_id":"fixture-s","target_kind":"agent","target_id":"EMPLOYEE_ID","event":"run_completed","enabled":true}]}`
+
+These are response fixtures, not database edits. To obtain a server-issued preview,
+create matching records through the product configuration screen instead, enable
+them explicitly, and use their actual stable IDs in the overrides. Preview uses
+saved work; leave unsaved request text in the editor to verify preservation.
+
+1. Select the enabled Skill or eligible Hook and press Enter on its preview button.
+   Inspect the effective saved input; no execution is requested.
+2. Change either response to include a null record, duplicate ID, a string
+   `enabled`, invalid field type, or unsupported Hook target/event. Wait for the
+   next poll (800 ms). Loaded choices remain visible with **stale** feedback;
+   preview and execution are unavailable and prior consent is removed. Focus
+   returns to the labelled execution region when its preview button is disabled.
+   Hook loading accepts both responses together, never half of a failed snapshot.
+3. Restore valid responses. The selected stable ID remains selected if present;
+   drafts and saved work remain intact. Recovery does not replay preview or
+   execution. Press Tab to reach preview and Enter for a fresh explicit preview.
+   Cancel it; inspect Network to confirm zero `/execute` requests.
+4. Reload with malformed overrides active. Confirm **unavailable** feedback,
+   disabled preview and no crash. Restore valid responses and wait for recovery.
+   If a selected record disappears in a valid response, choose another record.
+
+Run deterministic validator and interaction coverage with frontend dependencies:
+
+```sh
+cd frontend
+npm exec -- vitest run src/execution-configuration.test.tsx src/SkillExecution.test.tsx src/HookExecution.test.tsx
+npm exec -- tsc --noEmit
+```
+
+The new interactions cover malformed initial snapshots, malformed polling after
+keyboard preview, recovery, retained selection/draft, focus and zero unintended
+submissions for Skills and for each half of the Hook snapshot. Integration ran
+these three suites successfully (39 tests) and passed `tsc --noEmit` using the
+available local frontend dependencies. Polling intervals are controlled in the
+recovery tests while keyboard interaction timeout queues run normally. The
+supervisor's applicable consolidated/browser verification remains pending. Live
+provider calls remain skipped, not passed.
