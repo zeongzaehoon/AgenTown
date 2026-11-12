@@ -443,5 +443,5 @@ def test_connections_presentation_boundary_and_no_storage_access(tmp_path, monke
         assert client.post(path, json={}, headers={'Origin': 'http://evil.example'}).status_code == 403
         response = client.post(path, json={}, headers=HEADERS)
         assert response.status_code == 200
-        assert response.json() == connection_setup()
+        assert response.json() == connection_setup(str(tmp_path / 'company.db'))
         assert 'no-store' in response.headers['cache-control']

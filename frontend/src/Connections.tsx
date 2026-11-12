@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from './api';
 
-interface Platform { id: string; name: string; configuration: string; destination: string; inspection: string }
+interface Platform { id: string; name: string; configuration: string; destination: string; inspection: string; filename?: string }
 export interface ConnectionSetup {
   schema_version: 1; workflow_version: 1; transport: 'stdio'; evidence: string;
   preparation: string; actions: string[]; consent: string; recovery: string;
-  clients: { id: string; name: string; readiness: 'unknown'; platforms: Platform[] }[];
+  clients: { id: string; name: string; readiness: 'unknown'; status?: {detected: boolean | null; configured: 'unknown'; connected: 'unverified'; exercised: 'unverified'}; platforms: Platform[] }[];
 }
 
 export function Connections({workspaceConnected}: {workspaceConnected: boolean}) {
@@ -43,11 +43,26 @@ function Setup({workspaceConnected}: {workspaceConnected: boolean}) {
   const client = data?.clients.find(c => c.id === clientId) ?? data?.clients[0];
   const platform = client?.platforms.find(p => p.id === platformId) ?? client?.platforms[0];
   const instructions = data && client && platform ? [
-    `${client.name} · ${platform.name} · stdio workflow v1`, data.preparation,
+    `${client.name} · ${platform.name} · ${client.id === 'chatgpt' ? 'Remote HTTPS prerequisites' : 'stdio workflow v1'}`, data.preparation,
     `Merge into ${platform.destination}:`, platform.configuration, platform.inspection,
     'Ask the client: Using AgenTown, list employees and saved work. Inspect the selected Task and its attempt history. Do not execute work.',
     ...data.actions, data.consent, data.recovery, data.evidence,
   ].join('\n\n') : '';
+  function download() {
+    let url: string | undefined;
+    let anchor: HTMLAnchorElement | undefined;
+    try {
+      url = URL.createObjectURL(new Blob([platform?.configuration ?? ''], {type: 'text/plain;charset=utf-8'}));
+      anchor = document.createElement('a');
+      anchor.href = url; anchor.download = platform?.filename ?? `${clientId}-setup.txt`;
+      document.body.appendChild(anchor); anchor.click();
+      setFeedback('Download requested. Check your downloads; merge the fragment manually. Client readiness remains unknown.');
+    } catch { setFeedback('Could not download. Copy the setup instructions or select and save the text below manually.'); }
+    finally {
+      anchor?.remove();
+      if (url) { const completedUrl = url; setTimeout(() => URL.revokeObjectURL(completedUrl), 1000); }
+    }
+  }
   async function copy() {
     if (copyingLock.current) return;
     copyingLock.current = true; setCopying(true); setFeedback('');
@@ -67,10 +82,12 @@ function Setup({workspaceConnected}: {workspaceConnected: boolean}) {
       <select id="connection-client" value={client.id} onChange={e => {setClientId(e.target.value); setFeedback('');}}>{data.clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
       <label htmlFor="connection-platform">Platform</label>
       <select id="connection-platform" value={platform.id} onChange={e => {setPlatformId(e.target.value); setFeedback('');}}>{client.platforms.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
-      <p>Client readiness: Unknown</p><p>{data.evidence}</p>
+      <p>Client readiness: Unknown</p>
+      <p>Detected: {client.status?.detected === true ? 'Installation hint only' : client.status?.detected === false ? 'Not detected (inconclusive)' : 'Unknown'}. Configured: Unknown. Connected: Unverified. Exercised: Unverified.</p><p>{data.evidence}</p>
       <h3>Available actions</h3><ul>{data.actions.map(a => <li key={a}>{a}</li>)}</ul>
       <h3>Explicit execution consent</h3><p>{data.consent}</p>
       <button type="button" disabled={copying} onClick={() => void copy()}>Copy setup instructions</button>
+      <button type="button" onClick={download}>Download setup artifact</button>
       <p role="status" aria-live="polite">{feedback}</p>
       <label htmlFor="connection-instructions">Setup instructions</label>
       <textarea id="connection-instructions" readOnly rows={16} value={instructions} />

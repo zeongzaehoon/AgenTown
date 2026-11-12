@@ -103,7 +103,7 @@ def create_app(database, model=None, *, port=8765, provider=None, provider_name=
 
     async def connections(request):
         from .connections import connection_setup
-        return response(connection_setup())
+        return response(connection_setup(database))
 
     async def state(request):
         try:

@@ -51,3 +51,29 @@ def test_detection_does_not_open_files_or_launch_clients(monkeypatch):
     detected = detect_capabilities()["clients"]
     assert detected[1]["detected"] is True
     assert all(c["configuration"] == "unknown" and c["protocol_connection"] == c["client_exercise"] == "unverified" for c in detected)
+
+
+@pytest.mark.parametrize('folder', ['Company Space', 'Company 😀'])
+def test_packaged_runtime_artifacts_preserve_paths_and_truthful_states(tmp_path, monkeypatch, folder):
+    import sys
+    executable = str(tmp_path / folder / 'Installed App' / 'python')
+    database = str(tmp_path / folder / 'User Data' / 'company.sqlite')
+    monkeypatch.setattr(sys, 'executable', executable)
+    setup = connection_setup(database)
+    assert [c['id'] for c in setup['clients']] == ['codex', 'claude-code', 'claude-desktop', 'cursor', 'chatgpt']
+    for client in setup['clients']:
+        assert client['status']['configured'] == 'unknown'
+        assert client['status']['connected'] == client['status']['exercised'] == 'unverified'
+        platform, = client['platforms']
+        assert platform['filename']
+        if client['id'] == 'chatgpt':
+            assert 'PKCE' in platform['configuration']
+            assert 'prerequisites unmet' in platform['destination']
+            assert database in platform['configuration']
+            continue
+        parsed = (tomllib.loads(platform['configuration'])['mcp_servers'] if client['id'] == 'codex'
+                  else json.loads(platform['configuration'])['mcpServers'])['agentown']
+        assert parsed['command'] == executable
+        assert parsed['args'] == ['-I', '-m', 'llm_engine.mcp_server', '--database', database]
+        assert Path(platform['destination']).is_absolute()
+    assert not Path(database).exists()

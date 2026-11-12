@@ -53,3 +53,30 @@ test('clipboard denial and disconnected setup retain selection and instructions 
   await waitFor(() => expect(screen.getByText('Setup service available.')).toBeTruthy());
   expect(screen.getByText('Client readiness: Unknown')).toBeTruthy();
 });
+
+test('all five choices offer artifacts; download failure preserves truthful status', async () => {
+  const all = {...setup, clients: ['codex', 'claude-code', 'claude-desktop', 'cursor', 'chatgpt'].map(id => ({
+    ...setup.clients[0], id, name: id, platforms: [{...setup.clients[0].platforms[0], configuration: `artifact-${id}`, filename: `${id}.txt`}],
+  }))};
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(all))));
+  const user = userEvent.setup();
+  const create = vi.fn((_blob: Blob) => 'blob:setup');
+  vi.stubGlobal('URL', {createObjectURL: create, revokeObjectURL: vi.fn()});
+  const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+  render(<Connections workspaceConnected={false} />);
+  await user.click(screen.getByRole('button', {name: 'Open connections'}));
+  await screen.findByLabelText('Client');
+  for (const id of ['codex', 'claude-code', 'claude-desktop', 'cursor', 'chatgpt']) {
+    await user.selectOptions(screen.getByLabelText('Client'), id);
+    screen.getByRole('button', {name: 'Download setup artifact'}).focus();
+    await user.keyboard('{Enter}');
+    expect(create.mock.calls.at(-1)?.[0]).toBeInstanceOf(Blob);
+    expect(screen.getByText(/Configured: Unknown. Connected: Unverified. Exercised: Unverified/)).toBeTruthy();
+    expect((screen.getByLabelText('Setup instructions') as HTMLTextAreaElement).value).toContain(`artifact-${id}`);
+  }
+  expect(click).toHaveBeenCalledTimes(5);
+  create.mockImplementation(() => {throw new Error('download denied');});
+  await user.click(screen.getByRole('button', {name: 'Download setup artifact'}));
+  expect(screen.getByText(/Could not download/)).toBeTruthy();
+  expect(screen.getByText('Client readiness: Unknown')).toBeTruthy();
+});

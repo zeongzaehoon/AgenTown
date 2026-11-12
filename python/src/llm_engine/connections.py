@@ -6,7 +6,8 @@ import sys
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
 
-def connection_setup():
+def connection_setup(database=None):
+    selected_database = database
     clients = []
     for client_id, name in (("codex", "Codex"), ("claude-code", "Claude Code"), ("claude-desktop", "Claude Desktop"), ("cursor", "Cursor")):
         platforms = []
@@ -34,7 +35,7 @@ def connection_setup():
             platforms.append({"id": platform, "name": "Windows" if windows else "macOS", "configuration": config,
                               "destination": destination, "inspection": inspect})
         clients.append({"id": client_id, "name": name, "readiness": "unknown", "platforms": platforms})
-    return {
+    result = {
         "schema_version": 1, "workflow_version": 1, "transport": "stdio",
         "evidence": "No client settings or connection sessions are inspected. Setup availability and copying do not establish configuration or verification.",
         "preparation": "Install AgenTown into a virtual environment. Replace both absolute paths below. The database parent must exist. Initialize the store with the matching agentown executable: agentown --database ABSOLUTE_DATABASE agent list. Back up the destination and merge only the agentown entry; preserve other servers. The client launches the stdio server; there is no remote URL.",
@@ -43,6 +44,65 @@ def connection_setup():
         "recovery": "After a timeout or disconnect inspect history before retrying: a lost response may have committed a Run. For startup failure check the configured executable with --help, database path/permissions and client stderr. Do not delete the database. To disconnect, stop the client, remove only its agentown entry (or restore the backup), then restart. Keep the database.",
         "clients": clients,
     }
+    if selected_database is not None:
+        _runtime_setup(result, selected_database)
+    return result
+
+
+def _runtime_setup(result, database):
+    """Render the running installation; never write settings or start a server."""
+    platform = "windows" if sys.platform == "win32" else "macos"
+    executable = str(Path(sys.executable).absolute())
+    database = str(Path(database).absolute())
+    args = ["-I", "-m", "llm_engine.mcp_server", "--database", database]
+    hints = {c["id"]: c for c in detect_capabilities()["clients"]}
+    home = Path.home()
+    for client in result["clients"]:
+        item = next(p for p in client["platforms"] if p["id"] == platform)
+        entry = {"command": executable, "args": args}
+        if client["id"] in ("cursor", "claude-code"):
+            entry["type"] = "stdio"
+        if client["id"] == "codex":
+            # TOML requires Unicode scalar values, not JSON surrogate escapes.
+            item["configuration"] = ('[mcp_servers.agentown]\ncommand = ' + json.dumps(executable, ensure_ascii=False) +
+                                     '\nargs = ' + json.dumps(args, ensure_ascii=False) + '\n')
+            destination = home / ".codex" / "config.toml"
+        else:
+            item["configuration"] = json.dumps({"mcpServers": {"agentown": entry}}, indent=2) + "\n"
+            if client["id"] == "claude-desktop":
+                destination = (Path(os.environ.get("APPDATA", str(home / "AppData" / "Roaming"))) / "Claude" / "claude_desktop_config.json"
+                               if platform == "windows" else home / "Library" / "Application Support" / "Claude" / "claude_desktop_config.json")
+            elif client["id"] == "cursor":
+                destination = home / ".cursor" / "mcp.json"
+            else:
+                destination = home / ".claude.json"
+                item["inspection"] = "Use Claude Code /mcp Add server (user scope) with the command and args shown, then run claude mcp get agentown and inspect /mcp. Merge the mcpServers entry only; preserve other settings."
+        item["destination"] = str(destination)
+        item["filename"] = client["id"] + (".toml" if client["id"] == "codex" else ".json")
+        client["platforms"] = [item]
+        client["status"] = {"detected": hints.get(client["id"], {}).get("detected"),
+                            "configured": "unknown", "connected": "unverified", "exercised": "unverified"}
+    remote = """ChatGPT remote connection prerequisites — not configured or verified.
+ChatGPT cannot use a local executable or loopback URL.
+Provide a public HTTPS endpoint with a valid certificate and trusted TLS proxy forwarding /mcp and discovery routes, including Authorization headers (never log them).
+Provide an OAuth issuer with discovery, authorization/token endpoints, supported client registration, redirect validation, PKCE and scoped/audienced access tokens. AgenTown is a resource server, not an OAuth login service.
+Choose an eligible ChatGPT workspace and configure its remote MCP connector with the public HTTPS /mcp URL. Keep tool approvals enabled.
+The operator must explicitly start the packaged Python with -I -m llm_engine.mcp_remote --database DATABASE --public-key PUBLIC_KEY --issuer ISSUER --base-url HTTPS_URL --allow-public --host 127.0.0.1 behind that proxy.
+Replace DATABASE with the selected database below; all other values require operator configuration. No endpoint, issuer or key is detected by this screen.
+Validate protected-resource discovery at /.well-known/oauth-protected-resource/mcp, unauthenticated rejection, OAuth login and approved read-only list_agents/list_tasks before considering connected or exercised.
+Recovery: stop the foreground adapter and revoke/stop the proxy separately. Inspect work history before retrying. Keep the database. Remove only the connector to disconnect.
+"""
+    remote += "\nPackaged Python: " + executable + "\nSelected database: " + database + "\n"
+    result["clients"].append({"id": "chatgpt", "name": "ChatGPT", "readiness": "unknown",
+        "status": {"detected": None, "configured": "unknown", "connected": "unverified", "exercised": "unverified"},
+        "platforms": [{"id": platform, "name": "Windows" if platform == "windows" else "macOS",
+        "configuration": remote, "filename": "chatgpt-prerequisites.txt", "destination": "ChatGPT workspace connector settings — HTTPS/OAuth prerequisites unmet",
+        "inspection": "Complete the prerequisites in this checklist. Local stdio configuration is not usable by ChatGPT."}]})
+    result["preparation"] = ("Artifacts use this running packaged Python and selected database. No checkout or Node is required. "
+        "Back up the destination and merge only the agentown entry; do not replace other settings. "
+        "Download saves a merge fragment, not a settings installation. For ChatGPT use the prerequisite checklist instead. "
+        "Moving the installation or selecting another database requires fresh artifacts.")
+
 
 
 JSON_CLIENTS = ("claude-desktop", "cursor")

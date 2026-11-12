@@ -316,3 +316,16 @@ IDs; failed upgrade/interrupted install recovery; and manual visual/form use.
 None was executed by the implementation invocation on macOS. Supervisor browser
 and consolidated product verification are also pending. macOS delivery evidence
 is not Windows proof.
+
+### Connections from an installed desktop (C26-T3)
+
+1. On macOS, launch `/Applications/AgenTown.app` from Finder (or `open /Applications/AgenTown.app`). On Windows, launch AgenTown from the Start menu after installation, or run its installed `launch-agentown.bat`. These steps require no checkout or Node.
+2. Open **Connections**, choose Codex, Claude Code, Claude Desktop, Cursor or ChatGPT. The local platform is selected by the service. Inspect the displayed absolute settings destination and configuration. The command is the running packaged Python with `-I -m llm_engine.mcp_server`; its database argument is the desktop's selected database. Paths containing spaces remain separate JSON/TOML arguments.
+3. Copy setup instructions or download the setup artifact. Downloads are merge fragments: back up the displayed destination, merge only `agentown`, and preserve other settings. Claude Code can instead add the displayed command/args through `/mcp` in user scope. No action here writes application settings or starts another service.
+4. Follow the displayed restart/status inspection instructions. Ask the client to list employees and saved work without execution. An installation hint, successful copy or download proves neither configuration nor a protocol session; this screen keeps configured unknown and connected/exercised unverified.
+5. ChatGPT downloads a prerequisite checklist. Public HTTPS, a TLS proxy, an OAuth issuer with supported registration/login and eligible client configuration remain operator prerequisites. This screen neither exposes the local service nor supplies credentials. See `docs/mcp.md` for the opt-in remote adapter contract.
+6. Deny clipboard permission to check manual-copy recovery. If downloads are denied by the host, use the readable instructions and save manually. Stop the local service and refresh to check disconnected/stale recovery; restart AgenTown and refresh. Inspect history before retrying work and never delete the database to repair a connection.
+
+Client sessions, actual downloads in each desktop webview and browser interaction
+for this snapshot require supervisor validation. No live provider calls are needed
+for this setup flow.

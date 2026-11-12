@@ -1038,3 +1038,11 @@ real browser exercise/screenshots are pending only if that profile requires them
 This implementation invocation did not run browser or installed-product checks.
 Live provider calls remain skipped, not passed. Existing WCAG research and the
 C24-T1 API documentation were reused; no new research uncertainty arose.
+
+C26-T3 Connections: the packaged service provides five choices, runtime-specific
+stdio merge fragments for local clients and an HTTPS/OAuth prerequisite checklist
+for ChatGPT. Copy and download are explicit actions and never advance connection
+status. Installation detection is a bounded hint only. Exact current settings
+paths, validation and recovery appear in the read-only instructions. Keyboard
+users can open Connections, select a client and activate either action with
+standard native controls. See `docs/desktop.md` for installed launch/recovery steps.
