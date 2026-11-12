@@ -118,6 +118,8 @@ def create_app(database, model=None, *, port=8765, provider=None, provider_name=
     async def state(request):
         try:
             agents, tasks, executions = _native.history_snapshot(database)
+            # Read after recovery so every included Run can have caller metadata.
+            sources = dict(_native.execution_sources(database))
             results = {row[0]: record(row) for row in executions}
             skill_provenance = {item["run_id"]: item for item in _native.skill_provenance(database)}
             hook_provenance = {item["run_id"]: item for item in _native.hook_provenance(database)}
@@ -127,7 +129,7 @@ def create_app(database, model=None, *, port=8765, provider=None, provider_name=
                 item = dict(zip(("id", "input", "status", "assignees"), task))
                 attempts = []
                 for run in runs:
-                    attempt = {"id": run[0], "state": run[6], "outcome": run[7], "started": run[4], "ended": run[5], "participants": run[8]}
+                    attempt = {"id": run[0], "state": run[6], "outcome": run[7], "started": run[4], "ended": run[5], "participants": run[8], "declared_source": sources.get(run[0])}
                     # CLI reporters may use the same stage without an execution.
                     if run[0] in results:
                         attempt.update(results[run[0]])

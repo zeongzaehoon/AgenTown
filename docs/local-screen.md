@@ -1278,3 +1278,42 @@ Availability is advisory and the server can reject an ownership race. Such
 failures retain inspection-before-retry guidance and never automatically resend.
 Browser validation and consolidated frontend/build/Python checks are pending the
 supervisor gate. Live provider validation remains skipped, not passed.
+
+### Saved-work caller attribution API (C35-T1)
+
+`POST /api/state` now includes `declared_source` on every saved-work attempt.
+The value is caller-declared, unverified metadata from native `execution_sources`,
+joined by Run ID after `history_snapshot` performs its existing recovery. Missing
+metadata (including ordinary web executions and legacy reporter Runs) is JSON
+`null`; no identity is inferred from participants, provider or reporting source.
+Skill and Hook provenance, attempt ordering and snapshot status remain intact.
+
+Implementation invocation checks: the available product Python 3.13 environment
+ran `pytest python/tests/test_web.py -q -k 'not
+same_origin_boundary_configuration_and_redaction'`: **37 passed, 1 deselected**.
+The initial run also exercised that existing test; its asset-count assertion
+failed because this isolated source workspace lacks built frontend assets.
+The supervisor must rerun it with built assets. New deterministic tests exercise
+persisted ordinary MCP, Skill and Hook sources, null web/legacy values, Run/Task
+association, ordering, reopening, read-after-snapshot ordering and sanitized
+source-read failures. No real provider calls were made.
+
+A separate process invoked the `agentown-web` entry point (`llm_engine.web.main`)
+with `--database <temporary-product.db> --port 18765`. It used this checkout's
+Python source and the already available product native binding, without rebuilding
+or changing the installed package. The database was copied from the deterministic
+attribution test. A real HTTP request was made with:
+
+```sh
+curl -H 'Origin: http://127.0.0.1:18765' -H 'Content-Type: application/json' \
+  -d '{}' http://127.0.0.1:18765/api/state
+```
+
+Observed response: two saved Tasks, six attempts, and sources
+`["other-client", null, null, "codex", "cursor", "claude-code"]` in response order.
+Temporary artifacts for this invocation are
+`/var/folders/dx/ny9cjsmd1bb3r42zbp694xkh0000gn/T/c35-workspace-2oxpq1_h/`
+(`product.db`, `state.json`, `server.log`). The process shut down normally.
+These are fixture results, not live provider evidence. Browser validation and
+consolidated checks remain pending the supervisor gate; live LLM tests are skipped
+under the user policy, not passed.

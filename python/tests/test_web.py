@@ -445,3 +445,80 @@ def test_connections_presentation_boundary_and_no_storage_access(tmp_path, monke
         assert response.status_code == 200
         assert response.json() == connection_setup(str(tmp_path / 'company.db'))
         assert 'no-store' in response.headers['cache-control']
+
+
+def test_workspace_declared_sources_persist_by_run(tmp_path, monkeypatch):
+    db = str(tmp_path / 'sources.db')
+    provider = TestProvider()
+    expected = {}
+    with TestClient(create_app(db, provider=provider), base_url=ORIGIN) as client:
+        task = setup_work(client)
+        employee = _native.show_task(db, task)[3][0]
+        legacy = _native.start_run(db, task, 'implement', 'not-a-declared-source', [employee])
+        _native.finish_run(db, legacy[0], 'failure')
+        expected[legacy[0]] = None
+        web = _native.start_web_execution(db, task, 'anthropic', 'fixture', 1)
+        _native.finish_execution(db, web[0], 'Web fixture', None)
+        expected[web[0]] = None
+        ordinary = _native.start_mcp_execution(db, task, 'anthropic', 'fixture', 2, True, 'codex')
+        _native.finish_execution(db, ordinary[0], 'MCP fixture', None)
+        expected[ordinary[0]] = 'codex'
+        skill = _native.create_skill(db, 'Concise', 'Use short sentences.')
+        _native.set_skill_enabled(db, skill['id'], True)
+        preview = _native.preview_skill(db, task, skill['id'])
+        run = _native.start_skill_execution(db, task, preview['preview_id'], 'anthropic', 'fixture', 3,
+                                            declared_source='cursor')
+        _native.finish_execution(db, run[0], 'Skill fixture', None)
+        expected[run[0]] = 'cursor'
+        hook = _native.create_hook(db, 'Follow up', skill['id'], 'agent', employee, 'run_completed')
+        _native.set_hook_enabled(db, hook['id'], True)
+        preview = _native.preview_hook(db, task, hook['id'])
+        run = _native.start_hook_execution(db, task, preview['preview_id'], 'anthropic', 'fixture', 4,
+                                           declared_source='claude-code')
+        _native.finish_execution(db, run[0], 'Hook fixture', None)
+        expected[run[0]] = 'claude-code'
+        other = setup_work(client)
+        run = _native.start_mcp_execution(db, other, 'anthropic', 'fixture', 0, False, 'other-client')
+        _native.finish_execution(db, run[0], 'Other fixture', None)
+        expected[run[0]] = 'other-client'
+        snapshot = _native.history_snapshot
+        sources = _native.execution_sources
+        reads = []
+
+        def read_history(database):
+            reads.append('history')
+            return snapshot(database)
+
+        def read_sources(database):
+            assert reads[-1] == 'history'
+            reads.append('sources')
+            return sources(database)
+
+        monkeypatch.setattr(_native, 'history_snapshot', read_history)
+        monkeypatch.setattr(_native, 'execution_sources', read_sources)
+        saved = client.post('/api/state', json={}, headers=HEADERS).json()
+        work = {item['id']: item for item in saved['work']}
+        attempts = [a for item in work.values() for a in item['attempts']]
+        assert {a['id']: a['declared_source'] for a in attempts} == expected
+        assert {a['id'] for a in work[task]['attempts']} == set(expected) - {run[0]}
+        assert [a['id'] for a in work[other]['attempts']] == [run[0]]
+        assert any('skill' in a for a in attempts)
+        assert any('hook' in a for a in attempts)
+        for item in work.values():
+            assert item['attempts'] == sorted(item['attempts'], key=lambda a: (a['started'], a['id']))
+    with TestClient(create_app(db, provider=provider), base_url=ORIGIN) as client:
+        assert client.post('/api/state', json={}, headers=HEADERS).json() == saved
+        assert provider.calls == 0
+
+
+@pytest.mark.parametrize('failure', [ValueError, OSError])
+def test_workspace_source_read_failure_is_sanitized(tmp_path, monkeypatch, failure):
+    def unavailable(database):
+        raise failure('/private/database caller-secret')
+
+    with TestClient(create_app(str(tmp_path / 'sources.db'), provider=TestProvider()), base_url=ORIGIN) as client:
+        monkeypatch.setattr(_native, 'execution_sources', unavailable)
+        result = client.post('/api/state', json={}, headers=HEADERS)
+        assert result.status_code == 503
+        assert result.json() == {'error': 'Cannot read work history. Check the database path, permissions and compatibility, then restart.'}
+        assert 'caller-secret' not in result.text
