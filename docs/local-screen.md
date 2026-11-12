@@ -1726,3 +1726,37 @@ now matches the explicit “Previously loaded instructions may be stale” feedb
 The supervisor-selected consolidated profile and browser checks remain pending.
 No live provider or external client configuration is required. Live LLM tests
 remain skipped.
+
+
+### Read ordered local-client setup guidance (C47-T1)
+
+Launch `agentown-web --database PATH --port 8765` with your existing database,
+then open `http://127.0.0.1:8765`, or open the desktop app. Open **Connections**
+and select Codex, Claude Code, Claude Desktop, or Cursor and the desired platform.
+The four numbered steps now show the existing API guidance directly:
+
+1. **Prepare AgenTown**: read the preparation and replace paths as directed.
+2. **Configure [client] · [platform]**: inspect the destination and exact fragment.
+   Copy configuration or download the artifact, then merge manually if desired.
+3. **Inspect and verify in [client]**: follow the selected client's inspection
+   instructions and the read-only employee/work prompt. The existing local server
+   and shared-data checks remain available here with their recovery notices.
+4. **Recover if setup fails**: read recovery guidance before retrying.
+
+No external client installation or credentials are needed to inspect these steps.
+Changing client or platform updates the destination, fragment, and inspection
+instructions together. Preparation and recovery preserve API line breaks. The
+combined **Setup instructions** field and its copy action remain available.
+Tab from the setup heading through Refresh setup, Client, Platform and the fields;
+use Enter or Space to activate focused buttons. All guidance is readable without
+opening a disclosure or searching the combined field.
+
+For recovery, stop the web server and choose **Refresh setup**: the stale notice
+appears while previously loaded steps stay readable. Restart with the same database
+and refresh again: the notice clears and guidance updates, retaining selection.
+Choose ChatGPT: its separate **ChatGPT prerequisites checklist** replaces local
+steps and offers no local configuration fragment or diagnostic controls. Copying,
+downloading, and local checks never establish external configuration, connection,
+or exercise. Deterministic Connections interaction tests cover these states;
+supervisor-selected browser validation is pending for this implementation.
+Live provider calls remain skipped, not passed.

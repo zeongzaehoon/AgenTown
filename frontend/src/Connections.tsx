@@ -282,7 +282,6 @@ function Setup({workspaceConnected, openClient, active}: {active: boolean; works
       <select id="connection-platform" value={platform.id} onChange={e => {setPlatformId(e.target.value); setFeedback('');}}>{client.platforms.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
       <p>Client readiness: Unknown</p>
       <p>Detected: {client.status?.detected === true ? 'Installation hint only' : client.status?.detected === false ? 'Not detected (inconclusive)' : 'Unknown'}. Configured: Unknown. Connected: Unverified. Exercised: Unverified.</p><p>{data.evidence}</p>
-      {client.id !== 'chatgpt' && <><LocalDiagnostic /><SharedDataCheck /></>}
       <h3>Available actions</h3><ul>{data.actions.map(a => <li key={a}>{a}</li>)}</ul>
       <h3>Explicit execution consent</h3><p>{data.consent}</p>
       {client.id === 'chatgpt' ? <section aria-labelledby="chatgpt-prerequisites">
@@ -290,13 +289,23 @@ function Setup({workspaceConnected, openClient, active}: {active: boolean; works
         <p>Remote HTTPS prerequisites; this is not a local client configuration.</p>
         <ul>{platform.configuration.split('\n').filter(line => line.trim()).map((line, index) => <li key={index}>{line}</li>)}</ul>
         <p>{platform.inspection}</p>
-      </section> : <>
-        <label htmlFor="connection-destination">Configuration destination</label>
-        <textarea id="connection-destination" readOnly rows={2} value={platform.destination} />
-        <label htmlFor="connection-configuration">Configuration fragment</label>
-        <textarea id="connection-configuration" readOnly rows={10} value={platform.configuration} />
-        <button type="button" disabled={copying} onClick={() => void copy(true)}>Copy configuration</button>
-      </>}
+      </section> : <ol className="connection-steps" aria-label="Local client setup steps">
+        <li><h4>Prepare AgenTown</h4><p className="connection-guidance">{data.preparation}</p></li>
+        <li><h4>Configure {client.name} · {platform.name}</h4>
+          <p>Merge this fragment into the selected destination manually.</p>
+          <label htmlFor="connection-destination">Configuration destination</label>
+          <textarea id="connection-destination" readOnly rows={2} value={platform.destination} />
+          <label htmlFor="connection-configuration">Configuration fragment</label>
+          <textarea id="connection-configuration" readOnly rows={10} value={platform.configuration} />
+          <button type="button" disabled={copying} onClick={() => void copy(true)}>Copy configuration</button>
+        </li>
+        <li><h4>Inspect and verify in {client.name}</h4>
+          <p className="connection-guidance">{platform.inspection}</p>
+          <p>Ask the client: Using AgenTown, list employees and saved work. Inspect the selected Task and its attempt history. Do not execute work.</p>
+          <LocalDiagnostic /><SharedDataCheck />
+        </li>
+        <li><h4>Recover if setup fails</h4><p className="connection-guidance">{data.recovery}</p></li>
+      </ol>}
       <button type="button" disabled={copying} onClick={() => void copy()}>Copy setup instructions</button>
       <button type="button" onClick={download}>Download setup artifact</button>
       <p role="status" aria-live="polite">{feedback}</p>

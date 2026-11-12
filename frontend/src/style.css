@@ -51,3 +51,8 @@
 .hook-device-grid, .loop-policy-device-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr)); gap: 16px; }
 .hook-device, .loop-policy-device { display: flex; flex-direction: column; align-items: flex-start; text-align: left; gap: 6px; min-width: 0; overflow-wrap: anywhere; border: 3px solid #61766b; border-radius: 14px; }
 .hook-device:focus-visible, .loop-policy-device:focus-visible { outline: 4px solid #a33b00; outline-offset: 5px; }
+
+.connection-steps { padding-left: 2rem; }
+.connection-steps > li { padding: 0 0 1.25rem .5rem; min-width: 0; }
+.connection-steps h4 { font-size: 1.1rem; margin-bottom: .5rem; }
+.connection-guidance { white-space: pre-wrap; overflow-wrap: anywhere; }

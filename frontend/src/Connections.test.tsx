@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, expect, test, vi } from 'vitest';
 import { REQUEST_DEADLINE_MS } from './api';
@@ -528,4 +528,86 @@ test('ChatGPT shows a separate prerequisites checklist without local fragment co
   expect(copy).toHaveBeenCalledWith((screen.getByLabelText('Setup instructions') as HTMLTextAreaElement).value);
   expect(screen.getByRole('button', {name: 'Download setup artifact'})).toBeTruthy();
   expect(fetcher.mock.calls).toHaveLength(1);
+});
+
+
+const guidedSetup: ConnectionSetup = {...setup, clients: [
+  ...['codex', 'claude-code', 'claude-desktop', 'cursor'].map((id, index) => ({
+    ...setup.clients[0], id, name: ['Codex', 'Claude Code', 'Claude Desktop', 'Cursor'][index],
+    platforms: setup.clients[0].platforms.map(platform => ({...platform,
+      destination: `${id}/${platform.id}/settings`, configuration: `fragment ${id} ${platform.id}\n`,
+      inspection: `Inspect ${id} on ${platform.id}.\nRestart the selected client.`,
+    })),
+  })), recoverySetup.clients[2],
+]};
+
+test('ordered local setup follows all four clients and platforms and separates ChatGPT', async () => {
+  const fetcher = vi.fn(async () => new Response(JSON.stringify(guidedSetup)));
+  vi.stubGlobal('fetch', fetcher);
+  const user = userEvent.setup();
+  render(<Connections workspaceConnected openClient={{id: 'codex'}} />);
+  await screen.findByLabelText('Client');
+  // The workstation heading receives focus; native controls follow in reading order.
+  expect(document.activeElement).toBe(screen.getByRole('heading', {name: 'Codex setup'}));
+  await user.tab();
+  expect(document.activeElement).toBe(screen.getByRole('button', {name: 'Refresh setup'}));
+  await user.tab();
+  expect(document.activeElement).toBe(screen.getByLabelText('Client'));
+  await user.tab();
+  expect(document.activeElement).toBe(screen.getByLabelText('Platform'));
+  for (const client of guidedSetup.clients.slice(0, 4)) {
+    await user.selectOptions(screen.getByLabelText('Client'), client.id);
+    for (const platform of client.platforms) {
+      await user.selectOptions(screen.getByLabelText('Platform'), platform.id);
+      const steps = within(screen.getByRole('list', {name: 'Local client setup steps'}));
+      expect(steps.getAllByRole('heading', {level: 4}).map(node => node.textContent)).toEqual([
+        'Prepare AgenTown', `Configure ${client.name} · ${platform.name}`,
+        `Inspect and verify in ${client.name}`, 'Recover if setup fails',
+      ]);
+      expect(steps.getByText(guidedSetup.preparation)).toBeTruthy();
+      expect(steps.getByText(platform.inspection, {normalizer: value => value})).toBeTruthy();
+      expect(steps.getByText(guidedSetup.recovery)).toBeTruthy();
+      expect((steps.getByLabelText('Configuration destination') as HTMLTextAreaElement).value).toBe(platform.destination);
+      expect((steps.getByLabelText('Configuration fragment') as HTMLTextAreaElement).value).toBe(platform.configuration);
+    }
+  }
+  await user.selectOptions(screen.getByLabelText('Client'), 'chatgpt');
+  expect(screen.queryByRole('list', {name: 'Local client setup steps'})).toBeNull();
+  expect(screen.getByRole('region', {name: 'ChatGPT prerequisites checklist'})).toBeTruthy();
+  expect(screen.queryByRole('button', {name: 'Check local server'})).toBeNull();
+  expect(screen.queryByRole('button', {name: 'Check shared data'})).toBeNull();
+  expect(screen.getByText(/Configured: Unknown. Connected: Unverified. Exercised: Unverified/)).toBeTruthy();
+  expect(fetcher.mock.calls).toHaveLength(1);
+});
+
+test('failed refresh retains readable steps and keyboard refresh recovers selected guidance', async () => {
+  let fail = false;
+  let response = guidedSetup;
+  vi.stubGlobal('fetch', vi.fn(async () => {
+    if (fail) throw new Error('offline');
+    return new Response(JSON.stringify(response));
+  }));
+  const user = userEvent.setup();
+  render(<Connections workspaceConnected openClient={{id: 'cursor'}} />);
+  await screen.findByLabelText('Client');
+  await user.selectOptions(screen.getByLabelText('Platform'), 'windows');
+  const refresh = screen.getByRole('button', {name: 'Refresh setup'});
+  fail = true;
+  refresh.focus();
+  await user.keyboard('{Enter}');
+  await screen.findByText(/Previously loaded instructions may be stale/);
+  let steps = within(screen.getByRole('list', {name: 'Local client setup steps'}));
+  expect(steps.getByText(guidedSetup.preparation)).toBeTruthy();
+  expect(steps.getByText('Inspect cursor on windows.\nRestart the selected client.', {normalizer: value => value})).toBeTruthy();
+  expect(steps.getByText(guidedSetup.recovery)).toBeTruthy();
+  fail = false;
+  response = {...guidedSetup, preparation: 'New preparation', recovery: 'New recovery'};
+  await user.keyboard(' ');
+  await screen.findByText('Setup service available.');
+  steps = within(screen.getByRole('list', {name: 'Local client setup steps'}));
+  expect(steps.getByText('New preparation')).toBeTruthy();
+  expect(steps.getByText('New recovery')).toBeTruthy();
+  expect(steps.getByRole('heading', {name: 'Configure Cursor · windows'})).toBeTruthy();
+  expect(screen.queryByText(/Previously loaded instructions may be stale/)).toBeNull();
+  expect(screen.getByText(/Configured: Unknown. Connected: Unverified. Exercised: Unverified/)).toBeTruthy();
 });
