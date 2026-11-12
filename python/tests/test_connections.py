@@ -2,8 +2,10 @@
 import json
 from pathlib import Path
 import tomllib
+import builtins
+import pytest
 
-from llm_engine.connections import connection_setup
+from llm_engine.connections import connection_setup, generate_configuration, detect_capabilities
 
 
 def test_setup_matches_published_contract_and_is_fresh():
@@ -19,6 +21,33 @@ def test_setup_matches_published_contract_and_is_fresh():
             artifact = root / f"{client['id']}-{platform['id']}.{suffix}"
             assert parse(platform['configuration']) == parse(artifact.read_text())
     setup['clients'].clear()
-    assert len(connection_setup()['clients']) == 2
+    assert len(connection_setup()['clients']) == 4
     assert 'fresh explicit consent' in setup['consent']
     assert 'do not establish' in setup['evidence']
+
+
+@pytest.mark.parametrize("platform,executable,database", [
+    ("macos", "/Company Space/bin/agentown-mcp", "/Company Space/data.sqlite"),
+    ("windows", r"C:\Company Space\agentown-mcp.exe", r"C:\Company Space\data.sqlite")])
+@pytest.mark.parametrize("client", ["claude-desktop", "cursor"])
+def test_explicit_path_generation(client, platform, executable, database):
+    entry = json.loads(generate_configuration(client, platform, executable, database))["mcpServers"]["agentown"]
+    assert entry.pop("type", "stdio") == "stdio"
+    assert entry == {"command": executable, "args": ["--database", database]}
+    for bad in ("relative", "", "bad\npath"):
+        with pytest.raises(ValueError):
+            generate_configuration(client, platform, bad, database)
+        with pytest.raises(ValueError):
+            generate_configuration(client, platform, executable, bad)
+
+
+def test_detection_does_not_open_files_or_launch_clients(monkeypatch):
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Detection must not open files")
+    monkeypatch.setattr(builtins, "open", forbidden)
+    monkeypatch.setattr(Path, "open", forbidden)
+    monkeypatch.setattr("llm_engine.connections.shutil.which", lambda name: "/bin/cursor")
+    monkeypatch.setattr(Path, "is_dir", lambda path: False)
+    detected = detect_capabilities()["clients"]
+    assert detected[1]["detected"] is True
+    assert all(c["configuration"] == "unknown" and c["protocol_connection"] == c["client_exercise"] == "unverified" for c in detected)

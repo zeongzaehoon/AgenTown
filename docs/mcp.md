@@ -201,17 +201,13 @@ OS, initialization, discovery, inspection and disconnect results when validating
 an actual client. Windows artifacts parse on macOS but that does not test Windows
 process launch or permissions.
 
-### Bounded next packaging steps (not delivered or validated)
+### Bounded next packaging steps (bundles not delivered or validated)
 
 - Claude Desktop: package the installed server plus its supported Python/native
   runtime as a Desktop Extension (historically DXT, now MCPB), with a manifest and
   user-selected existing database path. Build separate platform bundles, check
   licensing/signing, install/uninstall and child cleanup on each OS. Do not ship
   this checkout, credentials or a company database in a bundle.
-- Cursor: adapt the stdio `command`/`args` object under `mcpServers` in the
-  operator's `.cursor/mcp.json`, following current Cursor documentation. Validate
-  discovery, approvals and inspection there before claiming support. The Claude
-  Code `type` field is not a promised portable setting.
 - Codex/Claude plugins can package the same stdio command with platform runtime
   and explicit user database selection. A plugin manifest alone is not an
   installation or authorization boundary. Remote MCP/ChatGPT integration needs
@@ -252,7 +248,7 @@ pending checks. Protocol test success must never be reported as client validatio
   stdio CLI separator, project `.mcp.json` with `mcpServers`, and approval/recovery.
 - [Desktop Extensions](https://github.com/modelcontextprotocol/mcpb) and
   [Cursor MCP documentation](https://cursor.com/docs/mcp) inform the bounded
-  future packaging path. These integrations were not implemented or exercised.
+  future packaging path. Manual JSON setup is delivered below; client sessions and bundled extensions remain unexercised.
 
 ## Research and decisions (2026-09-13)
 
@@ -292,3 +288,106 @@ copied build source is deleted, using a clean environment with locked dependenci
 This validates protocol and packaging on the recorded macOS host. Windows and
 live Codex/Claude Code sessions have not been executed; examples are researched
 connection instructions, not claims of those validations.
+
+## Claude Desktop and Cursor manual JSON setup (C26-T1)
+
+Generate a standalone artifact using explicitly selected **absolute** installed
+executable and database paths. Generation prints JSON and does not open the
+selected database, probe the executable, or change client settings. Initialize
+with the matching `agentown` executable first; the database parent must exist.
+Examples deliberately include spaces. Replace the paths with your own.
+
+macOS:
+
+```sh
+'/Company Space/venv/bin/agentown' --database '/Company Space/company.sqlite' agent list
+'/Company Space/venv/bin/agentown' --database '/Company Space/company.sqlite' connection setup --client claude-desktop --platform macos --executable '/Company Space/venv/bin/agentown-mcp' > claude-desktop.json
+'/Company Space/venv/bin/agentown' --database '/Company Space/company.sqlite' connection setup --client cursor --platform macos --executable '/Company Space/venv/bin/agentown-mcp' > cursor.json
+python3 -m json.tool claude-desktop.json
+python3 -m json.tool cursor.json
+'/Company Space/venv/bin/agentown-mcp' --help
+'/Company Space/venv/bin/agentown' connection detect
+```
+
+Windows PowerShell (UTF-8 output works with Windows PowerShell 5.1 as well):
+
+```powershell
+& 'C:\Company Space\venv\Scripts\agentown.exe' --database 'C:\Company Space\company.sqlite' agent list
+& 'C:\Company Space\venv\Scripts\agentown.exe' --database 'C:\Company Space\company.sqlite' connection setup --client claude-desktop --platform windows --executable 'C:\Company Space\venv\Scripts\agentown-mcp.exe' | Set-Content -Encoding utf8 claude-desktop.json
+& 'C:\Company Space\venv\Scripts\agentown.exe' --database 'C:\Company Space\company.sqlite' connection setup --client cursor --platform windows --executable 'C:\Company Space\venv\Scripts\agentown-mcp.exe' | Set-Content -Encoding utf8 cursor.json
+Get-Content -Raw claude-desktop.json | ConvertFrom-Json
+Get-Content -Raw cursor.json | ConvertFrom-Json
+& 'C:\Company Space\venv\Scripts\agentown-mcp.exe' --help
+& 'C:\Company Space\venv\Scripts\agentown.exe' connection detect
+```
+
+| Client | macOS destination | Windows destination | Templates |
+| --- | --- | --- | --- |
+| Claude Desktop | `~/Library/Application Support/Claude/claude_desktop_config.json` | `%APPDATA%\Claude\claude_desktop_config.json` | [macOS](mcp-config/claude-desktop-macos.json), [Windows](mcp-config/claude-desktop-windows.json) |
+| Cursor global | `~/.cursor/mcp.json` | `%USERPROFILE%\.cursor\mcp.json` | [macOS](mcp-config/cursor-macos.json), [Windows](mcp-config/cursor-windows.json) |
+| Cursor project | `.cursor/mcp.json` inside the chosen project | `.cursor\mcp.json` inside the chosen project | Same Cursor templates |
+
+Back up the destination, then explicitly merge only `mcpServers.agentown` from
+the generated artifact, preserving other keys and servers. Do not register the
+same server in both Cursor scopes. JSON paths contain no extra shell quotes.
+No Node runtime or bundled extension is required for this installed Python server.
+
+For Claude Desktop use Settings → Developer → Edit Config, then fully quit and
+restart the application. For Cursor open the intended project and inspect its
+MCP server controls under Customize/settings; approve and enable the server.
+Request: “Use AgenTown to list employees and saved work, inspect a Task and its
+history; do not execute work.” Confirm eight tools and the expected database
+contents. Use `declared_source: "claude-desktop"` or `"cursor"` for explicitly
+consented execution, retaining all workflow v1 retry and approval requirements.
+
+For removal, fully quit the client and back up the destination. The following
+command removes only `agentown`; replace `DESTINATION` with the expanded exact
+path from the table. On macOS run with Python from the installed environment:
+
+```sh
+python3 -c 'import json, pathlib, sys; p=pathlib.Path(sys.argv[1]); d=json.loads(p.read_text(encoding="utf-8-sig")); d.get("mcpServers", {}).pop("agentown", None); p.write_text(json.dumps(d, indent=2)+"\n", encoding="utf-8")' 'DESTINATION'
+```
+
+On Windows PowerShell use the exact expanded destination (example for Desktop;
+for Cursor use the corresponding path from the table):
+
+```powershell
+$destination = Join-Path $env:APPDATA 'Claude\claude_desktop_config.json'
+$config = Get-Content -Raw -LiteralPath $destination | ConvertFrom-Json
+if ($null -ne $config.mcpServers) { $config.mcpServers.PSObject.Properties.Remove('agentown') }
+$config | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $destination -Encoding utf8
+```
+
+Alternatively restore the backup or manually remove only that entry. Restart the
+client and confirm AgenTown is absent. Retain the database and environment.
+The command above is an explicit operator action, never performed by detection.
+
+Detection checks PATH for Cursor and known application locations only:
+`/Applications/Claude.app`, `/Applications/Cursor.app`, and on Windows
+`%LOCALAPPDATA%\AnthropicClaude\claude.exe` and
+`%LOCALAPPDATA%\Programs\cursor\Cursor.exe`. It reads no settings contents or
+credential stores and launches no application. Custom installations can be missed.
+Detected means an installation hint; configured means the operator merged an
+entry; connected means a successful MCP initialization/discovery session;
+actually exercised means a recorded client application inspection. None implies
+the next. Detection always reports configuration unknown and connection/client
+exercise unverified. Copying or parsing JSON establishes neither connection nor
+client exercise.
+
+Scoped deterministic coverage: `tests/test_connections.py`,
+`tests/test_cli.py -k connection`, and `tests/test_mcp_config.py`. The last parses
+all eight artifacts and exercises host-generated Desktop/Cursor commands with
+executable/database paths containing spaces through MCP initialization, eight-tool
+discovery, inspection, clean protocol stdout and process cleanup. Windows syntax
+on macOS is not Windows execution. No actual Claude Desktop or Cursor session
+was exercised by this implementation. Live provider calls are skipped, not passed.
+Supervisor protocol and browser checks are pending; see
+[evidence](evidence/c26-t1/implementation.md).
+
+Primary guidance used for this addition (2026-11-12):
+[official local-server guide](https://modelcontextprotocol.io/docs/2026-07-28/develop/connect-local-servers)
+confirms Desktop's manual JSON destinations and restart;
+[official Cursor MCP guide](https://cursor.com/docs/mcp) confirms project/global
+locations and stdio fields. Cursor's current field table requires `type: "stdio"`;
+its generated artifacts include it. Existing Codex/Claude Code guidance above is
+reused without repeating research. Bundled extensions remain future work.

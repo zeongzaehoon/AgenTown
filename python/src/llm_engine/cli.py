@@ -10,7 +10,7 @@ from .providers import PROVIDERS, runtime_secrets
 def parser():
     root = argparse.ArgumentParser(
         description="AgenTown — create agents and teams and assign persistent Tasks.")
-    root.add_argument("--database", required=True, metavar="PATH",
+    root.add_argument("--database", metavar="PATH",
                       help="product SQLite database; parent directory must exist")
     root.add_argument("--json", action="store_true", help="print JSON for scripts")
     entities = root.add_subparsers(dest="entity", required=True)
@@ -39,6 +39,12 @@ def parser():
                 description="Copy current members to a Task atomically. Empty teams or already assigned members reject the whole batch. Later membership changes leave earlier assignments unchanged.")
             assign.add_argument("team_id")
             assign.add_argument("task_id")
+    connection = entities.add_parser("connection", help="generate MCP JSON or detect installation hints").add_subparsers(dest="action", required=True)
+    setup = connection.add_parser("setup", help="print JSON only; never write client settings")
+    setup.add_argument("--client", choices=("claude-desktop", "cursor"), required=True)
+    setup.add_argument("--platform", choices=("macos", "windows"), required=True)
+    setup.add_argument("--executable", required=True, help="absolute installed agentown-mcp path")
+    connection.add_parser("detect", help="bounded installation hints; no settings or credentials read")
     notice = "Recorded attempts only: commands do not execute agents, verify results or complete Tasks."
     runs = entities.add_parser("run", help="record attempts and inspect retry history",
                                description=notice).add_subparsers(dest="action", required=True)
@@ -134,8 +140,16 @@ def execute(args):
 
 
 def main(argv=None):
-    args = parser().parse_args(argv)
+    root = parser()
+    args = root.parse_args(argv)
+    if not args.database and not (args.entity == "connection" and args.action == "detect"):
+        root.error("--database is required")
     try:
+        if args.entity == "connection":
+            from .connections import detect_capabilities, generate_configuration
+            print(json.dumps(detect_capabilities()) if args.action == "detect" else
+                  generate_configuration(args.client, args.platform, args.executable, args.database), end="\n")
+            return 0
         result = execute(args)
     except (ValueError, OSError) as exc:
         print(f"Error: {exc}", file=sys.stderr)

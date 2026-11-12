@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "agentown": {
+      "command": "C:\\Company\\venv\\Scripts\\agentown-mcp.exe",
+      "args": [
+        "--database",
+        "C:\\Company\\company.sqlite"
+      ],
+      "type": "stdio"
+    }
+  }
+}

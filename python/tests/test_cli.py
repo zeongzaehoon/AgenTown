@@ -88,3 +88,25 @@ def test_validation_help_and_errors(cli):
 def test_database_error(cli, tmp_path):
     (tmp_path / "product.sqlite").mkdir()
     assert "database error" in cli("agent", "list", success=False)
+
+
+@pytest.mark.parametrize("client", ["claude-desktop", "cursor"])
+def test_connection_setup_cli(cli, client):
+    platform = "windows" if os.name == "nt" else "macos"
+    executable = r"C:\Installed Space\agentown-mcp.exe" if os.name == "nt" else "/Installed Space/bin/agentown-mcp"
+    config = cli("connection", "setup", "--client", client, "--platform", platform,
+                 "--executable", executable)
+    assert config["mcpServers"]["agentown"]["command"] == executable
+    assert "absolute" in cli("connection", "setup", "--client", client,
+        "--platform", "macos", "--executable", "relative", success=False)
+
+
+def test_connection_detection_cli():
+    executable = os.environ.get("LLM_ENGINE_TEST_CLI") or str(
+        Path(sys.executable).parent / ("agentown.exe" if os.name == "nt" else "agentown"))
+    result = subprocess.run([executable, "connection", "detect"],
+                            text=True, capture_output=True, timeout=20)
+    assert result.returncode == 0 and not result.stderr
+    clients = json.loads(result.stdout)["clients"]
+    assert {client["id"] for client in clients} == {"claude-desktop", "cursor"}
+    assert all(client["client_exercise"] == "unverified" for client in clients)
