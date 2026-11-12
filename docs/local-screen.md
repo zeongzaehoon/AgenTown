@@ -1655,3 +1655,38 @@ coverage; execution is pending because this isolated workspace has no frontend
 node_modules. Supervisor-selected consolidated verification and browser validation
 remain pending. No browser result is claimed here. Live LLM validation remains
 skipped, not passed.
+
+### Copy a client configuration fragment (C45-T1)
+
+Launch `agentown-web --database PATH --port 8765` with an existing product
+database, or open the packaged desktop app. Open **Connections**, select a local
+client (Codex, Claude Code, Claude Desktop or Cursor), then select its platform.
+**Configuration destination** and **Configuration fragment** are separately
+labeled, read-only fields: Tab into either and select its text for manual copying.
+**Copy configuration** copies only the exact fragment, including whitespace;
+it does not include the destination or setup instructions. Merge it manually
+at the shown destination after reviewing existing settings.
+
+Tab to Copy configuration and press Enter or Space. The status announces copying
+and its result. Change client/platform and check both fields update. If clipboard
+access is denied or unavailable, follow the status guidance to select the
+Configuration fragment field and copy manually. Changing selection while copying
+clears pending feedback; a late result cannot claim the new selection was copied.
+Copying makes no API requests, changes no settings, and runs no diagnostic or work.
+Client configuration stays unknown; connection and exercise stay unverified.
+
+**Copy setup instructions** still copies the full instructions, and **Download
+setup artifact** retains its existing behavior. ChatGPT instead shows a labeled
+**ChatGPT prerequisites checklist** for remote HTTPS setup, with no local
+configuration fields or Copy configuration action. Its full instructions and
+prerequisites download remain available.
+
+Deterministic interaction coverage in `frontend/src/Connections.test.tsx` checks
+exact clipboard content, client/platform selection, Enter/Space, status, denied
+and unavailable clipboard recovery, pending-selection changes, ChatGPT and absence
+of extra requests. With frontend dependencies available, run `cd frontend` then
+`npx vitest run src/Connections.test.tsx` and `npx tsc --noEmit`.
+This isolated implementation workspace has no frontend node_modules; execution,
+frontend build, ordinary Python checks and browser validation remain pending
+supervisor verification under its selected profile. Live LLM calls remain skipped,
+not passed. No external client or credentials are required for this exercise.

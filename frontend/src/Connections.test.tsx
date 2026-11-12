@@ -345,3 +345,98 @@ test('ChatGPT never offers shared-data validation and selection change aborts th
   expect(screen.getByText('Client readiness: Unknown')).toBeTruthy();
   expect(fetcher.mock.calls.map(([path]) => path)).toEqual(['/api/connections/v1', sharedPath]);
 });
+
+// Include whitespace that must survive copying without instructions or destination.
+const fragmentSetup: ConnectionSetup = {...setup, clients: setup.clients.map(client => ({
+  ...client, platforms: client.platforms.map(platform => ({
+    ...platform, configuration: `  ${platform.configuration}\n\n  trailing space \n`,
+  })),
+}))};
+
+test('configuration fields and native keyboard copy preserve exact selected client/platform fragments', async () => {
+  const fetcher = vi.fn(async () => new Response(JSON.stringify(fragmentSetup)));
+  vi.stubGlobal('fetch', fetcher);
+  const user = userEvent.setup();
+  const copy = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue();
+  render(<Connections workspaceConnected />);
+  await user.click(screen.getByRole('button', {name: 'Open connections'}));
+  await screen.findByLabelText('Client');
+  for (const client of fragmentSetup.clients) {
+    await user.selectOptions(screen.getByLabelText('Client'), client.id);
+    for (const platform of client.platforms) {
+      await user.selectOptions(screen.getByLabelText('Platform'), platform.id);
+      const destination = screen.getByLabelText('Configuration destination') as HTMLTextAreaElement;
+      const fragment = screen.getByLabelText('Configuration fragment') as HTMLTextAreaElement;
+      expect(destination.value).toBe(platform.destination);
+      expect(fragment.value).toBe(platform.configuration);
+      expect(destination.readOnly && fragment.readOnly).toBe(true);
+      const button = screen.getByRole('button', {name: 'Copy configuration'});
+      button.focus();
+      await user.keyboard(platform.id === 'macos' ? '{Enter}' : ' ');
+      expect(copy).toHaveBeenLastCalledWith(platform.configuration);
+      expect(document.activeElement).toBe(button);
+      const status = await screen.findByText('Configuration copied. Client readiness remains unknown.');
+      expect(status.getAttribute('role')).toBe('status');
+    }
+  }
+  expect(fetcher.mock.calls).toHaveLength(1);
+  expect(screen.getByText(/Configured: Unknown. Connected: Unverified. Exercised: Unverified/)).toBeTruthy();
+});
+
+test.each(['denied', 'unavailable'])('configuration clipboard %s leaves selectable manual recovery', async failure => {
+  const fetcher = vi.fn(async () => new Response(JSON.stringify(fragmentSetup)));
+  vi.stubGlobal('fetch', fetcher);
+  const user = userEvent.setup();
+  if (failure === 'denied') vi.spyOn(navigator.clipboard, 'writeText').mockRejectedValue(new Error('denied'));
+  else vi.spyOn(navigator, 'clipboard', 'get').mockReturnValue(undefined as unknown as Clipboard);
+  render(<Connections workspaceConnected />);
+  await user.click(screen.getByRole('button', {name: 'Open connections'}));
+  await screen.findByLabelText('Client');
+  await user.click(screen.getByRole('button', {name: 'Copy configuration'}));
+  await screen.findByText(/Select the Configuration fragment field and copy manually/);
+  const field = screen.getByLabelText('Configuration fragment') as HTMLTextAreaElement;
+  field.focus(); field.select();
+  expect(field.value.slice(field.selectionStart, field.selectionEnd)).toBe(fragmentSetup.clients[0].platforms[0].configuration);
+  expect((screen.getByRole('button', {name: 'Copy configuration'}) as HTMLButtonElement).disabled).toBe(false);
+  expect(fetcher.mock.calls).toHaveLength(1);
+});
+
+test.each(['client', 'platform', 'workstation'])('pending copy feedback cannot follow a changed %s selection', async change => {
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(fragmentSetup))));
+  const user = userEvent.setup();
+  let finish!: () => void;
+  const copy = vi.spyOn(navigator.clipboard, 'writeText').mockImplementationOnce(() => new Promise<void>(resolve => {finish = resolve;})).mockResolvedValue();
+  const view = render(<Connections workspaceConnected />);
+  await user.click(screen.getByRole('button', {name: 'Open connections'}));
+  await screen.findByLabelText('Client');
+  await user.click(screen.getByRole('button', {name: 'Copy configuration'}));
+  expect(screen.getByText('Copying…')).toBeTruthy();
+  if (change === 'client') await user.selectOptions(screen.getByLabelText('Client'), 'claude-code');
+  else if (change === 'platform') await user.selectOptions(screen.getByLabelText('Platform'), 'windows');
+  else view.rerender(<Connections workspaceConnected openClient={{id: 'claude-code'}} />);
+  await act(async () => {finish();});
+  expect(screen.queryByText('Configuration copied. Client readiness remains unknown.')).toBeNull();
+  expect(screen.queryByText('Copying…')).toBeNull();
+  await user.click(screen.getByRole('button', {name: 'Copy configuration'}));
+  expect(copy).toHaveBeenLastCalledWith((screen.getByLabelText('Configuration fragment') as HTMLTextAreaElement).value);
+  await screen.findByText('Configuration copied. Client readiness remains unknown.');
+});
+
+test('ChatGPT shows a separate prerequisites checklist without local fragment controls', async () => {
+  const remote = {...setup, clients: [{...setup.clients[0], id: 'chatgpt', name: 'ChatGPT', platforms: [{...setup.clients[0].platforms[0], configuration: 'Provide HTTPS\nProvide OAuth'}]}]};
+  const fetcher = vi.fn(async () => new Response(JSON.stringify(remote)));
+  vi.stubGlobal('fetch', fetcher);
+  const user = userEvent.setup();
+  render(<Connections workspaceConnected openClient={{id: 'chatgpt'}} />);
+  const checklist = await screen.findByRole('region', {name: 'ChatGPT prerequisites checklist'});
+  expect(checklist.textContent).toContain('Provide HTTPS');
+  expect(checklist.textContent).toContain('Provide OAuth');
+  expect(screen.queryByRole('button', {name: 'Copy configuration'})).toBeNull();
+  expect(screen.queryByLabelText('Configuration fragment')).toBeNull();
+  expect(screen.queryByLabelText('Configuration destination')).toBeNull();
+  const copy = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue();
+  await user.click(screen.getByRole('button', {name: 'Copy setup instructions'}));
+  expect(copy).toHaveBeenCalledWith((screen.getByLabelText('Setup instructions') as HTMLTextAreaElement).value);
+  expect(screen.getByRole('button', {name: 'Download setup artifact'})).toBeTruthy();
+  expect(fetcher.mock.calls).toHaveLength(1);
+});

@@ -208,15 +208,27 @@ function Setup({workspaceConnected, openClient, active}: {active: boolean; works
       if (url) { const completedUrl = url; setTimeout(() => URL.revokeObjectURL(completedUrl), 1000); }
     }
   }
-  async function copy() {
+  const copyGeneration = useRef(0);
+  useLayoutEffect(() => {
+    copyGeneration.current += 1;
+    copyingLock.current = false;
+    setCopying(false); setFeedback('');
+    return () => { copyGeneration.current += 1; };
+  }, [clientId, platformId, data, openClient]);
+  async function copy(fragment = false) {
+    const generation = copyGeneration.current;
     if (copyingLock.current) return;
-    copyingLock.current = true; setCopying(true); setFeedback('');
+    copyingLock.current = true; setCopying(true); setFeedback('Copying…');
     try {
       if (!navigator.clipboard?.writeText) throw new Error('Unavailable');
-      await navigator.clipboard.writeText(instructions);
-      setFeedback('Setup instructions copied. Client readiness remains unknown.');
-    } catch { setFeedback('Could not copy. Clipboard access is unavailable or denied. Select the setup instructions below and copy manually.'); }
-    finally { copyingLock.current = false; setCopying(false); }
+      await navigator.clipboard.writeText(fragment ? platform!.configuration : instructions);
+      if (generation !== copyGeneration.current) return;
+      setFeedback(`${fragment ? 'Configuration' : 'Setup instructions'} copied. Client readiness remains unknown.`);
+    } catch {
+      if (generation === copyGeneration.current) setFeedback(`Could not copy. Clipboard access is unavailable or denied. Select the ${fragment ? 'Configuration fragment' : 'Setup instructions'} field and copy manually.`);
+    } finally {
+      if (generation === copyGeneration.current) { copyingLock.current = false; setCopying(false); }
+    }
   }
   const clientName = workstationClients.find(c => c.id === clientId)?.name ?? client?.name ?? clientId;
   return <>
@@ -242,6 +254,18 @@ function Setup({workspaceConnected, openClient, active}: {active: boolean; works
       {client.id !== 'chatgpt' && <><LocalDiagnostic /><SharedDataCheck /></>}
       <h3>Available actions</h3><ul>{data.actions.map(a => <li key={a}>{a}</li>)}</ul>
       <h3>Explicit execution consent</h3><p>{data.consent}</p>
+      {client.id === 'chatgpt' ? <section aria-labelledby="chatgpt-prerequisites">
+        <h3 id="chatgpt-prerequisites">ChatGPT prerequisites checklist</h3>
+        <p>Remote HTTPS prerequisites; this is not a local client configuration.</p>
+        <ul>{platform.configuration.split('\n').filter(line => line.trim()).map((line, index) => <li key={index}>{line}</li>)}</ul>
+        <p>{platform.inspection}</p>
+      </section> : <>
+        <label htmlFor="connection-destination">Configuration destination</label>
+        <textarea id="connection-destination" readOnly rows={2} value={platform.destination} />
+        <label htmlFor="connection-configuration">Configuration fragment</label>
+        <textarea id="connection-configuration" readOnly rows={10} value={platform.configuration} />
+        <button type="button" disabled={copying} onClick={() => void copy(true)}>Copy configuration</button>
+      </>}
       <button type="button" disabled={copying} onClick={() => void copy()}>Copy setup instructions</button>
       <button type="button" onClick={download}>Download setup artifact</button>
       <p role="status" aria-live="polite">{feedback}</p>
