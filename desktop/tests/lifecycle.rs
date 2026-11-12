@@ -139,6 +139,10 @@ mod processes {
         let fixture = Fixture::new("exit 7");
         let mut service = fixture.launch();
         assert!(service.wait_ready(Duration::from_secs(1)).is_err());
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while service.alive() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
         assert!(!service.alive());
     }
 
