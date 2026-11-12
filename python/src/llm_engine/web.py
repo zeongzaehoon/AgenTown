@@ -1,9 +1,10 @@
 """Loopback presentation adapter. Rust owns all durable state and admission.
 
-An execution stays in its async HTTP request; there is no queue, background
-scheduler, automatic retry, or Python execution-state registry.
+Manual execution stays in its HTTP request. Loop workers perform provider I/O
+only after Rust admission; they never resume or retry after service restart.
 """
 import argparse
+from contextlib import asynccontextmanager
 import json
 import os
 from pathlib import Path
@@ -56,7 +57,7 @@ class LocalBoundary:
 
 def create_app(database, model=None, *, port=8765, provider=None, provider_name="anthropic"):
     database = str(database)
-    # Injection is for tests only. The product CLI always uses configured Anthropic.
+    # Injection is for tests only. The CLI uses the selected configured provider.
     configuration = None
     if provider is None:
         try:
@@ -64,6 +65,20 @@ def create_app(database, model=None, *, port=8765, provider=None, provider_name=
         except ValueError as exc:
             configuration = str(exc) + " Then restart this server."
     secrets = runtime_secrets()
+    from .loop_execution import LoopService
+    loops = LoopService(database, provider, model)
+
+    @asynccontextmanager
+    async def lifespan(app):
+        # Fail closed for Loop endpoints if recovery storage is unavailable.
+        try:
+            loops.initialize()
+        except (ValueError, OSError):
+            pass
+        try:
+            yield
+        finally:
+            await loops.close()
 
     def response(value, status=200):
         # Never echo the configured credential, even through legacy stored text.
@@ -281,9 +296,41 @@ def create_app(database, model=None, *, port=8765, provider=None, provider_name=
         except (ValueError, OSError):
             return response({"error": "The response could not be saved or the attempt expired. Refresh history before deciding to retry."}, 409)
 
+    async def loop_api(request):
+        try:
+            loops.initialize()
+            action = request.path_params.get("action")
+            if request.method == "GET":
+                return response(loops.inspect())
+            data = await body(request)
+            if action == "preview":
+                if data.keys() != {"policy_id"} or type(data["policy_id"]) is not str:
+                    raise ValueError("policy")
+                return response(_native.preview_loop(database, data["policy_id"], runtime_secrets()))
+            if action == "start":
+                if configuration or provider is None or not model or not model.strip():
+                    return response({"error": configuration or "Configure a provider and explicit model before activation."}, 409)
+                if (data.keys() != {"preview_id", "expected_runs"}
+                        or type(data["preview_id"]) is not str
+                        or type(data["expected_runs"]) is not int or data["expected_runs"] < 0):
+                    raise ValueError("start")
+                return response(loops.start(data["preview_id"], data["expected_runs"]), 201)
+            if action == "stop" and data.keys() == {"session_id"} and type(data["session_id"]) is str:
+                session = loops.stop(data["session_id"])
+                return response({**session, "cancellation": "Local cancellation requested; remote completion may remain unknown."})
+            raise ValueError("action")
+        except RequestTooLarge:
+            return response({"error": "Loop request exceeds 120,000 bytes."}, 413)
+        except (ValueError, KeyError, TypeError, OverflowError, UnicodeError):
+            return response({"error": "Loop request rejected. Refresh sessions and explicitly preview/start again; check saved work, enabled policy and request fields."}, 409)
+        except OSError:
+            return response({"error": "Loop storage unavailable. Inspect history before any explicit new start."}, 503)
+
     from .configuration import routes as configuration_routes
 
-    app = Starlette(routes=configuration_routes(database, body, response) + [Route("/", home), Route("/api/state", state, methods=["POST"]),
+    app = Starlette(lifespan=lifespan, routes=configuration_routes(database, body, response) + [Route("/", home), Route("/api/state", state, methods=["POST"]),
+        Route("/api/loops/v1", loop_api, methods=["GET"]),
+        Route("/api/loops/v1/{action}", loop_api, methods=["POST"]),
         Route("/api/connections/v1", connections, methods=["POST"]),
         Route("/api/employees", employee, methods=["POST"]),
         Route("/api/teams", teams, methods=["GET", "POST"]),

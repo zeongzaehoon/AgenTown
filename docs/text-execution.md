@@ -236,3 +236,53 @@ source, wrong-task and consumed consent, concurrent duplicates, failure provenan
 restart and secret rejection. They never contact a real provider. This worker's
 local checks and pending integration gates are recorded in
 [evidence](evidence/c28-t1/ai-developer.md).
+
+### Bounded saved-work Loop service
+
+Launch `agentown-web --database /absolute/path/company.db --provider anthropic --model MODEL`
+with the selected provider's normal environment configuration. Missing configuration
+still permits preview and history, but activation returns 409 before creating a
+session. Enabling a policy does not start execution. No real-provider validation
+was performed for this slice; deterministic fixture outputs are not LLM evidence.
+
+Use the existing configuration API to create an enabled Loop for saved work with
+one employee. From the documented loopback origin, send same-origin JSON requests
+(`Origin: http://127.0.0.1:8765`, `Content-Type: application/json`):
+
+1. `POST /api/loops/v1/preview` with `{"policy_id":"POLICY_ID"}`.
+   Inspect the saved input, employee, maximum calls, interval and expected count.
+2. Explicitly consent with `POST /api/loops/v1/start` and
+   `{"preview_id":"PREVIEW_ID","expected_runs":0}` using the preview's actual
+   count. A 201 response supplies the session ID. Reusing consent returns 409.
+3. `GET /api/loops/v1` shows native sessions and immutable attempt links with
+   execution output/error, Run ID and `quality: unverified`. Existing
+   `/api/state` also shows those ordinary Runs. Poll inspection without starting
+   another session.
+4. `POST /api/loops/v1/stop` with `{"session_id":"SESSION_ID"}` commits stop
+   before attempting cancellation of local async provider work. Repeating stop is
+   safe. An already dispatched remote request may complete despite cancellation;
+   interrupted local output does not prove remote cancellation or absence of cost.
+
+Rust checks admission before every call, including the first, and owns all timing,
+limits and durable transitions. Python polls Rust while waiting and never computes
+eligibility. Provider failures terminate continuation; there is no silent retry.
+Graceful shutdown stops local workers; restart uses a fresh runtime identity and
+marks remaining active sessions `restarted`, without dispatching them. A new
+session requires fresh preview and explicit consent. Run leases/results remain
+inspectable after restart; remote completion can remain uncertain.
+
+Credential-free runnable fixtures (in the normal product development environment,
+with the current native bindings already built):
+
+```sh
+cd python
+python -m pytest tests/test_loop_execution.py -q
+```
+
+These fixtures create a temporary database, employee, saved work and enabled
+policy and inject an explicitly labelled deterministic provider. They exercise
+the actual HTTP endpoints and Rust persistence, maximum call bound, duplicate
+start/admission, interval refusal, stop before/during dispatch, failure and restart.
+Rust's existing controlled-clock Loop fixtures cover advancing interval boundaries
+and concurrent writer ordering; Python fixtures require no minute-long waits.
+No public HTTP endpoint permits injecting a fixture provider or finalizing output.

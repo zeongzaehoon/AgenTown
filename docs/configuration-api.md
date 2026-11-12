@@ -237,3 +237,25 @@ label fixture results honestly and must not dispatch from configuration reads.
 The Rust `loop_execution::tests` fixtures use a controlled clock and real SQLite
 connections to exercise timing, concurrent writers, stop, stale consent,
 rollback, failure, expiry and reopen without real LLM calls.
+
+### Loop HTTP runtime adapter (v1)
+
+`agentown-web --database PATH --provider PROVIDER --model MODEL` exposes:
+
+| Method | Endpoint | JSON body / result |
+| --- | --- | --- |
+| POST | `/api/loops/v1/preview` | `{policy_id}` → native version 1 preview |
+| POST | `/api/loops/v1/start` | `{preview_id, expected_runs}` → native session (201) |
+| GET | `/api/loops/v1` | `{schema_version:1, sessions, attempts, cancellation}` |
+| POST | `/api/loops/v1/stop` | `{session_id}` → native session plus cancellation notice |
+
+Mutation requests require the existing loopback same-origin JSON boundary and
+120,000-byte limit. Bodies accept exactly the listed fields; expected count is a
+nonnegative integer, never a boolean. Invalid/stale consent and unavailable
+provider/model configuration return 409; oversized bodies return 413. Errors do
+not expose raw storage errors or credentials. Inspection includes native attempt
+fields plus `execution` with linked Run output/error and unverified quality.
+Secrets are passed to native preview/start/admission and redacted from responses.
+Runtime IDs are private to the service and cannot be supplied through HTTP.
+See [text-execution.md](text-execution.md#bounded-saved-work-loop-service) for
+explicit consent, cancellation uncertainty, recovery and runnable fixture steps.
