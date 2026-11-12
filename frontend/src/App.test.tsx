@@ -839,7 +839,7 @@ test('employee navigation uses IDs, composes filters and preserves drafts, resul
   const expanded = [...document.querySelectorAll<HTMLDetailsElement>('#detail details')];
   await waitFor(() => expect(expanded.every(d => d.open)).toBe(true));
   await user.click(retry());
-  const card = screen.getByRole('button', {name: 'View assigned work: Alex · ID: other'});
+  const card = screen.getByRole('button', {name: 'Select office character: Alex · ID: other'});
   card.focus(); await user.keyboard('{Enter}');
   expect(document.activeElement).toBe(card);
   expect(card.getAttribute('aria-pressed')).toBe('true');

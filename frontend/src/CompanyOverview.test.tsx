@@ -1,5 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, expect, test, vi } from 'vitest';
+import userEvent from '@testing-library/user-event';
+import { useState } from 'react';
 import { CompanyOverview } from './CompanyOverview';
 import { App } from './App';
 import type { Work, Workspace } from './api';
@@ -99,8 +101,31 @@ test('App uses existing polling, retains stale counts and drafts, reconnects and
   state = {...state, work: []};
   await act(async () => { await vi.advanceTimersByTimeAsync(800); });
   expect(within(overview).getByText('Showing recorded workload.')).toBeTruthy();
-  expect(within(overview).getAllByText('No assigned work.')).toHaveLength(3);
+  expect(within(within(overview).getByRole('list', {name: 'Employee workload'})).getAllByText('No assigned work.')).toHaveLength(3);
   expect((screen.getByLabelText('What would you like help with?') as HTMLTextAreaElement).value).toBe('Keep draft');
   expect(fetcher.mock.calls.filter(([path]) => path === '/api/state')).toHaveLength(5);
   expect(fetcher.mock.calls.every(([path]) => path === '/api/state' || (path === '/api/config/v1/skills' || path === '/api/config/v1/hooks' || path === '/api/config/v1/loops' || path === '/api/loops/v1'))).toBe(true);
+});
+
+
+test('office characters and list share selection by identity with keyboard and stale polling', async () => {
+  const user = userEvent.setup();
+  function Office({data, connected = true}: {data: Workspace; connected?: boolean}) {
+    const [selected, select] = useState('');
+    return <CompanyOverview workspace={data} connected={connected} error="" onOpenWork={vi.fn()} selectedEmployee={selected} onSelectEmployee={select} />;
+  }
+  const view = render(<Office data={workspace()} />);
+  const character = screen.getByRole('button', {name: 'Select office character: Alex · ID: b'});
+  character.focus(); await user.keyboard('{Enter}');
+  expect(document.activeElement).toBe(character);
+  expect(character.getAttribute('aria-pressed')).toBe('true');
+  expect(screen.getByRole('button', {name: 'View assigned work: Alex · ID: b'}).getAttribute('aria-pressed')).toBe('true');
+  const list = screen.getByRole('button', {name: 'View assigned work: Alex · ID: a'});
+  list.focus(); await user.keyboard(' ');
+  expect(screen.getByRole('button', {name: 'Select office character: Alex · ID: a'}).getAttribute('aria-pressed')).toBe('true');
+  expect(character.getAttribute('aria-pressed')).toBe('false');
+  view.rerender(<Office data={{...workspace(), work: []}} connected={false} />);
+  expect(screen.getByRole('button', {name: 'Select office character: Alex · ID: a'}).getAttribute('aria-pressed')).toBe('true');
+  expect(screen.getAllByText('Stale snapshot · No assigned work.')).toHaveLength(3);
+  expect(document.activeElement).toBe(list);
 });

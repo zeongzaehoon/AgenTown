@@ -1408,3 +1408,69 @@ The final scoped run passed all 8 tests with `--configLoader runner` (avoiding
 a bundled-config cache write into the read-only shared dependency tree). Browser
 interaction and the applicable consolidated supervisor verification profile
 remain pending this handoff. Live LLM calls are skipped, not passed.
+
+### Select employee characters in the office (C37-T1)
+
+Serve the current built frontend with the product entry point:
+
+```sh
+agentown-web --database /path/to/product.db --port 8765
+```
+
+Open http://127.0.0.1:8765 and **Company overview → Employee office**.
+The responsive floor places every persisted employee at a desk, with a character,
+name and full ID. **Employee workload list** below is an alternative presentation
+of the same assignments. No character motion or navigation starts work.
+
+1. Create two employees named Alex and one with no assignments. Enter an unsaved
+   work draft. Select either Alex character using Tab and Enter (or Space).
+   Its character and matching list button both expose the pressed state and
+   visible “Selected” text. The existing Work & results view filters by that
+   employee ID; the other Alex remains distinct. Select a different list button
+   and observe the corresponding character selection. Draft text is retained.
+2. With shared saved work, both assigned employees count that request once.
+   Pending, active, failed/interrupted, blocked, unverified results and other
+   counts are textual. Blocked is a subset of other recorded work. An active
+   attempt without a provider is explicitly caller-reported, with “no provider
+   request”; a character never implies live presence or automatic execution.
+3. Polling updates these same desks without resetting selection or drafts.
+   Disconnect the server: retained office counts say “Stale snapshot” and the
+   company status identifies the last successful refresh. With no initial data,
+   loading and unavailable messages appear instead of fabricated employees.
+   An empty employee collection shows an empty office and creation guidance.
+4. Use a narrow viewport: desks wrap into a single column without horizontal
+   character controls. Tab through character and list buttons: the focus outline
+   remains visible and native Enter/Space activation retains focus. Enable the
+   operating system's reduced-motion preference: all office/list animation and
+   transitions are disabled; status and controls remain present. Identity,
+   selection and activity use text and shapes as well as color.
+5. Existing Bounded Loop activity inspection and Stop controls remain available
+   above the office and keep their existing authority/freshness restrictions.
+
+Deterministic representative-state evidence: `CompanyOverview.test.tsx` uses
+three persisted IDs including duplicate names, duplicated/shared assignments,
+caller-reported activity, failed and blocked work, empty/unavailable/stale states,
+and polling with a retained draft. Its office interaction case checks Enter and
+Space selection, synchronized pressed states and retained focus across a stale
+snapshot update. `App.test.tsx`'s employee-navigation case now enters through an
+office character and verifies filtered work, preserved draft, assignment choice,
+expanded result details and existing execution consent, then uses list navigation.
+
+Runnable scoped checks in a prepared frontend tree:
+
+```sh
+cd frontend
+npx tsc --noEmit
+npx vitest run src/CompanyOverview.test.tsx src/App.test.tsx -t 'office characters|mixed recorded|loading, unavailable|App uses existing polling|employee navigation' --configLoader runner
+```
+
+This invocation used a temporary source copy and the existing repository
+node_modules because the isolated workspace has no dependencies installed.
+TypeScript passed. The initial focused run exposed an empty-label assertion that
+needed scoping to the accessible list now that both presentations show it.
+The final focused run passed 5 tests across 2 files (77 unrelated tests skipped).
+Browser interaction, visual inspection and consolidated profile verification
+remain pending supervisor verification; no fresh screenshot or installed-browser
+result is claimed. Accessibility decisions reuse the recorded
+[WCAG 2.2 guidance](https://www.w3.org/WAI/WCAG22/quickref/) and `docs/2d-world.md`.
+Live provider calls remain skipped, not passed.

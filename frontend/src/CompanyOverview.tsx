@@ -11,6 +11,18 @@ export function CompanyOverview({workspace, connected, error, onOpenWork, select
   workspace: Workspace | null; connected: boolean; error: string; onOpenWork: (id: string) => void; selectedEmployee?: string; onSelectEmployee?: (id: string) => void;
 }) {
   const employees = workspace?.employees ?? [];
+  // Both presentations use the same persisted identities and latest-attempt classification.
+  const desks = employees.map(employee => {
+    const assigned = workspace!.work.filter(work => work.assignees.includes(employee.id));
+    const counts: Record<WorkOutcome, number> = {pending: 0, active: 0, results: 0, failed: 0, other: 0};
+    assigned.forEach(work => { counts[classifyWork(work).outcome]++; });
+    const callerActive = assigned.filter(work => classifyWork(work).outcome === 'active' && !work.attempts.at(-1)?.provider).length;
+    const blocked = assigned.filter(work => classifyWork(work).outcome === 'other' && work.status === 'blocked').length;
+    const activity = assigned.length
+      ? `${counts.pending} pending · ${counts.active} active · ${counts.failed} failed / interrupted · ${blocked} blocked · ${counts.results} results (unverified) · ${counts.other} other recorded work`
+      : 'No assigned work.';
+    return {employee, assigned, counts, callerActive, blocked, activity};
+  });
   const employeeIds = new Set(employees.map(employee => employee.id));
   const unassigned = workspace?.work.filter(work => !work.assignees.some(id => employeeIds.has(id))) ?? [];
   return <section className="company-overview" aria-labelledby="company-title">
@@ -24,12 +36,29 @@ export function CompanyOverview({workspace, connected, error, onOpenWork, select
       <p>Each request counts once per assigned employee. Shared work appears for each employee, so employee counts may exceed the number of requests.</p>
       <p>Active includes caller-reported attempts, which do not imply a provider request. Results are unverified. Other includes blocked, cancelled and other recorded states. Nothing runs automatically.</p>
       {!employees.length && <p>No employees yet. Create an employee below to start assigning work.</p>}
+      <section className="company-office" aria-labelledby="office-title">
+        <h3 id="office-title">Employee office</h3>
+        <p>Choose a character to view assigned work. Desks show recorded assignments, not live presence.</p>
+        {!employees.length && <p>The office is empty.</p>}
+        <div className="office-floor">
+          {desks.map(({employee, activity, callerActive, blocked}, index) => <div className="office-desk" key={employee.id}>
+            <button type="button" className="office-character" disabled={!onSelectEmployee}
+              aria-label={`Select office character: ${employee.name} · ID: ${employee.id}`}
+              aria-pressed={selectedEmployee === employee.id} aria-controls="employee-work"
+              onClick={() => onSelectEmployee?.(employee.id)}>
+              <span className={`character-body character-style-${index % 4}`} aria-hidden="true"><span className="character-head" /><span className="character-shirt" /></span>
+              <strong>{employee.name}</strong><span>ID: {employee.id}</span>
+              {selectedEmployee === employee.id && <span>Selected</span>}
+            </button>
+            <p>{!connected && 'Stale snapshot · '}{activity}</p>
+            {!!blocked && <p>{blocked} blocked requests</p>}
+            {!!callerActive && <p>{callerActive} caller-reported active · no provider request</p>}
+          </div>)}
+        </div>
+      </section>
+      <h3>Employee workload list</h3>
       <ul className="employee-grid" aria-label="Employee workload">
-        {employees.map(employee => {
-          const assigned = workspace.work.filter(work => work.assignees.includes(employee.id));
-          const counts: Record<WorkOutcome, number> = {pending: 0, active: 0, results: 0, failed: 0, other: 0};
-          assigned.forEach(work => { counts[classifyWork(work).outcome]++; });
-          const callerActive = assigned.filter(work => classifyWork(work).outcome === 'active' && !work.attempts.at(-1)?.provider).length;
+        {desks.map(({employee, assigned, counts, callerActive, blocked}) => {
           return <li key={employee.id} className="employee-card">
             <h3>{onSelectEmployee ? <button type="button" aria-pressed={selectedEmployee === employee.id} aria-controls="employee-work"
               onClick={() => onSelectEmployee(employee.id)} aria-label={`View assigned work: ${employee.name} · ID: ${employee.id}`}>{employee.name}</button> : employee.name}</h3><p className="employee-id">Employee ID: {employee.id}</p>
@@ -37,6 +66,7 @@ export function CompanyOverview({workspace, connected, error, onOpenWork, select
             <dl className="workload-counts">{categories.map(category => <div key={category.key}>
               <dt>{category.label}</dt><dd>{counts[category.key]}</dd>
             </div>)}</dl>
+            {!!blocked && <p>{blocked} blocked requests</p>}
             {!!callerActive && <p>{callerActive} caller-reported active · no provider request</p>}
           </li>;
         })}

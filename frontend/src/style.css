@@ -12,3 +12,17 @@
 .employee-card button[aria-pressed="true"]::after { content: ' · Selected'; }
 #teams-panel input[type="checkbox"] { width: auto; min-width: 24px; min-height: 24px; margin-right: 12px; vertical-align: middle; }
 #teams-panel fieldset { margin-top: 20px; min-width: 0; border: 1px solid #6c7d73; }
+
+.company-office { background: #edf2eb; padding: clamp(12px, 3vw, 24px); }
+.office-floor { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 210px), 1fr)); gap: 24px; padding: 16px; background: repeating-linear-gradient(0deg, #e0e5da 0 47px, #ccd5c7 48px 49px); border: 2px solid #73836d; border-radius: 12px; }
+.office-desk { min-width: 0; background: #fffdf6; border: 2px solid #78674e; border-bottom: 10px solid #78674e; border-radius: 8px; padding: 12px; }
+.office-character { display: flex; flex-direction: column; align-items: center; gap: 6px; width: 100%; margin-top: 0; overflow-wrap: anywhere; }
+.office-character[aria-pressed="true"] { outline: 3px solid #234f3b; outline-offset: 3px; }
+.office-character:focus-visible { outline: 4px solid #a33b00; outline-offset: 5px; }
+.character-body { display: grid; justify-items: center; height: 74px; width: 64px; }
+.character-head { width: 30px; height: 30px; background: #f7d7b2; border: 3px solid #302e2b; border-radius: 50%; }
+.character-shirt { width: 50px; height: 40px; background: #a9d4eb; border: 3px solid #302e2b; border-radius: 14px 14px 4px 4px; }
+.character-style-1 .character-shirt { background: #edc8ef; border-radius: 4px 4px 14px 14px; }
+.character-style-2 .character-shirt { background: #f7d78b; width: 42px; }
+.character-style-3 .character-shirt { background: #bce1c5; border-radius: 20px; }
+@media (prefers-reduced-motion: reduce) { .company-office *, .employee-grid * { animation: none !important; transition: none !important; scroll-behavior: auto; } }
