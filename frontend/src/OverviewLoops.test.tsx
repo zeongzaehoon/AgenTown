@@ -7,7 +7,7 @@ import type { Workspace } from './api';
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 const workspace: Workspace = {employees: [{id: 'a', name: 'Alex'}], work: [{id: 't', input: 'Saved request', assignees: ['a'], status: 'pending', attempts: []}], configuration: null, provider: 'test', model: 'test'};
 const session: LoopSession = {session_id: 's', state: 'active', admitted: 1, next_at: 0, provider: 'test', model: 'test', preview: {schema_version: 1, preview_id: 'p', policy_id: 'l', policy_name: 'Follow up', task_id: 't', agent_id: 'a', input: 'Saved request', max_iterations: 2, interval_seconds: 60, expected_runs: 0, policy_enabled: true}};
-const initial = (): LoopInspection => ({schema_version: 1, sessions: [session], attempts: [{session_id: 's', run_id: 'r', ordinal: 1, execution: {output: null, error: null}}], cancellation: ''});
+const initial = (): LoopInspection => ({schema_version: 1, control: {state: 'available', can_control: true, message: ''}, sessions: [session], attempts: [{session_id: 's', run_id: 'r', ordinal: 1, execution: {output: null, error: null}}], cancellation: ''});
 
 test('read-only inspection transitions independently through active, waiting, stale, recovered and terminal states', async () => {
   vi.useFakeTimers();
@@ -107,4 +107,21 @@ test('App linked-work navigation clears filters explicitly, preserves drafts and
   expect(document.activeElement).toBe(screen.getByLabelText('Saved work'));
   expect((screen.getByLabelText('What would you like help with?') as HTMLTextAreaElement).value).toBe('Keep my draft');
   expect(screen.getByRole('button', {name: 'Stop Loop s'})).toBeTruthy();
+});
+
+test('competing owner remains connected for inspection and navigation with unverified source', async () => {
+  const fetcher = vi.fn(async (_path: string, init?: RequestInit) => {
+    expect(init?.method).toBe('GET');
+    return new Response(JSON.stringify({...initial(), control: {state: 'competing_owner', can_control: false, message: ''}, sessions: [{...session, declared_source: 'claude-code'}]}));
+  });
+  vi.stubGlobal('fetch', fetcher);
+  const open = vi.fn();
+  render(<OverviewLoops workspace={workspace} onOpenWork={open} />);
+  const button = await screen.findByRole('button', {name: /Open work:/});
+  expect(screen.getByText('Showing recorded Loop sessions.')).toBeTruthy();
+  expect(screen.getByText(/another server owns execution/)).toBeTruthy();
+  expect(screen.getByText(/Caller-declared source \(unverified\): claude-code/)).toBeTruthy();
+  fireEvent.click(button);
+  expect(open).toHaveBeenCalledWith('t');
+  expect(fetcher).toHaveBeenCalledTimes(1);
 });

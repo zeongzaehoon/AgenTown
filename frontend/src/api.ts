@@ -1,3 +1,4 @@
+import type { LoopControl } from './loop-control';
 export interface HookPreview extends SkillPreview {
   hook_id: string; hook_name: string; event: string; agent_id: string;
   source_run_id: string; source_outcome: string; hook_enabled: true; skill_enabled: true;
@@ -26,6 +27,9 @@ export interface Work {
 export interface Workspace {
   employees: Employee[]; work: Work[]; configuration: string | null;
   provider: string; model: string | null;
+}
+export class ApiError extends Error {
+  constructor(message: string, readonly control?: LoopControl) { super(message); }
 }
 export class WorkInputError extends Error {}
 export function workInputError(input: string, employee: string): string {
@@ -77,7 +81,7 @@ export async function api<T>(path: string, data: object, signal?: AbortSignal, m
       if (controller.signal.aborted) throw controller.signal.reason;
       if (!response.ok) {
         if (value.code === 'request_too_large' || value.code === 'invalid_work_text') throw new WorkInputError(value.error);
-        throw new Error(value.error || 'Request failed. Refresh history before retrying.');
+        throw new ApiError(value.error || 'Request failed. Refresh history before retrying.', value.control);
       }
       return value as T;
     })()]);

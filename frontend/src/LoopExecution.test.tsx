@@ -9,7 +9,7 @@ const workspace: Workspace = {work: [work], employees: [{id: 'e', name: 'Writer'
 const preview: LoopPreview = {schema_version: 1, preview_id: 'p', policy_id: 'l', policy_name: 'Bounded', task_id: 'w', agent_id: 'e', input: work.input, expected_runs: 0, policy_enabled: true, max_iterations: 2, interval_seconds: 60};
 const session: LoopSession = {session_id: 'session', preview, state: 'active', admitted: 0, next_at: 0, provider: 'fixture', model: 'fixture'};
 function setup() {
-  const data = {schema_version: 1, sessions: [] as LoopSession[], attempts: [], cancellation: 'Remote completion may remain unknown.'};
+  const data = {schema_version: 1, control: {state: 'available', can_control: true, message: ''}, sessions: [] as LoopSession[], attempts: [], cancellation: 'Remote completion may remain unknown.'};
   const fetcher = vi.fn(async (path: string) => new Response(JSON.stringify(path === '/api/config/v1/loops' ? {loops: [{id: 'l', name: 'Bounded', task_id: 'w', enabled: true, max_iterations: 2, interval_seconds: 60}]} : path.endsWith('/preview') ? preview : data)));
   vi.stubGlobal('fetch', fetcher);
   const submit = vi.fn(async () => {});
@@ -61,7 +61,7 @@ test('recovers saved active sessions and keeps emergency stop available when exe
   expect((stop as HTMLButtonElement).disabled).toBe(false);
   view.rerender(<LoopExecution {...f.props} disabled connected={false} />);
   expect((stop as HTMLButtonElement).disabled).toBe(true);
-  expect(screen.getByRole('status').textContent).toMatch(/stale/);
+  expect(screen.getAllByRole('status')[0].textContent).toMatch(/stale/);
   view.rerender(<LoopExecution {...f.props} disabled connected />);
   await userEvent.setup().click(stop);
   expect(f.props.submit).toHaveBeenCalledWith('/api/loops/v1/stop', {session_id: 'session'}, true);
@@ -81,7 +81,7 @@ test('polling recovers disconnected inspection without resubmitting consent', as
     vi.stubGlobal('fetch', (path: string, options: RequestInit) => offline ? Promise.reject(new Error('offline')) : original(path, options));
     render(<LoopExecution {...f.props} />);
     await act(async () => { await vi.advanceTimersByTimeAsync(0); });
-    expect(screen.getByRole('status').textContent).toMatch(/unavailable/);
+    expect(screen.getAllByRole('status')[0].textContent).toMatch(/unavailable/);
     offline = false; f.data.sessions = [{...session, state: 'restarted'}];
     await act(async () => { await vi.advanceTimersByTimeAsync(800); });
     expect(screen.getByText(/Restarted — explicit new consent required/)).toBeTruthy();
@@ -93,4 +93,72 @@ test('uses actual API execution records for active and waiting labels', () => {
   const row = {session_id: 'session', run_id: 'r', ordinal: 1, execution: {output: null, error: null}};
   expect(loopLabel({...session, admitted: 1}, [row])).toMatch(/^Active/);
   expect(loopLabel({...session, admitted: 1}, [{...row, execution: {output: 'TEST RESPONSE', error: null}}])).toMatch(/^Waiting/);
+});
+
+test('authority changes invalidate consent; competing owner and storage errors preserve readable history and recover without mutation', async () => {
+  vi.useFakeTimers();
+  try {
+    const f = setup();
+    let control: object = {state: 'competing_owner', can_control: false, message: ''};
+    let storage = false;
+    const original = globalThis.fetch;
+    vi.stubGlobal('fetch', async (path: string, options: RequestInit) => {
+      if (path !== '/api/loops/v1') return original(path, options);
+      return new Response(JSON.stringify(storage ? {error: 'Storage unavailable', control} : {...f.data, control}), {status: storage ? 503 : 200});
+    });
+    f.data.sessions = [{...session, declared_source: 'cursor'}];
+    render(<LoopExecution {...f.props} />);
+    await act(async () => {});
+    const stop = screen.getByRole('button', {name: 'Stop Loop session'}) as HTMLButtonElement;
+    expect(stop.disabled).toBe(true);
+    expect(screen.getByText(/Caller-declared source \(unverified\): cursor/)).toBeTruthy();
+    expect(screen.getByText(/another server owns execution/)).toBeTruthy();
+    act(() => stop.click());
+    control = {state: 'local_authority', can_control: true, message: ''};
+    await act(async () => { await vi.advanceTimersByTimeAsync(800); });
+    expect(stop.disabled).toBe(false);
+    storage = true; control = {state: 'storage_failure', can_control: false, message: ''};
+    await act(async () => { await vi.advanceTimersByTimeAsync(800); });
+    expect(stop.disabled).toBe(true);
+    expect(screen.getByText(/storage failure/)).toBeTruthy();
+    expect(screen.getAllByRole('status')[0].textContent).toMatch(/stale/);
+    storage = false; control = {state: 'available', can_control: true, message: ''};
+    f.data.sessions = [{...session, declared_source: null}];
+    await act(async () => { await vi.advanceTimersByTimeAsync(800); });
+    expect(screen.getByText(/Unknown \/ legacy session/)).toBeTruthy();
+    expect(stop.disabled).toBe(false);
+    expect(f.props.submit).not.toHaveBeenCalled();
+    expect(f.fetcher.mock.calls.every(([path]) => !path.endsWith('/start') && !path.endsWith('/stop'))).toBe(true);
+  } finally { vi.useRealTimers(); }
+});
+
+test('missing or unknown availability fails closed even when can_control is true', async () => {
+  const f = setup();
+  const original = globalThis.fetch;
+  vi.stubGlobal('fetch', async (path: string, options: RequestInit) => path === '/api/loops/v1'
+    ? new Response(JSON.stringify({...f.data, sessions: [session], control: {state: 'future', can_control: true}})) : original(path, options));
+  render(<LoopExecution {...f.props} />);
+  const stop = await screen.findByRole('button', {name: 'Stop Loop session'});
+  expect((stop as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.getByText(/unknown authority/)).toBeTruthy();
+  expect(f.props.submit).not.toHaveBeenCalled();
+});
+
+test('authority loss invalidates focused preview and recovery requires fresh consent', async () => {
+  const f = setup();
+  let owner = true;
+  const original = globalThis.fetch;
+  vi.stubGlobal('fetch', async (path: string, options: RequestInit) => path === '/api/loops/v1'
+    ? new Response(JSON.stringify({...f.data, control: owner
+      ? {state: 'available', can_control: true, message: ''}
+      : {state: 'competing_owner', can_control: false, message: ''}})) : original(path, options));
+  render(<LoopExecution {...f.props} />);
+  await inspect();
+  owner = false;
+  await waitFor(() => expect(screen.queryByRole('button', {name: 'Authorize and start bounded Loop'})).toBeNull(), {timeout: 2000});
+  expect(document.activeElement).toBe(screen.getByRole('region', {name: 'Run a bounded Loop'}));
+  owner = true;
+  await waitFor(() => expect((screen.getByRole('button', {name: 'Preview Loop with saved work'}) as HTMLButtonElement).disabled).toBe(false), {timeout: 2000});
+  expect(screen.queryByRole('button', {name: 'Authorize and start bounded Loop'})).toBeNull();
+  expect(f.props.submit).not.toHaveBeenCalled();
 });

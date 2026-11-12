@@ -62,7 +62,7 @@ test('App uses existing polling, retains stale counts and drafts, reconnects and
   const fetcher = vi.fn(async (path: string, init?: RequestInit) => {
     if (path === '/api/config/v1/loops') return new Response('{"loops":[]}');
     if (path === '/api/loops/v1' && loopUnavailable) throw new Error('Loop inspection offline');
-    if (path === '/api/loops/v1') return new Response('{"schema_version":1,"sessions":[],"attempts":[],"cancellation":"Stop prevents admissions"}');
+    if (path === '/api/loops/v1') return new Response('{"schema_version":1,"control":{"state":"available","can_control":true,"message":""},"sessions":[],"attempts":[],"cancellation":"Stop prevents admissions"}');
     if (path === '/api/config/v1/hooks') return new Response('{"hooks":[]}');
     if (path === '/api/config/v1/skills') {
       expect(init?.method).toBe('GET');

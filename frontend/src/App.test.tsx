@@ -13,7 +13,7 @@ function fixture(state = initial()) {
   const calls: {path: string; body: Record<string, unknown>}[] = [];
   const fetcher = vi.fn(async (path: string, options: RequestInit) => {
     if (path === '/api/config/v1/loops') return new Response('{"loops":[]}');
-    if (path === '/api/loops/v1') return new Response('{"schema_version":1,"sessions":[],"attempts":[],"cancellation":"Stop prevents admissions"}');
+    if (path === '/api/loops/v1') return new Response('{"schema_version":1,"control":{"state":"available","can_control":true,"message":""},"sessions":[],"attempts":[],"cancellation":"Stop prevents admissions"}');
     if (path === '/api/config/v1/hooks') return new Response('{"hooks":[]}');
     if (path === '/api/config/v1/skills') return new Response(JSON.stringify({skills: []}));
     const body = JSON.parse(options.body as string) as Record<string, unknown>;
@@ -48,7 +48,7 @@ const refresh = () => fireEvent.click(screen.getByRole('button', {name: 'Refresh
 const connected = () => waitFor(() => {
   expect(document.querySelector('#connection')!.textContent).toContain('Connected');
   const loop = screen.queryByRole('region', {name: 'Run a bounded Loop'});
-  if (loop) expect(within(loop).getByRole('status').textContent).not.toContain('Loop data unavailable');
+  if (loop) expect(within(loop).getByRole('status', {name: 'Loop inspection'}).textContent).not.toContain('Loop data unavailable');
 });
 
 test('StrictMode employee → saved work → running → failure → explicit retry → full safe result and reload', async () => {

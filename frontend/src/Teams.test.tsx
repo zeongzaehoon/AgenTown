@@ -98,7 +98,7 @@ test('App team navigation preserves unsaved work, assignment and existing resend
   const fetcher = vi.fn(async (path: string, init?: RequestInit) => {
     if (path === '/api/state') return response(state);
     if (path === '/api/config/v1/loops') return new Response('{"loops":[]}');
-    if (path === '/api/loops/v1') return new Response('{"schema_version":1,"sessions":[],"attempts":[],"cancellation":"Stop prevents admissions"}');
+    if (path === '/api/loops/v1') return new Response('{"schema_version":1,"control":{"state":"available","can_control":true,"message":""},"sessions":[],"attempts":[],"cancellation":"Stop prevents admissions"}');
     if (path === '/api/config/v1/hooks') return new Response('{"hooks":[]}');
     if (path === '/api/config/v1/skills') {
       expect(init?.method).toBe('GET');

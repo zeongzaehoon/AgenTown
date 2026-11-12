@@ -24,7 +24,7 @@ for (const path of ['/api/state', '/api/employees', '/api/work', '/api/work/w/ex
       const calls: string[] = [];
       vi.stubGlobal('fetch', vi.fn(async (url: string, options: RequestInit) => {
         if (url === '/api/config/v1/loops') return new Response('{"loops":[]}');
-        if (url === '/api/loops/v1') return new Response('{"schema_version":1,"sessions":[],"attempts":[],"cancellation":"Stop prevents admissions"}');
+        if (url === '/api/loops/v1') return new Response('{"schema_version":1,"control":{"state":"available","can_control":true,"message":""},"sessions":[],"attempts":[],"cancellation":"Stop prevents admissions"}');
         if (url === '/api/config/v1/hooks') return new Response('{"hooks":[]}');
         if (url === '/api/config/v1/skills') return new Response('{"skills":[]}');
         calls.push(url);
@@ -80,7 +80,7 @@ for (const path of ['/api/employees', '/api/work', '/api/work/w/execute']) {
     const calls: string[] = [];
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url === '/api/config/v1/loops') return new Response('{"loops":[]}');
-      if (url === '/api/loops/v1') return new Response('{"schema_version":1,"sessions":[],"attempts":[],"cancellation":"Stop prevents admissions"}');
+      if (url === '/api/loops/v1') return new Response('{"schema_version":1,"control":{"state":"available","can_control":true,"message":""},"sessions":[],"attempts":[],"cancellation":"Stop prevents admissions"}');
       if (url === '/api/config/v1/hooks') return new Response('{"hooks":[]}');
       if (url === '/api/config/v1/skills') return new Response('{"skills":[]}');
       calls.push(url);
@@ -113,7 +113,7 @@ test('unmount cancels pending mutation and history without starting a recovery r
   let pending = false;
   const fetcher = vi.fn(async (_url: string, options: RequestInit) => {
     if (_url === '/api/config/v1/loops') return new Response('{"loops":[]}');
-    if (_url === '/api/loops/v1') return new Response('{"schema_version":1,"sessions":[],"attempts":[],"cancellation":"Stop prevents admissions"}');
+    if (_url === '/api/loops/v1') return new Response('{"schema_version":1,"control":{"state":"available","can_control":true,"message":""},"sessions":[],"attempts":[],"cancellation":"Stop prevents admissions"}');
     if (_url === '/api/config/v1/hooks') return new Response('{"hooks":[]}');
     if (_url === '/api/config/v1/skills') return new Response('{"skills":[]}');
     signals.push(options.signal as AbortSignal);
@@ -145,7 +145,7 @@ for (const path of ['/api/work', '/api/work/w/execute']) {
     const calls: string[] = [];
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url === '/api/config/v1/loops') return new Response('{"loops":[]}');
-      if (url === '/api/loops/v1') return new Response('{"schema_version":1,"sessions":[],"attempts":[],"cancellation":"Stop prevents admissions"}');
+      if (url === '/api/loops/v1') return new Response('{"schema_version":1,"control":{"state":"available","can_control":true,"message":""},"sessions":[],"attempts":[],"cancellation":"Stop prevents admissions"}');
       if (url === '/api/config/v1/hooks') return new Response('{"hooks":[]}');
       if (url === '/api/config/v1/skills') return new Response('{"skills":[]}');
       calls.push(url);

@@ -1239,3 +1239,42 @@ replay work. Explicit control recovers abandoned sessions as restarted without
 replaying them; a new activation needs a fresh, explicitly approved preview.
 Storage failures require checking database/lock-file permissions and access,
 not repeatedly trying to take control. Live provider validation remains skipped.
+
+### Ownership-aware Loop screen exercise (C34-T2)
+
+Use the credential-free browser fixture command in the C30 exercise above; its
+responses are test data, not live provider validation. Both **Bounded Loop
+activity** and saved work now show **Caller-declared source (unverified)**. A
+missing/null source reads **Unknown / legacy session**. This label is metadata,
+not proof of which server owns execution.
+
+For deterministic UI exercises, use the interaction cases in
+`frontend/src/LoopExecution.test.tsx` and `OverviewLoops.test.tsx` (supervisor runs
+`npm test` in `frontend`). They supply the existing `/api/loops/v1` contract
+without credentials. The observable states are:
+
+- `available`: local preview/start and active-session Stop are eligible, subject
+  to ordinary saved-work restrictions and explicit consent.
+- `local_authority`: the screen says this server owns execution. Emergency Stop
+  remains available even when ordinary execution is disabled.
+- `competing_owner`: history remains connected/readable and Open work remains
+  usable; local Loop preview/start/Stop are disabled. Follow the displayed
+  instructions to use `stop_loop_v1` on the owning MCP server or Stop on the
+  owning web server. Shut down that owner to transfer authority, then inspect
+  again and explicitly retry. Polling never performs the transfer or recovery.
+- `storage_failure`: local control is disabled with database/lock-file access
+  guidance; previously loaded sessions remain visible with a stale notice.
+- `closed`, missing or unknown authority: local Loop actions fail closed.
+- Inspection transport failure: disconnected/unavailable inspection is shown
+  separately from ownership; loaded records remain marked potentially stale.
+  Successful polling restores inspection and eligible controls without sending
+  any start or stop request. Any invalidated preview requires new consent.
+
+With a draft entered, navigate from a company Loop card to saved work and wait
+through polling and failures. The draft and history remain; navigation focuses
+Saved work. Control changes invalidate a displayed preview. Stop prevents new
+admissions and attempts local cancellation; remote completion may remain unknown.
+Availability is advisory and the server can reject an ownership race. Such
+failures retain inspection-before-retry guidance and never automatically resend.
+Browser validation and consolidated frontend/build/Python checks are pending the
+supervisor gate. Live provider validation remains skipped, not passed.
