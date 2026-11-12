@@ -126,11 +126,16 @@ python3.13 desktop/check_runtime.py desktop/target/release/bundle/macos/AgenTown
 
 For the assembled macOS app, use this acceptance sequence and record each result:
 
-`desktop/check_app.py` is only a copied-bundle process ownership/cleanup smoke
-check. Its child observation does not establish authenticated readiness, window
-creation, React rendering, or saved records after restart. Even when it exits
-successfully, the graphical acceptance sequence below remains required; do not
-use its output as workspace acceptance evidence.
+Run `python3.13 desktop/check_app.py` after assembly in a graphical macOS login.
+It copies the bundle outside the checkout, launches with an empty PATH and a
+temporary macOS home, observes an on-screen native window, and waits for a
+webview DOM signal requiring the React heading, employee form and connected
+status. It saves an employee through the owned service API, quits, relaunches,
+waits for React again, and checks both the saved ID and name. It also requires
+owned-service cleanup. Retain its actual output in the verification artifact;
+source inspection alone is not passing evidence. This automated check does not
+exercise employee form interaction or visually inspect the saved record, so the
+graphical acceptance sequence below remains required.
 
 The supervisor can prepare and launch the copied bundle with the following
 commands from the checkout root. Run them in one terminal session in a graphical

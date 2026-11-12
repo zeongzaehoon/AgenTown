@@ -27,7 +27,9 @@ fn main() {
                 .initialization_script(r#"
                     (() => {
                       const timer = setInterval(() => {
-                        if (document.body?.innerText.toLowerCase().includes('agentown')) {
+                        if (document.querySelector('h1')?.textContent === 'Where agents come alive.' &&
+                            document.querySelector('#employee-form') &&
+                            document.querySelector('#connection')?.textContent?.startsWith('Connected')) {
                           clearInterval(timer);
                           fetch('/_desktop/rendered', {
                             method: 'POST',

@@ -166,11 +166,17 @@ def main() -> None:
 
         process, owned, port = launch(executable, root, environment)
         try:
+            wait_until(
+                lambda: (api(port, "GET", "/_desktop/rendered") or {}).get("rendered"),
+                20, "React workspace did not render after app restart",
+            )
             state = api(port, "POST", "/api/state", {})
             employees = state.get("employees", [])
-            if not any(employee.get("id") == employee_id for employee in employees):
+            if not any(employee.get("id") == employee_id and
+                       employee.get("name") == "Desktop restart evidence"
+                       for employee in employees):
                 raise RuntimeError("Saved desktop record was not retained after app restart")
-            print(f"assembled-app-restart-persistence=true employee-id={employee_id}")
+            print(f"assembled-app-restart-persistence=true employee-id={employee_id} employee-name=Desktop restart evidence")
         finally:
             stop(process, owned)
         print("assembled-app-clean-shutdown=true copied-outside-checkout=true empty-path=true")
