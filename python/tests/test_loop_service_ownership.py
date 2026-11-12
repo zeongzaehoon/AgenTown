@@ -43,7 +43,7 @@ def test_failed_recovery_releases_handle_and_can_retry(monkeypatch):
     monkeypatch.setattr(_native, 'acquire_loop_execution_owner', lambda database: Handle(), raising=False)
     monkeypatch.setattr(_native, 'recover_loop_sessions', recover)
     service = LoopService('fixture', None, None)
-    with pytest.raises(OSError):
+    with pytest.raises(ValueError, match='storage unavailable'):
         service.initialize()
     assert events == ['recover', 'release']
     assert not service.initialized and service.owner is None
@@ -55,10 +55,14 @@ def test_inspection_never_initializes_or_recovers(monkeypatch):
 
     for name in ('acquire_loop_execution_owner', 'history_snapshot', 'recover_loop_sessions'):
         monkeypatch.setattr(_native, name, forbidden, raising=False)
+    monkeypatch.setattr(_native, 'loop_control_available', lambda database: False, raising=False)
     monkeypatch.setattr(_native, 'loop_sessions', lambda *a: [])
     monkeypatch.setattr(_native, 'loop_attempts', lambda *a: [])
     service = LoopService('fixture', None, None)
-    assert service.inspect()['sessions'] == []
+    result = service.inspect()
+    assert result['sessions'] == []
+    assert result['control']['state'] == 'competing_owner'
+    assert result['control']['can_control'] is False
     assert not service.initialized
 
 
@@ -148,3 +152,60 @@ def test_native_handle_is_used_for_activation_admission_and_stop(monkeypatch):
 
     asyncio.run(scenario())
     assert events == ['start', 'admit', 'stop', 'release']
+
+
+def test_availability_storage_failure_is_distinct(monkeypatch):
+    def unavailable(database):
+        raise OSError('private path must not escape')
+    monkeypatch.setattr(_native, 'loop_control_available', unavailable, raising=False)
+    service = LoopService('fixture', None, None)
+    control = service.control_availability()
+    assert control['state'] == 'storage_failure'
+    assert not control['can_control']
+    assert 'private path' not in str(control)
+
+
+def test_two_services_inspect_conflict_release_and_explicit_recovery(tmp_path):
+    """Real native ownership/consent boundary; deterministic and no dispatch."""
+    db = str(tmp_path / 'shared.db')
+    agent = _native.create_agent(db, 'Writer')[0]
+    task = _native.create_assigned_work(db, 'Saved input', agent)[0]
+    policy = _native.create_loop(db, 'Bounded', task, 1, 60)['id']
+    _native.set_loop_enabled(db, policy, True)
+    preview = _native.preview_loop(db, policy, [])
+    provider = type('Provider', (), {'name': 'fixture'})()
+
+    async def scenario():
+        first = LoopService(db, provider, 'model')
+        second = LoopService(db, provider, 'model')
+        assert second.control_availability()['state'] == 'available'
+        first.initialize()
+        # Persist an abandoned session without creating any Python driver.
+        session = _native.start_loop_session(first.owner, preview['preview_id'],
+                                             0, 'fixture', 'model', [], 'mcp')
+        fresh = _native.preview_loop(db, policy, [])
+        before = second.inspect()
+        assert before['control']['state'] == 'competing_owner'
+        assert first.control_availability()['state'] == 'local_authority'
+        assert before['sessions'][0]['state'] == 'active'
+        for command in (lambda: second.start(fresh['preview_id'], 0),
+                        lambda: second.stop(session['session_id'])):
+            with pytest.raises(ValueError, match='owning MCP server'):
+                command()
+        assert second.inspect() == before
+        assert not second.workers and not second.initialized
+        await first.close()
+        assert second.inspect()['sessions'][0]['state'] == 'active'
+        assert second.control_availability()['state'] == 'available'
+        # Explicit control triggers recovery, never replay of the old session.
+        second.initialize()
+        assert second.inspect()['sessions'][0]['state'] == 'restarted'
+        assert second.inspect()['attempts'] == []
+        # Rejected competing commands did not consume this preview's consent.
+        created = _native.start_loop_session(second.owner, fresh['preview_id'],
+                                             0, 'fixture', 'model', [], 'web')
+        second.stop(created['session_id'])
+        assert second.inspect()['attempts'] == []
+        await second.close()
+
+    asyncio.run(scenario())

@@ -17,7 +17,7 @@ impl LoopExecutionOwner {
     /// have stopped. Acquisition does not recover sessions or consume consent.
     pub fn acquire(database: impl AsRef<Path>) -> Result<Self, StorageError> {
         let store = SqliteStore::open(database.as_ref())?;
-        let database = std::fs::canonicalize(database).map_err(|_| Self::conflict())?;
+        let database = std::fs::canonicalize(database).map_err(|_| Self::storage_failure())?;
         let mut lock_path = database.as_os_str().to_os_string();
         lock_path.push(".loop-owner");
         let lock = OpenOptions::new()
@@ -26,8 +26,11 @@ impl LoopExecutionOwner {
             .create(true)
             .truncate(false)
             .open(lock_path)
-            .map_err(|_| Self::conflict())?;
-        lock.try_lock().map_err(|_| Self::conflict())?;
+            .map_err(|_| Self::storage_failure())?;
+        lock.try_lock().map_err(|e| match e {
+            std::fs::TryLockError::WouldBlock => Self::conflict(),
+            _ => Self::storage_failure(),
+        })?;
         let runtime = store
             .connection
             .query_row("SELECT lower(hex(randomblob(16)))", [], |r| r.get(0))?;
@@ -37,10 +40,30 @@ impl LoopExecutionOwner {
             _lock: lock,
         })
     }
+    fn storage_failure() -> StorageError {
+        StorageError::InvalidData("Loop ownership storage unavailable".into())
+    }
     fn conflict() -> StorageError {
-        StorageError::InvalidData(
-            "Loop execution ownership unavailable; another execution service may be active".into(),
-        )
+        StorageError::LoopOwnershipUnavailable
+    }
+    /// Advisory shared-lock probe: never creates an execution owner, database,
+    /// lock file, runtime identity or recovery work. Explicit control must still
+    /// acquire the exclusive lock; availability can change immediately.
+    pub fn control_available(database: impl AsRef<Path>) -> Result<bool, StorageError> {
+        ReadOnlyStore::open(database.as_ref())?;
+        let database = std::fs::canonicalize(database).map_err(|_| Self::storage_failure())?;
+        let mut path = database.as_os_str().to_os_string();
+        path.push(".loop-owner");
+        let lock = match File::open(path) {
+            Ok(lock) => lock,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(true),
+            Err(_) => return Err(Self::storage_failure()),
+        };
+        match lock.try_lock_shared() {
+            Ok(()) => Ok(true),
+            Err(std::fs::TryLockError::WouldBlock) => Ok(false),
+            Err(_) => Err(Self::storage_failure()),
+        }
     }
     pub fn recover(&self) -> Result<(), StorageError> {
         SqliteStore::open(&self.database)?.recover_loop_sessions(&self.runtime)
@@ -105,6 +128,27 @@ mod tests {
             .unwrap();
         let preview = store.preview_loop(policy, &[]).unwrap();
         (dir, path, preview)
+    }
+    #[test]
+    fn advisory_inspection_never_creates_owner_or_recovers() {
+        let (_dir, path, preview) = setup();
+        let lock_path = PathBuf::from(format!("{}.loop-owner", path.display()));
+        assert!(!lock_path.exists());
+        assert!(LoopExecutionOwner::control_available(&path).unwrap());
+        assert!(!lock_path.exists());
+        let owner = LoopExecutionOwner::acquire(&path).unwrap();
+        let session = owner
+            .start(&preview.preview_id, 0, "fixture", "model", &[], Some("mcp"))
+            .unwrap();
+        assert!(!LoopExecutionOwner::control_available(&path).unwrap());
+        let store = SqliteStore::open(&path).unwrap();
+        assert_eq!(store.loop_sessions().unwrap(), vec![session.clone()]);
+        assert!(store.loop_attempts().unwrap().is_empty());
+        drop(owner);
+        assert!(LoopExecutionOwner::control_available(&path).unwrap());
+        assert_eq!(store.loop_sessions().unwrap(), vec![session]);
+        assert!(store.loop_attempts().unwrap().is_empty());
+        assert!(LoopExecutionOwner::control_available(path.join("missing")).is_err());
     }
     #[test]
     fn owner_lock_excludes_another_process() {

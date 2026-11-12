@@ -28,10 +28,14 @@ pub enum StorageError {
     UnsupportedVersion(i32),
     ForeignDatabase,
     UnsupportedProvenance,
+    LoopOwnershipUnavailable,
 }
 impl fmt::Display for StorageError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::LoopOwnershipUnavailable => {
+                write!(f, "Loop execution is owned by another service")
+            }
             Self::Sqlite(e) => write!(f, "database error: {e}"),
             Self::Domain(e) => e.fmt(f),
             Self::InvalidData(e) => write!(f, "invalid stored data: {e}"),

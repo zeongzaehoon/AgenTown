@@ -35,7 +35,11 @@ def test_discovery_preview_and_poll_never_construct_execution_service(tmp_path, 
             assert preview.structured_content['max_iterations'] == 2
             assert preview.structured_content['expected_runs'] == 0
             inspection = await client.call_tool('inspect_loop_sessions_v1', {})
-            assert inspection.structured_content == {'schema_version': 1, 'sessions': [], 'attempts': []}
+            data = inspection.structured_content
+            assert data['schema_version'] == 1
+            assert data['sessions'] == data['attempts'] == []
+            assert data['control']['state'] == 'available'
+            assert data['control']['can_control'] is True
 
     asyncio.run(scenario())
 

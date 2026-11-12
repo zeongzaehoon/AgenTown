@@ -720,8 +720,10 @@ async def test_loop_inspection_without_execution_side_effects(cli, tmp_path, ser
             assert not tools[name].annotations.openWorldHint
             assert tools[name].inputSchema["properties"] == {}
         assert await call(client, tools, "list_loops_v1") == {"schema_version": 1, "loops": []}
-        assert await call(client, tools, "inspect_loop_sessions_v1") == {
-            "schema_version": 1, "sessions": [], "attempts": []}
+        inspection = await call(client, tools, "inspect_loop_sessions_v1")
+        control = inspection.pop('control')
+        assert control['state'] == 'available' and control['can_control']
+        assert inspection == {"schema_version": 1, "sessions": [], "attempts": []}
 
     employee = _native.create_agent(db, "Writer")[0]
     work = _native.create_assigned_work(db, "Saved loop input", employee)[0]
@@ -738,8 +740,10 @@ async def test_loop_inspection_without_execution_side_effects(cli, tmp_path, ser
         tools = await discover(client)
         assert await call(client, tools, "list_loops_v1") == {
             "schema_version": 1, "loops": sorted([enabled, disabled], key=lambda r: r["id"])}
-        assert await call(client, tools, "inspect_loop_sessions_v1") == {
-            "schema_version": 1, "sessions": [started], "attempts": []}
+        inspection = await call(client, tools, "inspect_loop_sessions_v1")
+        control = inspection.pop('control')
+        assert control['state'] == 'competing_owner' and not control['can_control']
+        assert inspection == {"schema_version": 1, "sessions": [started], "attempts": []}
     assert database.read_bytes() == before_admission
     row = _native.admit_loop_attempt(owner, sid)
     if state in {"complete", "failed"}:

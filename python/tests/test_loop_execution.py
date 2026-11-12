@@ -179,3 +179,59 @@ def test_api_stop_during_call_and_restart_inspection(saved):
                 assert state['attempts'][0]['execution']['error'] == 'interrupted'
                 assert provider.calls == 1
     asyncio.run(scenario())
+
+
+def test_web_history_and_typed_conflicts_while_mcp_service_owns(saved):
+    async def scenario():
+        db, policy = saved
+        provider = FixtureProvider()
+        owner = LoopService(db, provider, 'fixture-model')
+        owner.initialize()
+        app = create_app(db, 'fixture-model', provider=provider)
+        try:
+            async with app.app.router.lifespan_context(app.app):
+                async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                             base_url=ORIGIN, headers=HEADERS) as client:
+                    state = (await client.get('/api/loops/v1')).json()
+                    assert state['control']['state'] == 'competing_owner'
+                    preview = (await client.post('/api/loops/v1/preview',
+                               json={'policy_id': policy()})).json()
+                    payload = {'preview_id': preview['preview_id'], 'expected_runs': 0}
+                    result = await client.post('/api/loops/v1/start', json=payload)
+                    assert result.status_code == 409
+                    assert result.json()['control']['state'] == 'competing_owner'
+                    assert 'owning MCP server' in result.json()['error']
+                    assert provider.calls == 0
+                    assert (await client.get('/api/loops/v1')).json()['sessions'] == []
+                    # The same consent remains valid at the owning service.
+                    session = _native.start_loop_session(owner.owner, preview['preview_id'],
+                                                         0, provider.name, 'fixture-model', [], 'mcp')
+                    rejected = await client.post('/api/loops/v1/stop',
+                                                 json={'session_id': session['session_id']})
+                    assert rejected.status_code == 409
+                    assert rejected.json()['control']['state'] == 'competing_owner'
+                    state = (await client.get('/api/loops/v1')).json()
+                    assert state['sessions'][0]['state'] == 'active'
+                    assert state['attempts'] == []
+        finally:
+            await owner.close()
+    asyncio.run(scenario())
+
+
+def test_web_loop_storage_failure_has_typed_guidance(saved, monkeypatch):
+    db, _ = saved
+    app = create_app(db, 'fixture-model', provider=FixtureProvider())
+
+    def unavailable(database):
+        raise OSError('private storage path')
+
+    monkeypatch.setattr(_native, 'loop_control_available', unavailable)
+
+    async def scenario():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                     base_url=ORIGIN, headers=HEADERS) as client:
+            result = await client.get('/api/loops/v1')
+            assert result.status_code == 503
+            assert result.json()['control']['state'] == 'storage_failure'
+            assert 'private storage path' not in result.text
+    asyncio.run(scenario())

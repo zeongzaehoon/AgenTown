@@ -6,6 +6,17 @@ use pyo3::types::PyDict;
 fn rejected(_: impl std::fmt::Display) -> PyErr {
     error("loop command rejected; refresh and explicitly preview/start again")
 }
+fn command_error(e: llm_engine_sqlite::StorageError) -> PyErr {
+    match e {
+        llm_engine_sqlite::StorageError::Sqlite(_) => pyo3::exceptions::PyOSError::new_err(
+            "Loop storage unavailable; check database access before explicitly retrying.",
+        ),
+        llm_engine_sqlite::StorageError::LoopOwnershipUnavailable => {
+            error("Loop execution belongs to another owner; use the owning server.")
+        }
+        _ => rejected(e),
+    }
+}
 /// Explicitly close only after execution workers have joined/cancelled.
 #[pyclass]
 struct LoopOwner {
@@ -27,9 +38,19 @@ impl LoopOwner {
 #[pyfunction]
 fn acquire_loop_execution_owner(database: &str) -> PyResult<LoopOwner> {
     Ok(LoopOwner {
-        inner: Some(LoopExecutionOwner::acquire(database).map_err(|_| {
-            error("Loop execution ownership unavailable; another execution service may be active")
+        inner: Some(LoopExecutionOwner::acquire(database).map_err(|e| match e {
+            llm_engine_sqlite::StorageError::LoopOwnershipUnavailable =>
+                error("Loop execution is owned by another service; stop through the owning server or shut it down before explicitly retrying."),
+            _ => pyo3::exceptions::PyOSError::new_err("Loop ownership storage unavailable; check database access before retrying."),
         })?),
+    })
+}
+#[pyfunction]
+fn loop_control_available(database: &str) -> PyResult<bool> {
+    LoopExecutionOwner::control_available(database).map_err(|_| {
+        pyo3::exceptions::PyOSError::new_err(
+            "Loop ownership storage unavailable; check database access.",
+        )
     })
 }
 fn preview_record(py: Python<'_>, p: LoopPreview) -> PyResult<Py<PyDict>> {
@@ -72,7 +93,7 @@ fn preview_loop(
     secrets: Vec<String>,
 ) -> PyResult<Py<PyDict>> {
     let p = SqliteStore::open(database)
-        .map_err(rejected)?
+        .map_err(command_error)?
         .preview_loop(
             policy_id.parse::<LoopPolicyId>().map_err(rejected)?,
             &secrets,
@@ -104,7 +125,7 @@ fn start_loop_session(
                 &secrets,
                 declared_source,
             )
-            .map_err(rejected)?,
+            .map_err(command_error)?,
     )
 }
 #[pyfunction]
@@ -130,19 +151,19 @@ fn stop_loop_session(py: Python<'_>, owner: &LoopOwner, session_id: &str) -> PyR
         owner
             .get()?
             .stop(session_id.parse::<LoopSessionId>().map_err(rejected)?)
-            .map_err(rejected)?,
+            .map_err(command_error)?,
     )
 }
 #[pyfunction]
 fn recover_loop_sessions(owner: &LoopOwner) -> PyResult<()> {
-    owner.get()?.recover().map_err(rejected)
+    owner.get()?.recover().map_err(command_error)
 }
 #[pyfunction]
 fn loop_sessions(py: Python<'_>, database: &str) -> PyResult<Vec<Py<PyDict>>> {
     SqliteStore::open(database)
-        .map_err(rejected)?
+        .map_err(command_error)?
         .loop_sessions()
-        .map_err(rejected)?
+        .map_err(command_error)?
         .into_iter()
         .map(|s| session_record(py, s))
         .collect()
@@ -150,9 +171,9 @@ fn loop_sessions(py: Python<'_>, database: &str) -> PyResult<Vec<Py<PyDict>>> {
 #[pyfunction]
 fn loop_attempts(py: Python<'_>, database: &str) -> PyResult<Vec<Py<PyDict>>> {
     SqliteStore::open(database)
-        .map_err(rejected)?
+        .map_err(command_error)?
         .loop_attempts()
-        .map_err(rejected)?
+        .map_err(command_error)?
         .into_iter()
         .map(|a| {
             let d = PyDict::new(py);
@@ -167,6 +188,7 @@ fn loop_attempts(py: Python<'_>, database: &str) -> PyResult<Vec<Py<PyDict>>> {
 }
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<LoopOwner>()?;
+    m.add_function(wrap_pyfunction!(loop_control_available, m)?)?;
     m.add_function(wrap_pyfunction!(acquire_loop_execution_owner, m)?)?;
     m.add_function(wrap_pyfunction!(preview_loop, m)?)?;
     m.add_function(wrap_pyfunction!(start_loop_session, m)?)?;

@@ -65,16 +65,11 @@ def create_app(database, model=None, *, port=8765, provider=None, provider_name=
         except ValueError as exc:
             configuration = str(exc) + " Then restart this server."
     secrets = runtime_secrets()
-    from .loop_execution import LoopService
+    from .loop_execution import LoopControlError, LoopService
     loops = LoopService(database, provider, model)
 
     @asynccontextmanager
     async def lifespan(app):
-        # Fail closed for Loop endpoints if recovery storage is unavailable.
-        try:
-            loops.initialize()
-        except (ValueError, OSError):
-            pass
         try:
             yield
         finally:
@@ -318,12 +313,17 @@ def create_app(database, model=None, *, port=8765, provider=None, provider_name=
                 session = loops.stop(data["session_id"])
                 return response({**session, "cancellation": "Local cancellation requested; remote completion may remain unknown."})
             raise ValueError("action")
+        except LoopControlError as exc:
+            return response({'error': str(exc), 'control': exc.control},
+                            503 if exc.control['state'] == 'storage_failure' else 409)
         except RequestTooLarge:
             return response({"error": "Loop request exceeds 120,000 bytes."}, 413)
         except (ValueError, KeyError, TypeError, OverflowError, UnicodeError):
             return response({"error": "Loop request rejected. Refresh sessions and explicitly preview/start again; check saved work, enabled policy and request fields."}, 409)
         except OSError:
-            return response({"error": "Loop storage unavailable. Inspect history before any explicit new start."}, 503)
+            return response({"error": "Loop storage unavailable. Check database access before explicitly retrying.",
+                             "control": {"state": "storage_failure", "can_control": False,
+                                         "message": "Check database and lock-file access before explicitly retrying."}}, 503)
 
     from .configuration import routes as configuration_routes
 

@@ -870,3 +870,22 @@ Acquisition excludes competing services/processes before recovery; failure leave
 consent and sessions untouched. The handle has idempotent `close()`.
 Session records include nullable `declared_source` for historical records.
 There is no unsafe Python fallback if these native contracts are unavailable.
+
+
+Loop ownership and history (C34): launch `agentown-mcp --database /absolute/path/product.db`
+and `agentown-web --database /absolute/path/product.db` against the same database
+(use each command's `--help` for provider/model options). Opening the web screen
+and polling Loop history does not claim execution authority, recover sessions or
+dispatch work. Inspection adds `control: {state, can_control, message}`; states
+are `available`, `local_authority`, `competing_owner`, `storage_failure` and
+`closed`. Availability is advisory: Rust still exclusively admits every mutation.
+No owner handle or runtime identity is returned.
+
+When MCP owns execution, stop the Loop using `stop_loop_v1` on that same MCP
+server. The web service cannot cancel another server's operation. To transfer
+control, gracefully shut down the owning server, then explicitly start/stop from
+the new service. Merely refreshing history after release does not recover or
+replay work. Explicit control recovers abandoned sessions as restarted without
+replaying them; a new activation needs a fresh, explicitly approved preview.
+Storage failures require checking database/lock-file permissions and access,
+not repeatedly trying to take control. Live provider validation remains skipped.

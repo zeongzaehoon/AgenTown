@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .execution import configured_provider, finish_text, record
 from .providers import runtime_secrets
-from .loop_execution import LoopService
+from .loop_execution import LoopControlError, LoopService, control_availability
 
 from . import _native
 
@@ -139,7 +139,14 @@ class LoopAttempt(Record):
     execution: Execution
 
 
+class LoopControl(Record):
+    state: Literal['local_authority', 'available', 'competing_owner', 'storage_failure', 'closed']
+    can_control: bool
+    message: str
+
+
 class LoopInspection(Record):
+    control: LoopControl
     schema_version: Literal[1] = 1
     sessions: list[LoopSession]
     attempts: list[LoopAttempt]
@@ -327,6 +334,9 @@ def create_server(database: str, *, provider_factory=None, auth=None) -> FastMCP
         Does not initialize an execution owner, create previews or authorize dispatch.
         Active owners may continue writing between these native read queries.
         """
+        control = loops.control_availability() if loops is not None else control_availability(database)
+        if control['state'] == 'storage_failure':
+            raise ToolError(f"Loop inspection unavailable (storage_failure): {control['message']}")
         sessions = query(_native.loop_sessions)
         session_ids = {row["session_id"] for row in sessions}
         links = [row for row in query(_native.loop_attempts)
@@ -334,7 +344,8 @@ def create_server(database: str, *, provider_factory=None, auth=None) -> FastMCP
         attempts = [LoopAttempt(**row, execution=Execution(**record(
             query(_native.show_execution_read_only, row["run_id"]))))
             for row in links]
-        return LoopInspection(sessions=[LoopSession(**row) for row in sessions],
+        return LoopInspection(control=LoopControl(**control),
+                              sessions=[LoopSession(**row) for row in sessions],
                               attempts=attempts)
 
     @server.tool(annotations=mutations)
@@ -371,7 +382,11 @@ def create_server(database: str, *, provider_factory=None, auth=None) -> FastMCP
         try:
             return LoopSession(**loop_service().start(preview_id, expected_runs, declared_source,
                                             provider=adapter, model=model))
-        except (ValueError, OSError):
+        except LoopControlError as exc:
+            raise ToolError(f"Loop control unavailable ({exc.control['state']}): {exc}") from None
+        except OSError:
+            raise ToolError("Loop activation unavailable (storage_failure); check database access before explicitly retrying.") from None
+        except ValueError:
             raise ToolError("Loop activation rejected; inspect history, consent and execution ownership. "
                             "A live web or MCP owner must shut down before another service starts Loops.") from None
 
@@ -386,7 +401,11 @@ def create_server(database: str, *, provider_factory=None, auth=None) -> FastMCP
         safe_text(session_id)
         try:
             return LoopSession(**loop_service().stop(session_id))
-        except (ValueError, OSError):
+        except LoopControlError as exc:
+            raise ToolError(f"Loop control unavailable ({exc.control['state']}): {exc}") from None
+        except OSError:
+            raise ToolError("Loop stop unavailable (storage_failure); check database access before explicitly retrying.") from None
+        except ValueError:
             raise ToolError("Loop stop rejected; inspect sessions and use their execution owner.") from None
 
     @server.tool(annotations=mutations)
