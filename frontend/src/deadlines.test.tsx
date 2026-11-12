@@ -128,7 +128,9 @@ test('unmount cancels pending mutation and history without starting a recovery r
   // measuring unmount cleanup, without advancing any request deadline.
   await advance(0);
   expect(signals.slice(-2).every(signal => !signal.aborted)).toBe(true);
-  expect(vi.getTimerCount()).toBe(6); // State, Skills, Hooks and Loop poll intervals, plus two request deadlines.
+  // State, Skills, Hooks, saved-work Loops and overview Loop inspection each poll
+  // independently; the pending mutation and history request add two deadlines.
+  expect(vi.getTimerCount()).toBe(7);
   const count = fetcher.mock.calls.length;
   view.unmount(); await flush();
   expect(signals.slice(-2).every(signal => signal.aborted)).toBe(true);

@@ -13,7 +13,7 @@ export interface LoopSession {
   next_at: number; provider: string; model: string;
 }
 interface LoopAttempt {session_id: string; run_id: string; ordinal: number; execution: Partial<Attempt> | null}
-interface Inspection {schema_version: number; sessions: LoopSession[]; attempts: LoopAttempt[]; cancellation: string}
+export interface LoopInspection {schema_version: number; sessions: LoopSession[]; attempts: LoopAttempt[]; cancellation: string}
 function attemptState(a: LoopAttempt): string {
   if (!a.execution) return 'unavailable';
   return a.execution.state || (a.execution.output != null || a.execution.error != null ? 'finished' : 'active');
@@ -32,7 +32,7 @@ export function LoopExecution({work, workspace, connected, draft, disabled, avai
   submit: (path: string, payload: object, emergency?: boolean) => Promise<void>;
 }) {
   const [policies, setPolicies] = useState<Policy[]>([]);
-  const [inspection, setInspection] = useState<Inspection | null>(null);
+  const [inspection, setInspection] = useState<LoopInspection | null>(null);
   const [available, setAvailable] = useState(false);
   const [selected, setSelected] = useState('');
   const [preview, setPreview] = useState<{value: LoopPreview; snapshot: string} | null>(null);
@@ -62,7 +62,7 @@ export function LoopExecution({work, workspace, connected, draft, disabled, avai
       try {
         const [config, state] = await Promise.all([
           configurationRequest<{loops: Policy[]}>('loops', '', undefined, controller.signal),
-          api<Inspection>('/api/loops/v1', {}, controller.signal, 'GET'),
+          api<LoopInspection>('/api/loops/v1', {}, controller.signal, 'GET'),
         ]);
         if (!Array.isArray(config.loops) || state.schema_version !== 1 || !Array.isArray(state.sessions) || !Array.isArray(state.attempts)) throw new Error('Unsupported Loop response');
         if (live && generation === epoch.current) { setPolicies(config.loops); setInspection(state); setAvailable(true); }

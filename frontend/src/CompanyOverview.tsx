@@ -1,3 +1,4 @@
+import { OverviewLoops } from './OverviewLoops';
 import { classifyWork, type WorkOutcome, type Workspace } from './api';
 
 const categories: {key: WorkOutcome; label: string}[] = [
@@ -17,6 +18,7 @@ export function CompanyOverview({workspace, connected, error, onOpenWork, select
     <p role="status">{!workspace
       ? error ? 'Company data unavailable. Refresh connection to try again.' : 'Loading company overview…'
       : connected ? 'Showing recorded workload.' : 'Disconnected — showing stale company data from the last successful refresh.'}</p>
+    <OverviewLoops workspace={workspace} onOpenWork={onOpenWork} />
     {workspace && <>
       {workspace.configuration && <p>Execution setup needed: {workspace.configuration} Employees and saved assignments are still shown.</p>}
       <p>Each request counts once per assigned employee. Shared work appears for each employee, so employee counts may exceed the number of requests.</p>

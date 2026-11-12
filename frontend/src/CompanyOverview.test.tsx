@@ -58,8 +58,10 @@ test('App uses existing polling, retains stale counts and drafts, reconnects and
   vi.useFakeTimers();
   let state = workspace();
   let disconnected = false;
+  let loopUnavailable = false;
   const fetcher = vi.fn(async (path: string, init?: RequestInit) => {
     if (path === '/api/config/v1/loops') return new Response('{"loops":[]}');
+    if (path === '/api/loops/v1' && loopUnavailable) throw new Error('Loop inspection offline');
     if (path === '/api/loops/v1') return new Response('{"schema_version":1,"sessions":[],"attempts":[],"cancellation":"Stop prevents admissions"}');
     if (path === '/api/config/v1/hooks') return new Response('{"hooks":[]}');
     if (path === '/api/config/v1/skills') {
@@ -83,16 +85,21 @@ test('App uses existing polling, retains stale counts and drafts, reconnects and
   state = {...state, work: [...state.work, request('new')]};
   await act(async () => { await vi.advanceTimersByTimeAsync(800); });
   expect(within(overview).getByText('6 assigned requests')).toBeTruthy();
+  loopUnavailable = true;
+  await act(async () => { await vi.advanceTimersByTimeAsync(800); });
+  expect(within(overview).getByText('Showing recorded workload.')).toBeTruthy();
+  expect(within(overview).getByText(/Loop inspection unavailable — showing stale/)).toBeTruthy();
+  expect((screen.getByLabelText('Search saved work') as HTMLInputElement).value).toBe('');
   disconnected = true;
   await act(async () => { await vi.advanceTimersByTimeAsync(800); });
   expect(within(overview).getByText(/Disconnected — showing stale/)).toBeTruthy();
   expect(within(overview).getByText('6 assigned requests')).toBeTruthy();
-  disconnected = false;
+  disconnected = false; loopUnavailable = false;
   state = {...state, work: []};
   await act(async () => { await vi.advanceTimersByTimeAsync(800); });
   expect(within(overview).getByText('Showing recorded workload.')).toBeTruthy();
   expect(within(overview).getAllByText('No assigned work.')).toHaveLength(3);
   expect((screen.getByLabelText('What would you like help with?') as HTMLTextAreaElement).value).toBe('Keep draft');
-  expect(fetcher.mock.calls.filter(([path]) => path === '/api/state')).toHaveLength(4);
+  expect(fetcher.mock.calls.filter(([path]) => path === '/api/state')).toHaveLength(5);
   expect(fetcher.mock.calls.every(([path]) => path === '/api/state' || (path === '/api/config/v1/skills' || path === '/api/config/v1/hooks' || path === '/api/config/v1/loops' || path === '/api/loops/v1'))).toBe(true);
 });

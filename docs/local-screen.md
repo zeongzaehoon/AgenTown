@@ -1176,3 +1176,47 @@ independently; execution becomes available only after both are ready. After savi
 work, keyboard focus moves to Execute when that control becomes available.
 Browser flow validation remains pending. No fresh installed-browser artifact is
 required solely for this frontend scope. Real LLM validation is skipped, not passed.
+
+### Company overview Loop inspection (C30-T1)
+
+Launch the product with `agentown-web --database /tmp/agentown-loop.sqlite --port 8765`
+and open <http://127.0.0.1:8765>. The company overview's **Bounded Loop activity**
+reads `/api/loops/v1` independently of workspace polling. It shows recorded
+sessions, employee and work IDs, active/waiting or terminal labels, and admitted
+counts. These counts are separate from ordinary employee workload counts.
+
+For deterministic exercise without credentials:
+
+```sh
+printf 'success' > /tmp/agentown-loop-gate
+uv run --directory python --locked python tests/web_browser_server.py /tmp/agentown-loop.sqlite 8765 /tmp/agentown-loop-gate
+```
+
+1. Create an employee and save a request. In Configuration create and enable a
+   Loop targeting that work, with maximum 2 attempts and interval 60 seconds.
+2. In saved work, preview the Loop and explicitly authorize its start. The
+   overview shows its session ID and admitted count. With successful fixture
+   responses it moves from Active to Waiting and eventually Exhausted. To hold
+   an attempt active, remove the gate file before starting a fresh session.
+3. Type an unsaved request and a saved-work search filter. Wait through refreshes:
+   both remain intact. Tab to **Open work** on the Loop session and press Enter.
+   This explicit navigation clears work filters, selects the linked saved work,
+   and focuses **Saved work**, preserving the unsaved request. Inspect the existing
+   **Run a bounded Loop** section and its **Stop Loop** control. Navigation itself
+   never starts or resumes execution.
+4. Stop a held session using **Stop Loop** and inspect its stopped label. Use a
+   gate containing `fail` for a failed attempt. Results remain test responses and
+   unverified. Unknown/deleted employee IDs remain visible; absent loaded work
+   has an unavailable-link message instead of a misleading navigation control.
+5. To exercise independent inspection failure, block `/api/loops/v1` in browser
+   request blocking while leaving `/api/state` available. After the next poll,
+   workspace data stays connected while Loop inspection shows stale sessions.
+   Unblock it to recover. Blocking before initial load shows unavailable data,
+   rather than an empty-session claim. Initial loading has its own message.
+
+Deterministic coverage is in `OverviewLoops.test.tsx` and
+`CompanyOverview.test.tsx`: transitions, independent failure/recovery, linked-work
+navigation/focus, draft/filter preservation, abort and timer cleanup. This
+invocation did not run browser validation; supervisor frontend tests/build,
+ordinary Python checks and browser validation remain pending. Live provider calls
+remain skipped, not passed.
