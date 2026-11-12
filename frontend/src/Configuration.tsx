@@ -12,15 +12,15 @@ const defaults: Record<ConfigurationKind, Draft> = {
 function draftOf(record: ConfigurationRecord): Draft {
   return Object.fromEntries(Object.entries(record).filter(([key]) => key !== 'id' && key !== 'enabled').map(([key, value]) => [key, String(value)]));
 }
-export function Configuration({workspace}: {workspace: Workspace | null}) {
+export function Configuration({workspace, openSkill}: {workspace: Workspace | null; openSkill?: {id: string} | null}) {
   const [open, setOpen] = useState(false);
   return <section aria-labelledby="configuration-title"><h2 id="configuration-title">Configuration</h2>
     <p>Manage Skills, Hooks and Loop policies. Configuration does not execute work. Enabled means configuration enabled. Apply a Skill only through the saved-work preview and explicit execution controls. Hooks and Loops do not execute automatically.</p>
-    <button type="button" aria-expanded={open} aria-controls="configuration-panel" onClick={() => setOpen(true)}>Open configuration</button>
-    <div id="configuration-panel">{open && <ConfigurationPanel workspace={workspace} />}</div>
+    <button type="button" aria-expanded={open || !!openSkill} aria-controls="configuration-panel" onClick={() => setOpen(true)}>Open configuration</button>
+    <div id="configuration-panel">{(open || !!openSkill) && <ConfigurationPanel workspace={workspace} openSkill={openSkill} />}</div>
   </section>;
 }
-function ConfigurationPanel({workspace}: {workspace: Workspace | null}) {
+function ConfigurationPanel({workspace, openSkill}: {workspace: Workspace | null; openSkill?: {id: string} | null}) {
   const [kind, setKind] = useState<ConfigurationKind>('skills');
   const [records, setRecords] = useState<Record<ConfigurationKind, ConfigurationRecord[]> | null>(null);
   const [teams, setTeams] = useState<Team[]>([]);
@@ -69,6 +69,12 @@ function ConfigurationPanel({workspace}: {workspace: Workspace | null}) {
       selector.current?.focus();
     }
   });
+  useEffect(() => {
+    if (!openSkill) return;
+    setKind('skills');
+    setSelection(previous => ({...previous, skills: openSkill.id}));
+    focusSelection.current = true;
+  }, [openSkill]);
   function remember(saved: ConfigurationRecord) {
     setRecords(previous => previous && ({...previous, [kind]: [...previous[kind].filter(item => item.id !== saved.id), saved]}));
     setNotice(`${labels[kind]} saved · ID: ${saved.id}`);
@@ -91,7 +97,7 @@ function ConfigurationPanel({workspace}: {workspace: Workspace | null}) {
     <button type="button" disabled={busy} onClick={() => void perform()}>Refresh configuration</button>
     <label>Record type<select disabled={busy} value={kind} onChange={event => setKind(event.target.value as ConfigurationKind)}>{Object.entries(labels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
     <label>Saved record<select ref={selector} disabled={busy} value={selected} onChange={event => setSelection(previous => ({...previous, [kind]: event.target.value}))}>
-      <option value="">Create new {labels[kind]}</option>{records?.[kind].map(item => <option key={item.id} value={item.id}>{item.name} · ID: {item.id}</option>)}
+      <option value="">Create new {labels[kind]}</option>{selected && !record && <option value={selected}>Unavailable · ID: {selected}</option>}{records?.[kind].map(item => <option key={item.id} value={item.id}>{item.name} · ID: {item.id}</option>)}
     </select></label>
     {records?.[kind].length === 0 && <p>No saved {kind} yet.</p>}
     {selected && !record && <p>Selected record unavailable · ID: {selected}. Its draft is retained.</p>}

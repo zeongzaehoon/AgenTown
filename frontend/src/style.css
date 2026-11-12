@@ -26,3 +26,9 @@
 .character-style-2 .character-shirt { background: #f7d78b; width: 42px; }
 .character-style-3 .character-shirt { background: #bce1c5; border-radius: 20px; }
 @media (prefers-reduced-motion: reduce) { .company-office *, .employee-grid * { animation: none !important; transition: none !important; scroll-behavior: auto; } }
+
+.skill-library { background: #f5f0e5; }
+.skill-shelf { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); gap: 18px; border-bottom: 10px solid #78674e; padding-bottom: 16px; }
+.skill-book { display: flex; flex-direction: column; align-items: flex-start; text-align: left; gap: 6px; border-left: 12px double #d5d9bc; overflow-wrap: anywhere; min-width: 0; }
+.skill-book:focus-visible { outline: 4px solid #a33b00; outline-offset: 5px; }
+@media (prefers-reduced-motion: reduce) { .skill-library * { animation: none !important; transition: none !important; scroll-behavior: auto; } }

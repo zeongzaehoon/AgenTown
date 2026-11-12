@@ -1,3 +1,4 @@
+import { SkillBooks } from './SkillBooks';
 import { OverviewLoops } from './OverviewLoops';
 import { classifyWork, type WorkOutcome, type Workspace } from './api';
 
@@ -7,8 +8,8 @@ const categories: {key: WorkOutcome; label: string}[] = [
   {key: 'other', label: 'Other recorded work'},
 ];
 
-export function CompanyOverview({workspace, connected, error, onOpenWork, selectedEmployee = '', onSelectEmployee}: {
-  workspace: Workspace | null; connected: boolean; error: string; onOpenWork: (id: string) => void; selectedEmployee?: string; onSelectEmployee?: (id: string) => void;
+export function CompanyOverview({workspace, connected, error, onOpenWork, selectedEmployee = '', onSelectEmployee, onOpenSkill}: {
+  onOpenSkill?: (id: string) => void; workspace: Workspace | null; connected: boolean; error: string; onOpenWork: (id: string) => void; selectedEmployee?: string; onSelectEmployee?: (id: string) => void;
 }) {
   const employees = workspace?.employees ?? [];
   // Both presentations use the same persisted identities and latest-attempt classification.
@@ -30,6 +31,7 @@ export function CompanyOverview({workspace, connected, error, onOpenWork, select
     <p role="status">{!workspace
       ? error ? 'Company data unavailable. Refresh connection to try again.' : 'Loading company overview…'
       : connected ? 'Showing recorded workload.' : 'Disconnected — showing stale company data from the last successful refresh.'}</p>
+    <SkillBooks onOpenSkill={onOpenSkill} />
     <OverviewLoops workspace={workspace} onOpenWork={onOpenWork} />
     {workspace && <>
       {workspace.configuration && <p>Execution setup needed: {workspace.configuration} Employees and saved assignments are still shown.</p>}

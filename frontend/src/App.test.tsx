@@ -147,7 +147,7 @@ test('uncertain save delivery refreshes history and never replays a save', async
   render(<App />); await connected();
   fireEvent.change(screen.getByLabelText('Employee name'), {target: {value: 'Saved despite lost response'}});
   fireEvent.click(screen.getByRole('button', {name: 'Create employee'}));
-  await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('may have been saved or sent'));
+  await screen.findByText(/may have been saved or sent/, {selector: '#notice'});
   expect(await screen.findByText('Saved despite lost response', {selector: 'li'})).toBeTruthy();
   refresh(); await connected();
   expect(saves).toBe(1);
@@ -514,7 +514,8 @@ test.each(['request_too_large', 'invalid_work_text', 'database'])('server %s rej
   const text = '\n  한글 😀 <b>literal</b> e\u0301  ';
   await user.click(editor); await user.paste(text);
   await user.click(screen.getByRole('button', {name: 'Save work'}));
-  await screen.findByText(code === 'database' ? 'Check database access.' : 'Shorten the request; your draft is unchanged.');
+  await screen.findByText(code === 'database' ? 'Check database access.' : 'Shorten the request; your draft is unchanged.',
+    {selector: code === 'database' ? '#notice' : '#input-error'});
   expect((editor as HTMLTextAreaElement).value).toBe(text); expect((screen.getByLabelText('Assign to') as HTMLSelectElement).value).toBe('employee-1');
   expect(editor.getAttribute('aria-invalid')).toBe(String(code !== 'database'));
   if (code !== 'database') await waitFor(() => expect(document.activeElement).toBe(editor));

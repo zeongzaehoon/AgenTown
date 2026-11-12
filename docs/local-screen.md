@@ -1474,3 +1474,33 @@ remain pending supervisor verification; no fresh screenshot or installed-browser
 result is claimed. Accessibility decisions reuse the recorded
 [WCAG 2.2 guidance](https://www.w3.org/WAI/WCAG22/quickref/) and `docs/2d-world.md`.
 Live provider calls remain skipped, not passed.
+
+### Open a saved Skill from its office book
+
+Run `agentown-web --database PATH --port 8765` with your product database and
+open http://127.0.0.1:8765. In Configuration, create two Skills with the same
+name and different instructions. Leave one configuration enabled and the other
+disabled. Refresh **Skill books** in Company overview: each named manual shows
+its persisted ID and textual configuration status.
+
+Tab to a book and press Enter or Space. Configuration opens with that exact ID
+selected and focus moves to **Saved record**. Opening a book only inspects
+configuration; it never saves, enables, previews or executes work. Edit its
+instructions without saving, open the other book, then reopen the first: the
+unsaved instructions remain. Work input drafts and saved-work selection also
+remain in place. Reopening the same book moves focus back to Saved record.
+
+Refresh Skill books after creating or editing Skills; the shelf is a snapshot,
+not a live presence indicator. While loading it says so. An empty successful
+response says no Skills are saved; an initial failure says unavailable. A failed
+refresh keeps existing books with explicit stale labels. Retry using **Refresh
+Skill books**. If a selected Skill is no longer returned when Configuration is
+refreshed, its exact ID is shown as unavailable, its draft is retained, and
+saving is disabled. Refresh and inspect before making any explicit changes.
+
+Deterministic coverage: `cd frontend && npm test -- src/SkillBooks.test.tsx`
+(with frontend dependencies installed). Component tests cover loading, empty,
+unavailable, stale snapshots, duplicate names and native keyboard activation;
+the App test covers ID navigation, focus, repeated opening, draft retention and
+an unavailable selection. Supervisor browser validation is pending for this
+change. Live provider calls are skipped under the current user policy.
