@@ -67,12 +67,15 @@ def create_app(database, model=None, *, port=8765, provider=None, provider_name=
     secrets = runtime_secrets()
     from .loop_execution import LoopControlError, LoopService
     loops = LoopService(database, provider, model)
+    from .connection_diagnostic import ConnectionDiagnostic
+    diagnostic = ConnectionDiagnostic(database)
 
     @asynccontextmanager
     async def lifespan(app):
         try:
             yield
         finally:
+            await diagnostic.close()
             await loops.close()
 
     def response(value, status=200):
@@ -114,6 +117,16 @@ def create_app(database, model=None, *, port=8765, provider=None, provider_name=
     async def connections(request):
         from .connections import connection_setup
         return response(connection_setup(database))
+
+    async def connection_diagnostic(request):
+        try:
+            if await body(request) != {}:
+                raise ValueError("empty body required")
+        except RequestTooLarge:
+            return response({"error": "Diagnostic request exceeds 120,000 bytes."}, 413)
+        except (ValueError, UnicodeError):
+            return response({"error": "Send an empty JSON object; the installed command and database are fixed."}, 400)
+        return response(await diagnostic.run())
 
     async def state(request):
         try:
@@ -333,6 +346,7 @@ def create_app(database, model=None, *, port=8765, provider=None, provider_name=
         Route("/api/loops/v1", loop_api, methods=["GET"]),
         Route("/api/loops/v1/{action}", loop_api, methods=["POST"]),
         Route("/api/connections/v1", connections, methods=["POST"]),
+        Route("/api/connections/v1/diagnostic", connection_diagnostic, methods=["POST"]),
         Route("/api/employees", employee, methods=["POST"]),
         Route("/api/teams", teams, methods=["GET", "POST"]),
         Route("/api/teams/{team}/members", team_members, methods=["POST"]),

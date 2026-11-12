@@ -6,6 +6,12 @@ import sys
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
 
+def installed_server_command(database):
+    """The fixed installed command shared by setup artifacts and diagnostics."""
+    return [str(Path(sys.executable).absolute()), "-I", "-m", "llm_engine.mcp_server",
+            "--database", str(Path(database).absolute())]
+
+
 def connection_setup(database=None):
     selected_database = database
     clients = []
@@ -52,9 +58,8 @@ def connection_setup(database=None):
 def _runtime_setup(result, database):
     """Render the running installation; never write settings or start a server."""
     platform = "windows" if sys.platform == "win32" else "macos"
-    executable = str(Path(sys.executable).absolute())
-    database = str(Path(database).absolute())
-    args = ["-I", "-m", "llm_engine.mcp_server", "--database", database]
+    executable, *args = installed_server_command(database)
+    database = args[-1]
     hints = {c["id"]: c for c in detect_capabilities()["clients"]}
     home = Path.home()
     for client in result["clients"]:

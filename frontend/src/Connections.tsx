@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { api } from './api';
+import { api, RequestTimeoutError } from './api';
 
 export const workstationClients = [
   {id: 'codex', name: 'Codex'}, {id: 'claude-code', name: 'Claude Code'},
@@ -14,6 +14,70 @@ export interface ConnectionSetup {
   schema_version: 1; workflow_version: 1; transport: 'stdio'; evidence: string;
   preparation: string; actions: string[]; consent: string; recovery: string;
   clients: { id: string; name: string; readiness: 'unknown'; status?: {detected: boolean | null; configured: 'unknown'; connected: 'unverified'; exercised: 'unverified'}; platforms: Platform[] }[];
+}
+
+interface DiagnosticResponse {
+  schema_version: 1;
+  status: 'passed' | 'timeout' | 'failed' | 'busy';
+  code: string; message: string; recovery: string;
+}
+function isDiagnostic(value: unknown): value is DiagnosticResponse {
+  if (!value || typeof value !== 'object') return false;
+  const result = value as Record<string, unknown>;
+  return result.schema_version === 1 &&
+    ['passed', 'timeout', 'failed', 'busy'].includes(result.status as string) &&
+    ['code', 'message', 'recovery'].every(key => typeof result[key] === 'string' &&
+      (result[key] as string).length <= 2000) && Boolean(result.code) && Boolean(result.message);
+}
+const diagnosticMessages = {
+  passed: 'Local server diagnostic passed',
+  timeout: 'Local server diagnostic timed out.',
+  failed: 'Local server diagnostic failed.',
+  busy: 'A local server diagnostic is already running.',
+  missing_tools: 'Local server diagnostic failed: required workflow tools are missing.',
+};
+const diagnosticRecovery = {
+  passed: 'Continue with the setup instructions, then inspect the connection in your external client.',
+  timeout: 'Wait for the server check to close, then try again. If this continues, restart AgenTown and check its installation.',
+  failed: 'Check that the installed AgenTown server and selected database are available, restart AgenTown, then try again.',
+  busy: 'Wait for the current check to finish, then try again.',
+  missing_tools: 'Repair or reinstall AgenTown, keeping your database. Restart AgenTown, then check again.',
+};
+function LocalDiagnostic() {
+  const [pending, setPending] = useState(false);
+  const [outcome, setOutcome] = useState<keyof typeof diagnosticMessages | null>(null);
+  const lock = useRef(false);
+  const request = useRef<AbortController | null>(null);
+  useEffect(() => () => request.current?.abort(), []);
+  async function check() {
+    if (lock.current) return;
+    lock.current = true;
+    const controller = new AbortController();
+    request.current = controller;
+    setPending(true); setOutcome(null);
+    try {
+      const result = await api<unknown>('/api/connections/v1/diagnostic', {}, controller.signal);
+      if (!isDiagnostic(result)) throw new Error('Unsupported diagnostic response');
+      if (!controller.signal.aborted) setOutcome(result.status === 'failed' && result.code === 'missing_tools' ? 'missing_tools' : result.status);
+    } catch (error) {
+      // Do not expose transport errors or subprocess output in the interface.
+      if (!controller.signal.aborted) setOutcome(error instanceof RequestTimeoutError ? 'timeout' : 'failed');
+    } finally {
+      lock.current = false;
+      if (!controller.signal.aborted) setPending(false);
+    }
+  }
+  return <section aria-label="Local server diagnostic" aria-busy={pending}>
+    <h3>Check local server</h3>
+    <p>Checks the installed server and selected database used by the setup artifact. Initializes MCP and discovers workflow tools without running them or calling a provider.</p>
+    <button type="button" disabled={pending} onClick={() => void check()}>Check local server</button>
+    <div role="status" aria-live="polite" aria-atomic="true">
+      {pending ? <p>Checking local server… Waiting for initialization and workflow tool discovery.</p> : outcome && <>
+        <p>{diagnosticMessages[outcome]}</p><p>{diagnosticRecovery[outcome]}</p>
+      </>}
+    </div>
+    <p>This check does not read client settings. External client configuration remains unknown; external connection and exercise remain unverified.</p>
+  </section>;
 }
 
 export function Connections({workspaceConnected, openClient}: {workspaceConnected: boolean; openClient?: OpenClientRequest | null}) {
@@ -113,6 +177,7 @@ function Setup({workspaceConnected, openClient, active}: {active: boolean; works
       <select id="connection-platform" value={platform.id} onChange={e => {setPlatformId(e.target.value); setFeedback('');}}>{client.platforms.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
       <p>Client readiness: Unknown</p>
       <p>Detected: {client.status?.detected === true ? 'Installation hint only' : client.status?.detected === false ? 'Not detected (inconclusive)' : 'Unknown'}. Configured: Unknown. Connected: Unverified. Exercised: Unverified.</p><p>{data.evidence}</p>
+      {client.id !== 'chatgpt' && <LocalDiagnostic />}
       <h3>Available actions</h3><ul>{data.actions.map(a => <li key={a}>{a}</li>)}</ul>
       <h3>Explicit execution consent</h3><p>{data.consent}</p>
       <button type="button" disabled={copying} onClick={() => void copy()}>Copy setup instructions</button>

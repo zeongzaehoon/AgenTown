@@ -1,9 +1,10 @@
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, expect, test, vi } from 'vitest';
+import { REQUEST_DEADLINE_MS } from './api';
 import { Connections, type ConnectionSetup } from './Connections';
 
-afterEach(() => {cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks();});
+afterEach(() => {cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks();});
 const setup: ConnectionSetup = {
   schema_version: 1, workflow_version: 1, transport: 'stdio', evidence: 'Copying does not verify a client.',
   preparation: 'Replace both paths.', actions: ['Inspect saved work', 'Execute only with consent'], consent: 'Explicit consent required before spending.', recovery: 'Inspect history before retrying.',
@@ -79,4 +80,126 @@ test('all five choices offer artifacts; download failure preserves truthful stat
   await user.click(screen.getByRole('button', {name: 'Download setup artifact'}));
   expect(screen.getByText(/Could not download/)).toBeTruthy();
   expect(screen.getByText('Client readiness: Unknown')).toBeTruthy();
+});
+
+const diagnosticPath = '/api/connections/v1/diagnostic';
+const diagnosticResult = (status: string) => ({schema_version: 1, status, code: status, message: 'Server result', recovery: 'Server recovery'});
+async function openDiagnostic() {
+  const user = userEvent.setup();
+  render(<Connections workspaceConnected />);
+  await user.click(screen.getByRole('button', {name: 'Open connections'}));
+  await screen.findByRole('button', {name: 'Check local server'});
+  return user;
+}
+
+test('explicit diagnostic submits only an empty body, prevents duplicates and permits repeat checks', async () => {
+  let finish!: (response: Response) => void;
+  const fetcher = vi.fn((path: string) => path === diagnosticPath
+    ? new Promise<Response>(resolve => { finish = resolve; })
+    : Promise.resolve(new Response(JSON.stringify(setup))));
+  vi.stubGlobal('fetch', fetcher);
+  const user = await openDiagnostic();
+  expect(fetcher.mock.calls.filter(([path]) => path === diagnosticPath)).toHaveLength(0);
+  const button = screen.getByRole('button', {name: 'Check local server'});
+  await user.dblClick(button);
+  expect((button as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.getByText(/Checking local server…/)).toBeTruthy();
+  expect(fetcher.mock.calls.filter(([path]) => path === diagnosticPath)).toHaveLength(1);
+  const call = (fetcher.mock.calls as unknown as [string, RequestInit][]).find(([path]) => path === diagnosticPath)!;
+  expect(call[1].method).toBe('POST');
+  expect(call[1].body).toBe('{}');
+  finish(new Response(JSON.stringify(diagnosticResult('passed'))));
+  expect(await screen.findByText('Local server diagnostic passed')).toBeTruthy();
+  expect(screen.getByText('Client readiness: Unknown')).toBeTruthy();
+  expect(screen.getByText(/Configured: Unknown. Connected: Unverified. Exercised: Unverified/)).toBeTruthy();
+  await user.click(button);
+  finish(new Response(JSON.stringify(diagnosticResult('passed'))));
+  await screen.findByText('Local server diagnostic passed');
+  expect(fetcher.mock.calls.map(([path]) => path)).toEqual(['/api/connections/v1', diagnosticPath, diagnosticPath]);
+});
+
+test.each([
+  ['timeout', 'Local server diagnostic timed out.', 'Wait for the server check to close'],
+  ['failed', 'Local server diagnostic failed.', 'Check that the installed AgenTown server'],
+  ['busy', 'A local server diagnostic is already running.', 'Wait for the current check to finish'],
+])('diagnostic %s offers recovery without changing readiness', async (status, message, recovery) => {
+  vi.stubGlobal('fetch', vi.fn(async (path: string) => new Response(JSON.stringify(path === diagnosticPath ? diagnosticResult(status) : setup))));
+  const user = await openDiagnostic();
+  await user.click(screen.getByRole('button', {name: 'Check local server'}));
+  expect(await screen.findByText(message)).toBeTruthy();
+  expect(screen.getByText(new RegExp(recovery))).toBeTruthy();
+  expect(screen.getByText('Client readiness: Unknown')).toBeTruthy();
+  expect((screen.getByRole('button', {name: 'Check local server'}) as HTMLButtonElement).disabled).toBe(false);
+});
+
+test.each([
+  {...diagnosticResult('passed'), status: 'connected'},
+  {...diagnosticResult('passed'), recovery: null},
+  {...diagnosticResult('passed'), schema_version: 2},
+  null,
+])('malformed diagnostic responses fail safely', async result => {
+  vi.stubGlobal('fetch', vi.fn(async (path: string) => new Response(JSON.stringify(path === diagnosticPath ? result : setup))));
+  const user = await openDiagnostic();
+  await user.click(screen.getByRole('button', {name: 'Check local server'}));
+  expect(await screen.findByText('Local server diagnostic failed.')).toBeTruthy();
+  expect(screen.queryByText('Local server diagnostic passed')).toBeNull();
+});
+
+test('missing workflow tools offers installation recovery without displaying server output', async () => {
+  const result = {...diagnosticResult('failed'), code: 'missing_tools', message: 'private subprocess output', recovery: 'private database path'};
+  const fetcher = vi.fn(async (path: string) => new Response(JSON.stringify(path === diagnosticPath ? result : setup)));
+  vi.stubGlobal('fetch', fetcher);
+  const user = await openDiagnostic();
+  await user.click(screen.getByRole('button', {name: 'Check local server'}));
+  expect(await screen.findByText('Local server diagnostic failed: required workflow tools are missing.')).toBeTruthy();
+  expect(screen.getByText('Repair or reinstall AgenTown, keeping your database. Restart AgenTown, then check again.')).toBeTruthy();
+  expect(screen.queryByText(/private/)).toBeNull();
+  expect(screen.getByText('Client readiness: Unknown')).toBeTruthy();
+  expect(fetcher.mock.calls.map(([path]) => path)).toEqual(['/api/connections/v1', diagnosticPath]);
+});
+
+test('transport failure is sanitized and the pending request is aborted on unmount', async () => {
+  let fail = true;
+  let signal: AbortSignal | undefined;
+  vi.stubGlobal('fetch', vi.fn(async (path: string, options: RequestInit) => {
+    if (path !== diagnosticPath) return new Response(JSON.stringify(setup));
+    if (fail) throw new Error('private subprocess stderr');
+    signal = options.signal as AbortSignal;
+    return new Promise<Response>(() => {});
+  }));
+  const user = await openDiagnostic();
+  await user.click(screen.getByRole('button', {name: 'Check local server'}));
+  await screen.findByText('Local server diagnostic failed.');
+  expect(screen.queryByText(/private subprocess stderr/)).toBeNull();
+  fail = false;
+  await user.click(screen.getByRole('button', {name: 'Check local server'}));
+  cleanup();
+  expect(signal?.aborted).toBe(true);
+});
+
+test('ChatGPT retains remote prerequisites without a local diagnostic action or result', async () => {
+  const remote = {...setup, clients: [...setup.clients, {...setup.clients[0], id: 'chatgpt', name: 'ChatGPT', platforms: [{...setup.clients[0].platforms[0], configuration: 'HTTPS and OAuth required'}]}]};
+  vi.stubGlobal('fetch', vi.fn(async (path: string) => new Response(JSON.stringify(path === diagnosticPath ? diagnosticResult('passed') : remote))));
+  const user = await openDiagnostic();
+  await user.click(screen.getByRole('button', {name: 'Check local server'}));
+  await screen.findByText('Local server diagnostic passed');
+  await user.selectOptions(screen.getByLabelText('Client'), 'chatgpt');
+  expect(screen.queryByRole('button', {name: 'Check local server'})).toBeNull();
+  expect(screen.queryByText('Local server diagnostic passed')).toBeNull();
+  expect((screen.getByLabelText('Setup instructions') as HTMLTextAreaElement).value).toContain('HTTPS and OAuth required');
+  expect(screen.getByText('Client readiness: Unknown')).toBeTruthy();
+});
+
+test('request deadline uses diagnostic recovery and releases the control', async () => {
+  vi.stubGlobal('fetch', vi.fn((path: string) => path === diagnosticPath
+    ? new Promise<Response>(() => {})
+    : Promise.resolve(new Response(JSON.stringify(setup)))));
+  await openDiagnostic();
+  vi.useFakeTimers();
+  const button = screen.getByRole('button', {name: 'Check local server'});
+  await act(async () => { button.click(); });
+  await act(async () => { await vi.advanceTimersByTimeAsync(REQUEST_DEADLINE_MS); });
+  expect(screen.getByText('Local server diagnostic timed out.')).toBeTruthy();
+  expect((button as HTMLButtonElement).disabled).toBe(false);
+  expect(screen.queryByText(/Saving or execution may already have occurred/)).toBeNull();
 });

@@ -889,3 +889,34 @@ replay work. Explicit control recovers abandoned sessions as restarted without
 replaying them; a new activation needs a fresh, explicitly approved preview.
 Storage failures require checking database/lock-file permissions and access,
 not repeatedly trying to take control. Live provider validation remains skipped.
+
+### Explicit installed local server diagnostic
+
+Launch `agentown-web --database ABSOLUTE_DATABASE` using the installed product
+(or open the packaged desktop app), open Connections and select **Check local
+server** on a local client's card. The pending state disables duplicate checks.
+The action uses exactly the installed Python command and selected database shown
+in the generated setup artifact. It does not read or change any client settings.
+
+`POST /api/connections/v1/diagnostic` accepts only `{}` as same-origin JSON.
+Observable output has `schema_version: 1`, `status` (`passed`, `timeout`, `failed`
+or `busy`), `code`, `message` and `recovery`. A passing message is **Local server
+diagnostic passed**. The server initializes MCP and discovers the existing
+workflow tools, including paginated discovery, within eight seconds. It never
+calls a tool or provider or acquires execution ownership. It kills and reaps the
+subprocess before allowing another check; request cancellation and app shutdown
+also close it. Stderr and protocol error contents are never returned.
+
+On timeout, check database access and installation health and explicitly retry.
+On failure or missing tools, check the installed Python/database permissions,
+repair the installation if needed, restart and retry. Keep the database. Busy
+means another check is finishing; wait and retry. Repeated checks are allowed.
+External configuration remains unknown and connection/exercise remain unverified
+after success. ChatGPT has no local diagnostic action: its public HTTPS/OAuth
+prerequisites still apply. Live LLM validation is skipped, not passed.
+
+Deterministic subprocess cases live in `python/tests/test_connection_diagnostic.py`;
+run with the installed development environment's `python -m pytest
+python/tests/test_connection_diagnostic.py python/tests/test_web.py -k diagnostic`.
+Supervisor integration/browser checks must additionally exercise the Connections
+pending, success, timeout, failure and repeat interactions.

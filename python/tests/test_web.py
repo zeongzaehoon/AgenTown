@@ -522,3 +522,33 @@ def test_workspace_source_read_failure_is_sanitized(tmp_path, monkeypatch, failu
         assert result.status_code == 503
         assert result.json() == {'error': 'Cannot read work history. Check the database path, permissions and compatibility, then restart.'}
         assert 'caller-secret' not in result.text
+
+
+def test_connection_diagnostic_api_fixed_input_and_no_provider(tmp_path, monkeypatch):
+    from llm_engine.connection_diagnostic import ConnectionDiagnostic, outcome
+    calls = []
+    async def check(self):
+        calls.append(self.command)
+        return outcome('passed', 'diagnostic_passed', 'Local server diagnostic passed',
+                       'External connection and exercise remain unverified.')
+    monkeypatch.setattr(ConnectionDiagnostic, 'run', check)
+    provider = TestProvider()
+    db = tmp_path / 'diagnostic.db'
+    with TestClient(create_app(db, provider=provider), base_url=ORIGIN) as client:
+        route = '/api/connections/v1/diagnostic'
+        for body in ({'command': 'evil'}, {'database': '/other'}, []):
+            assert client.post(route, json=body, headers=HEADERS).status_code == 400
+        # HTTPX treats json=None as no body, rather than a JSON null value.
+        assert client.post(route, content='null', headers={
+            **HEADERS, 'Content-Type': 'application/json',
+        }).status_code == 400
+        assert client.post(route, headers=HEADERS).status_code == 403
+        assert not calls
+        assert client.post(route, json={}).status_code == 403
+        for _ in range(2):
+            reply = client.post(route, json={}, headers=HEADERS)
+            assert reply.status_code == 200
+            assert reply.json()['status'] == 'passed'
+        assert len(calls) == 2
+        assert calls[0][-1] == str(db)
+        assert provider.calls == 0

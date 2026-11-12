@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { type Workspace, listTeams, type Team } from './api';
 import { savedLoopPolicies, configurationRequest, type ConfigurationNavigation, type ConfigurationFields, type ConfigurationKind, type ConfigurationRecord } from './configuration-api';
 
@@ -61,9 +61,9 @@ function ConfigurationPanel({workspace, openSkill, openRecord}: {workspace: Work
     } finally { if (controller.current === request) { lock.current = false; if (!request.signal.aborted) setBusy(false); } }
   }
   useEffect(() => { void perform(); return () => { controller.current?.abort(); lock.current = false; }; }, []);
-  useEffect(() => {
+  useLayoutEffect(() => {
     // Fast saves can batch busy=true and busy=false into one render. Check the
-    // pending request after every commit, even when busy did not change.
+    // pending request after every commit, before observers see the saved state.
     if (!busy && focusSelection.current) {
       focusSelection.current = false;
       selector.current?.focus();
