@@ -12,6 +12,8 @@ function fixture(state = initial()) {
   let finish: (() => void) | undefined;
   const calls: {path: string; body: Record<string, unknown>}[] = [];
   const fetcher = vi.fn(async (path: string, options: RequestInit) => {
+    if (path === '/api/config/v1/loops') return new Response('{"loops":[]}');
+    if (path === '/api/loops/v1') return new Response('{"schema_version":1,"sessions":[],"attempts":[],"cancellation":"Stop prevents admissions"}');
     if (path === '/api/config/v1/hooks') return new Response('{"hooks":[]}');
     if (path === '/api/config/v1/skills') return new Response(JSON.stringify({skills: []}));
     const body = JSON.parse(options.body as string) as Record<string, unknown>;
@@ -43,7 +45,11 @@ function fixture(state = initial()) {
   return {state, calls, finish: () => finish!(), disconnect: () => {disconnected = true;}, reconnect: () => {disconnected = false;}};
 }
 const refresh = () => fireEvent.click(screen.getByRole('button', {name: 'Refresh connection'}));
-const connected = () => waitFor(() => expect(document.querySelector('#connection')!.textContent).toContain('Connected'));
+const connected = () => waitFor(() => {
+  expect(document.querySelector('#connection')!.textContent).toContain('Connected');
+  const loop = screen.queryByRole('region', {name: 'Run a bounded Loop'});
+  if (loop) expect(within(loop).getByRole('status').textContent).not.toContain('Loop data unavailable');
+});
 
 test('StrictMode employee → saved work → running → failure → explicit retry → full safe result and reload', async () => {
   const f = fixture();
@@ -375,7 +381,7 @@ test('explicit offline match selection opens history and save selects new exclud
   fireEvent.click(screen.getByRole('button', {name: 'Save work'}));
   await waitFor(() => expect(document.querySelector('#detail pre')!.textContent).toBe('New excluded request'));
   expect(screen.getByText(/Its detail remains selected/)).toBeTruthy();
-  expect(document.activeElement).toBe(screen.getByRole('button', {name: 'Execute work'}));
+  await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', {name: 'Execute work'})));
   expect(JSON.stringify(f.state.work.slice(0, 2))).toBe(original);
   expect(f.calls.filter(c => c.path === '/api/work')).toHaveLength(1);
   expect(f.calls.filter(c => c.path.endsWith('/execute'))).toHaveLength(0);

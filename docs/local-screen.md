@@ -1128,3 +1128,51 @@ runnable fixture instructions, not evidence that browser execution passed in thi
 invocation. Frontend behavior tests cover consent and recovery; frontend
 checks/build, applicable supervisor checks and browser validation are pending
 handoff. Live-provider validation remains skipped, not passed.
+
+### Preview, start and stop bounded Loops (C29-T3)
+
+Prerequisite: C29-T2's Loop execution API. Build/package the frontend using the
+steps above, launch `agentown-web --database /tmp/agentown-loop.sqlite --port 8765`,
+and open <http://127.0.0.1:8765>. For deterministic exercise without credentials,
+use the documented `tests/web_browser_server.py` fixture command above with a new
+Loop database and gate file set to `success`; this uses test responses only.
+
+Create an employee, save work, then create and enable a Loop for that saved work
+in Configuration (for example maximum 2 attempts, interval 60 seconds). Enabled
+means configured; nothing starts automatically. In the saved work detail choose
+**Saved Loop**, then **Preview Loop with saved work**. Review the saved input,
+employee ID, maximum attempts and interval. Preview makes no provider call.
+Tab/Enter and native select keys work throughout. Focus moves to **Authorize and
+start bounded Loop**; Escape or Cancel closes consent and restores focus.
+
+Explicitly authorize once. Session IDs, admitted counts, provider/model and actual
+attempt records appear below. Waiting means recorded attempts finished while the
+server still controls further admissions; the screen does not estimate progress
+or run its own scheduler. A complete session is labeled Exhausted. Failed,
+stopped, expired, restarted and stale sessions remain distinct. Hooks and Skills
+are never automatically activated. Existing work execution controls are disabled
+while this work has an active Loop or Loop inspection is unavailable.
+
+**Stop Loop** remains available during execution and while ordinary execution is
+disabled. Stop prevents further admissions and attempts local cancellation;
+remote completion may remain unknown. With the deterministic gate file absent,
+start then stop to exercise cancellation; set it to `fail` to exercise failure.
+Leave a successful two-attempt session running to observe waiting then exhausted.
+Inspect immutable attempt IDs/results, rather than assuming a response was cancelled.
+
+Draft, saved work, provider/model, configuration or connection changes invalidate
+previews. Start consent is consumed before awaiting a response; competing work
+submissions share the existing mutation guard. On uncertain delivery, refresh the
+connection and inspect sessions and attempts before obtaining fresh consent.
+Stop/restart the fixture server with the same database, refresh and inspect the
+recovered session state; reconnecting never restarts a Loop. Loaded sessions are
+marked stale while disconnected and remain visible. Preview and status controls
+provide focus recovery and polite accessible announcements.
+
+Behavior coverage is in `frontend/src/LoopExecution.test.tsx` and the existing
+App and deadline fixtures. Run `npm test` and `npm run build` from `frontend/` for
+the consolidated frontend checks. Workspace connection and Loop inspection load
+independently; execution becomes available only after both are ready. After saving
+work, keyboard focus moves to Execute when that control becomes available.
+Browser flow validation remains pending. No fresh installed-browser artifact is
+required solely for this frontend scope. Real LLM validation is skipped, not passed.

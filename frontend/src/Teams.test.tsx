@@ -97,6 +97,8 @@ test('App team navigation preserves unsaved work, assignment and existing resend
   const state: Workspace = {...workspace, work: [{id: 'w', input: 'Original', status: 'pending', assignees: ['b'], attempts: [{id: 'r', state: 'finished', outcome: 'reported_success', participants: ['b'], output: 'Saved result'}]}]};
   const fetcher = vi.fn(async (path: string, init?: RequestInit) => {
     if (path === '/api/state') return response(state);
+    if (path === '/api/config/v1/loops') return new Response('{"loops":[]}');
+    if (path === '/api/loops/v1') return new Response('{"schema_version":1,"sessions":[],"attempts":[],"cancellation":"Stop prevents admissions"}');
     if (path === '/api/config/v1/hooks') return new Response('{"hooks":[]}');
     if (path === '/api/config/v1/skills') {
       expect(init?.method).toBe('GET');
@@ -119,5 +121,5 @@ test('App team navigation preserves unsaved work, assignment and existing resend
   expect(screen.getByRole('region', {name: 'Resend saved work?'})).toBeTruthy();
   expect((screen.getByLabelText('What would you like help with?') as HTMLTextAreaElement).value).toBe('Retained draft');
   expect((screen.getByLabelText('Assign to') as HTMLSelectElement).value).toBe('a');
-  expect(fetcher.mock.calls.every(([path]) => path === '/api/state' || path === '/api/teams' || (path === '/api/config/v1/skills' || path === '/api/config/v1/hooks'))).toBe(true);
+  expect(fetcher.mock.calls.every(([path]) => path === '/api/state' || path === '/api/teams' || (path === '/api/config/v1/skills' || path === '/api/config/v1/hooks' || path === '/api/config/v1/loops' || path === '/api/loops/v1'))).toBe(true);
 });

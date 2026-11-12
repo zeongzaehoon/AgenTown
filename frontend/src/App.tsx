@@ -1,3 +1,4 @@
+import { LoopExecution } from './LoopExecution';
 import { HookExecution } from './HookExecution';
 import { SkillExecution } from './SkillExecution';
 import { Configuration } from './Configuration';
@@ -112,6 +113,8 @@ export function App() {
   const cancelRef = useRef<HTMLButtonElement>(null);
   const [busy, setBusy] = useState<Set<string>>(new Set());
   const locks = useRef(new Set<string>());
+  const [loopAvailabilityState, setLoopAvailability] = useState({id: '', blocked: true});
+  const loopAvailability = useCallback((blocked: boolean) => setLoopAvailability({id: selected, blocked}), [selected]);
   const pendingFocus = useRef<'input' | 'execute' | 'draft' | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const executeRef = useRef<HTMLButtonElement>(null);
@@ -172,7 +175,7 @@ export function App() {
       draftActionRef.current?.focus(); pendingFocus.current = null;
     } else if (pendingFocus.current === 'input' && !busy.has('employee') && !busy.has('work')) {
       inputRef.current?.focus(); pendingFocus.current = null;
-    } else if (pendingFocus.current === 'execute' && executeRef.current && !busy.has('work')) {
+    } else if (pendingFocus.current === 'execute' && executeRef.current && !executeRef.current.disabled && !busy.has('work')) {
       executeRef.current.focus(); pendingFocus.current = null;
     }
   });
@@ -213,7 +216,8 @@ export function App() {
       if (!controller.signal.aborted) setBusy(new Set(locks.current));
     }
   }
-  const cannotExecute = inspectionRequired || !connected || !work || busy.has(work.id) || !!state?.configuration || work.status === 'cancelled' || work.assignees.length !== 1 || work.attempts.some(a => a.state === 'active');
+  const baseCannotExecute = inspectionRequired || !connected || !work || busy.has(work.id) || !!state?.configuration || work.status === 'cancelled' || work.assignees.length !== 1 || work.attempts.some(a => a.state === 'active');
+  const cannotExecute = baseCannotExecute || loopAvailabilityState.id !== selected || loopAvailabilityState.blocked;
   // Compare values, not snapshot identity: unchanged polling must retain consent.
   const executionSnapshot = JSON.stringify([work, state?.configuration, state?.provider, state?.model]);
   useLayoutEffect(() => {
@@ -313,7 +317,7 @@ export function App() {
           <p id="search-count" role="status" aria-live="polite" aria-atomic="true">{state ? `${matches.length} of ${state.work.length} saved requests match.` : 'Saved history has not loaded yet.'}</p>
           {!!state?.work.length && !matches.length && <p>No saved work matches your employee, search and outcome filters. This employee may have no assigned work. Change either filter, change the employee selection, return to all employees or choose Show all loaded work to reset all filters.</p>}
           {selectedExcluded && <p id="selection-help">The selected work is outside these matches. Its detail remains selected below. Select a match to change it.</p>}
-          <label htmlFor="history">Saved work</label><select id="history" ref={historyRef} aria-describedby={selectedExcluded ? 'selection-help' : undefined} value={selectedExcluded ? '' : work?.id ?? ''} onChange={e => setSelected(e.target.value)}>
+          <label htmlFor="history">Saved work</label><select id="history" ref={historyRef} aria-describedby={selectedExcluded ? 'selection-help' : undefined} value={selectedExcluded ? '' : work?.id ?? ''} onChange={e => { setSelected(e.target.value); }}>
             {(selectedExcluded || !work) && <option value="" disabled>Select a matching request</option>}
             {matches.map(w => <option key={w.id} value={w.id}>{w.input.slice(0, 55)} — {workStatus(w)} · ID: {w.id}</option>)}
           </select>
@@ -334,6 +338,13 @@ export function App() {
               <button type="button" disabled={busy.has('work')} onClick={() => loadDraft(replacement)}>Replace draft</button>
             </section>}
             {inspectionRequired && <p role="status">Submission needs inspection. Choose Refresh connection, inspect the attempts below, then explicitly retry. Nothing is resent automatically.</p>}
+            <LoopExecution key={`loop/${work.id}`} work={work} workspace={state!} connected={connected}
+              draft={input} disabled={baseCannotExecute} availability={loopAvailability}
+              submit={async (path, payload, emergency) => {
+                await mutate(emergency ? `stop/${work.id}` : work.id, async signal => {
+                  await api(path, payload, signal);
+                });
+              }} />
             <HookExecution key={`hook/${work.id}`} work={work} workspace={state!} connected={connected}
               draft={input} disabled={cannotExecute}
               submit={preview => { void mutate(work.id, async signal => {
