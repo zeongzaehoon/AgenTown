@@ -80,6 +80,68 @@ function LocalDiagnostic() {
   </section>;
 }
 
+type SharedDataResponse =
+  | (DiagnosticResponse & {status: 'passed'; employee_count: number; work_count: number})
+  | (DiagnosticResponse & {status: 'timeout' | 'failed' | 'busy'});
+function isSharedData(value: unknown): value is SharedDataResponse {
+  if (!isDiagnostic(value)) return false;
+  const result = value as DiagnosticResponse & {employee_count?: unknown; work_count?: unknown};
+  if (result.status !== 'passed') return !('employee_count' in result) && !('work_count' in result);
+  return [result.employee_count, result.work_count].every(count =>
+    typeof count === 'number' && Number.isSafeInteger(count) && count >= 0);
+}
+const sharedMessages = {
+  passed: 'Shared-data check passed.',
+  busy: 'A local server check is already running.',
+  timeout: 'Shared-data check timed out.',
+  failed: 'Shared-data check failed.',
+  malformed: 'Shared-data check returned an invalid response.',
+};
+function SharedDataCheck() {
+  const [pending, setPending] = useState(false);
+  const [outcome, setOutcome] = useState<keyof typeof sharedMessages | null>(null);
+  const [counts, setCounts] = useState<{employees: number; work: number} | null>(null);
+  const lock = useRef(false);
+  const request = useRef<AbortController | null>(null);
+  useEffect(() => () => request.current?.abort(), []);
+  async function check() {
+    if (lock.current) return;
+    lock.current = true;
+    const controller = new AbortController();
+    request.current = controller;
+    setPending(true); setOutcome(null); setCounts(null);
+    try {
+      const result = await api<unknown>('/api/connections/v1/shared-data', {}, controller.signal);
+      if (controller.signal.aborted) return;
+      if (!isSharedData(result)) { setOutcome('malformed'); return; }
+      setOutcome(result.status);
+      if (result.status === 'passed') setCounts({employees: result.employee_count, work: result.work_count});
+    } catch (error) {
+      if (!controller.signal.aborted) setOutcome(error instanceof RequestTimeoutError ? 'timeout' : 'failed');
+    } finally {
+      lock.current = false;
+      if (!controller.signal.aborted) setPending(false);
+    }
+  }
+  return <section aria-label="Shared employee and work access" aria-busy={pending}>
+    <h3>Check shared data</h3>
+    <p>Use the installed local server and selected database to read employees and saved work. Only counts are shown. This separate check calls list_agents and list_tasks; it does not change data, inspect history, execute work, call a provider, or read client settings or credentials.</p>
+    <button type="button" disabled={pending} onClick={() => void check()}>Check shared data</button>
+    <div role="status" aria-live="polite" aria-atomic="true">
+      {pending ? <p>Checking shared data… Waiting for employee and work counts.</p> : outcome && <>
+        <p>{sharedMessages[outcome]}</p>
+        {counts && <p>Employees: {counts.employees}. Saved work: {counts.work}.</p>}
+        <p>{outcome === 'passed'
+          ? 'Local read access verified for this check. Continue setup and inspect the connection in your external client.'
+          : outcome === 'busy' ? 'Wait for the current check to finish, then try again.'
+          : outcome === 'timeout' ? 'Wait for the server check to close, then try again. If this continues, restart AgenTown and check its installation.'
+          : 'Check that the installed AgenTown server and selected database are available, restart AgenTown, then try again.'}</p>
+      </>}
+    </div>
+    <p>External client configuration remains unknown; external connection and exercise remain unverified. This local check does not validate ChatGPT.</p>
+  </section>;
+}
+
 export function Connections({workspaceConnected, openClient}: {workspaceConnected: boolean; openClient?: OpenClientRequest | null}) {
   const [open, setOpen] = useState(false);
   const [visited, setVisited] = useState(false);
@@ -177,7 +239,7 @@ function Setup({workspaceConnected, openClient, active}: {active: boolean; works
       <select id="connection-platform" value={platform.id} onChange={e => {setPlatformId(e.target.value); setFeedback('');}}>{client.platforms.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
       <p>Client readiness: Unknown</p>
       <p>Detected: {client.status?.detected === true ? 'Installation hint only' : client.status?.detected === false ? 'Not detected (inconclusive)' : 'Unknown'}. Configured: Unknown. Connected: Unverified. Exercised: Unverified.</p><p>{data.evidence}</p>
-      {client.id !== 'chatgpt' && <LocalDiagnostic />}
+      {client.id !== 'chatgpt' && <><LocalDiagnostic /><SharedDataCheck /></>}
       <h3>Available actions</h3><ul>{data.actions.map(a => <li key={a}>{a}</li>)}</ul>
       <h3>Explicit execution consent</h3><p>{data.consent}</p>
       <button type="button" disabled={copying} onClick={() => void copy()}>Copy setup instructions</button>

@@ -920,3 +920,68 @@ run with the installed development environment's `python -m pytest
 python/tests/test_connection_diagnostic.py python/tests/test_web.py -k diagnostic`.
 Supervisor integration/browser checks must additionally exercise the Connections
 pending, success, timeout, failure and repeat interactions.
+
+### Explicit shared employee and work check
+
+With an installed AgenTown MCP server and a selected valid product database,
+launch `agentown-web --database ABSOLUTE_DATABASE` (or the packaged desktop app).
+Open Connections, select a local client and explicitly choose **Check shared
+data**. Opening Connections or running the separate discovery diagnostic does
+not start this read check. No external client or credentials are required.
+
+`POST /api/connections/v1/shared-data` accepts only same-origin JSON `{}`. The
+installed command initializes MCP, then calls exactly `list_agents` and
+`list_tasks`, each with `{}` arguments. It does not call discovery, mutation,
+history, execution or provider tools, or inspect client settings/credentials.
+The two counts describe separate read snapshots; concurrent user edits can
+change the store between them. This is local server access evidence, never
+ChatGPT or external-client connection validation.
+
+Observable success is `schema_version: 1`, `status: "passed"`,
+`code: "shared_data_passed"`, `employee_count` and `work_count`. An empty valid
+store succeeds with both counts zero. Complete structured employee/work schemas
+and equivalent text results are validated before any count is returned. Names,
+work text, IDs and tool payloads are never included in the HTTP response.
+
+The check shares admission with discovery. `busy` means wait for the active
+check/cleanup and explicitly retry. The eight-second deadline produces `timeout`;
+check database access and installation health before retrying. `failed` includes
+malformed responses and tool errors; check permissions, repair/restart the
+installation if needed and retry while retaining the database. These failures
+return bounded code/message/recovery fields without counts. Output is bounded
+by a one-MiB line limit and four-MiB cumulative limit. Cancellation and shutdown
+kill/reap the child before releasing admission.
+
+For observable installed-product evidence, compare the displayed counts with
+the saved employee/work lists, repeat against a valid empty store, and record
+status/counts only. Confirm external clients still show unknown/unverified
+states. Run deterministic checks in the product development environment:
+
+```sh
+python -m pytest python/tests/test_connection_diagnostic.py -q
+python -m pytest python/tests/test_web.py -k 'diagnostic_api or shared_data_api' -q
+```
+
+Installed-server/database-preservation evidence and Connections browser checks
+remain supervisor verification responsibilities for this implementation snapshot.
+The focused opt-in installed test exercises the actual `agentown-web` entry point
+and its installed MCP subprocess, with no HTTP or protocol replacements:
+
+```sh
+LLM_ENGINE_BROWSER=1 python -m pytest python/tests/test_web_browser.py -k installed_connections_shared_data -q
+```
+
+Run it in the supervisor's installed/browser development environment. Set
+`LLM_ENGINE_BROWSER_EVIDENCE` to the desired evidence directory. It explicitly
+clicks **Check shared data** for valid empty and populated stores and requires
+`passed` with counts `0/0` and `1/1`, respectively. It records
+`connections-shared-data.json` (status, counts and before/after logical SQLite
+SHA-256 digests) and `shared-data-empty.png` / `shared-data-populated.png`.
+Fixture creation occurs before the preservation snapshot; the check itself
+must leave all persisted schema and rows unchanged. The test is opt-in and its
+presence alone is not executed evidence.
+The ordinary Python suite skips this test unless `LLM_ENGINE_BROWSER=1` is set.
+The supervisor browser gate collects it from `python/tests/test_web_browser.py`
+and must retain its JSON and both screenshots with the current run's artifacts
+before acceptance review.
+Live LLM validation remains skipped, not passed.

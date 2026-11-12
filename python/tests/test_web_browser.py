@@ -2,9 +2,11 @@
 Run LLM_ENGINE_BROWSER=1 ... pytest -s tests/test_web_browser.py.
 """
 import json
+import hashlib
 import os
 from pathlib import Path
 import socket
+import sqlite3
 import subprocess
 import sys
 import time
@@ -13,6 +15,91 @@ import httpx
 import pytest
 
 pytestmark = pytest.mark.skipif(os.environ.get('LLM_ENGINE_BROWSER') != '1', reason='opt-in browser validation: set LLM_ENGINE_BROWSER=1')
+
+
+def test_installed_connections_shared_data(tmp_path, installed_package):
+    """Real installed web -> explicit UI action -> real installed MCP, no mocks."""
+    from playwright.sync_api import sync_playwright, expect
+
+    python, runtime, env = installed_package
+    evidence = Path(os.environ.get('LLM_ENGINE_BROWSER_EVIDENCE', str(tmp_path / 'evidence')))
+    evidence.mkdir(parents=True, exist_ok=True)
+    observations = []
+
+    def digest(database):
+        # Includes all persisted rows and schema, independent of SQLite page layout.
+        with sqlite3.connect(database) as connection:
+            return hashlib.sha256('\n'.join(connection.iterdump()).encode()).hexdigest()
+
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(channel=os.environ.get('LLM_ENGINE_BROWSER_CHANNEL'))
+        try:
+            for populated in (False, True):
+                label = 'populated' if populated else 'empty'
+                database = tmp_path / f'{label}.sqlite3'
+                subprocess.run([str(python), '-I', '-c',
+                    'from llm_engine import _native; import sys; _native.list_agents(sys.argv[1])',
+                    str(database)], cwd=runtime, env=env, check=True, capture_output=True)
+                with socket.socket() as sock:
+                    sock.bind(('127.0.0.1', 0))
+                    port = sock.getsockname()[1]
+                url = f'http://127.0.0.1:{port}'
+                executable = python.parent / ('agentown-web.exe' if os.name == 'nt' else 'agentown-web')
+                with (evidence / f'shared-data-{label}-server.txt').open('w') as log:
+                    server = subprocess.Popen([str(executable), '--database', str(database), '--port', str(port)],
+                        cwd=runtime, env=env, stdout=log, stderr=subprocess.STDOUT)
+                    page = browser.new_page()
+                    try:
+                        for _ in range(100):
+                            try:
+                                if httpx.get(url).status_code == 200:
+                                    break
+                            except httpx.HTTPError:
+                                pass
+                            assert server.poll() is None, 'Installed web exited'
+                            time.sleep(.1)
+                        else:
+                            pytest.fail('Installed web startup timed out')
+                        if populated:
+                            headers = {'Origin': url}
+                            employee = httpx.post(url + '/api/employees', json={'name': 'Shared reader'}, headers=headers)
+                            assert employee.status_code == 201
+                            work = httpx.post(url + '/api/work', json={'employee': employee.json()['id'], 'input': 'Private fixture work'}, headers=headers)
+                            assert work.status_code == 201
+                        before = digest(database)
+                        requests = []
+                        page.on('request', lambda request: requests.append(request.url) if '/api/connections/v1/shared-data' in request.url else None)
+                        page.goto(url)
+                        page.get_by_role('button', name='Open connections', exact=True).click()
+                        section = page.get_by_role('region', name='Shared employee and work access')
+                        expect(section.get_by_role('button', name='Check shared data', exact=True)).to_be_visible()
+                        assert requests == []
+                        with page.expect_response(url + '/api/connections/v1/shared-data') as response:
+                            section.get_by_role('button', name='Check shared data', exact=True).click()
+                        result = response.value.json()
+                        count = int(populated)
+                        assert result['status'] == 'passed' and result['code'] == 'shared_data_passed'
+                        assert result['employee_count'] == count and result['work_count'] == count
+                        expect(section).to_contain_text(f'Employees: {count}. Saved work: {count}.')
+                        expect(section).to_contain_text('External client configuration remains unknown')
+                        assert 'Private fixture work' not in section.inner_text()
+                        assert len(requests) == 1
+                        after = digest(database)
+                        assert before == after
+                        page.screenshot(path=str(evidence / f'shared-data-{label}.png'), full_page=True)
+                        observations.append(dict(store=label, status=result['status'], employee_count=count,
+                            work_count=count, database_unchanged=True, before_sha256=before, after_sha256=after))
+                    finally:
+                        page.close()
+                        server.terminate()
+                        try:
+                            server.wait(timeout=15)
+                        except subprocess.TimeoutExpired:
+                            server.kill()
+                            server.wait(timeout=5)
+        finally:
+            browser.close()
+    (evidence / 'connections-shared-data.json').write_text(json.dumps(observations, indent=2))
 
 
 def test_employee_to_result_browser(tmp_path, installed_package):

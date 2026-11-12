@@ -203,3 +203,145 @@ test('request deadline uses diagnostic recovery and releases the control', async
   expect((button as HTMLButtonElement).disabled).toBe(false);
   expect(screen.queryByText(/Saving or execution may already have occurred/)).toBeNull();
 });
+
+const sharedPath = '/api/connections/v1/shared-data';
+const sharedResult = (employees = 2, work = 3) => ({...diagnosticResult('passed'), employee_count: employees, work_count: work});
+
+test.each([[2, 3], [0, 0]])('explicit shared-data check displays only validated counts (%i, %i)', async (employees, work) => {
+  let finish!: (response: Response) => void;
+  const fetcher = vi.fn((path: string) => path === sharedPath
+    ? new Promise<Response>(resolve => { finish = resolve; })
+    : Promise.resolve(new Response(JSON.stringify(setup))));
+  vi.stubGlobal('fetch', fetcher);
+  const user = await openDiagnostic();
+  expect(fetcher.mock.calls.map(([path]) => path)).toEqual(['/api/connections/v1']);
+  const button = screen.getByRole('button', {name: 'Check shared data'});
+  button.focus();
+  await user.keyboard('{Enter}');
+  await user.dblClick(button);
+  expect(screen.getByText(/Checking shared data…/)).toBeTruthy();
+  expect((button as HTMLButtonElement).disabled).toBe(true);
+  expect(fetcher.mock.calls.map(([path]) => path)).toEqual(['/api/connections/v1', sharedPath]);
+  const call = (fetcher.mock.calls as unknown as [string, RequestInit][])[1];
+  expect(call[1].method).toBe('POST');
+  expect(call[1].body).toBe('{}');
+  finish(new Response(JSON.stringify({...sharedResult(employees, work), message: 'private work text', recovery: 'private database path'})));
+  await screen.findByText('Shared-data check passed.');
+  expect(screen.getByText(`Employees: ${employees}. Saved work: ${work}.`)).toBeTruthy();
+  expect(screen.queryByText(/private/)).toBeNull();
+  expect(screen.getByText('Client readiness: Unknown')).toBeTruthy();
+  expect(screen.getByText(/Configured: Unknown. Connected: Unverified. Exercised: Unverified/)).toBeTruthy();
+  expect(screen.queryByText('Local server diagnostic passed')).toBeNull();
+  await user.click(button);
+  expect(screen.queryByText(`Employees: ${employees}. Saved work: ${work}.`)).toBeNull();
+  finish(new Response(JSON.stringify(sharedResult(0, 0))));
+  await screen.findByText('Employees: 0. Saved work: 0.');
+});
+
+test.each([
+  null, {...sharedResult(), schema_version: 2}, {...sharedResult(), status: 'connected'},
+  {...sharedResult(), employee_count: -1}, {...sharedResult(), employee_count: 1.5},
+  {...sharedResult(), employee_count: Number.MAX_SAFE_INTEGER + 1},
+  {...sharedResult(), work_count: '3'}, {...sharedResult(), work_count: null},
+  diagnosticResult('passed'), {...sharedResult(), recovery: null},
+  {...sharedResult(), message: 'x'.repeat(2001)}, {...sharedResult(), status: 'failed'},
+])('shared-data rejects malformed responses without counts', async result => {
+  vi.stubGlobal('fetch', vi.fn(async (path: string) => new Response(JSON.stringify(path === sharedPath ? result : setup))));
+  const user = await openDiagnostic();
+  await user.click(screen.getByRole('button', {name: 'Check shared data'}));
+  await screen.findByText('Shared-data check returned an invalid response.');
+  expect(screen.queryByText(/^Employees:/)).toBeNull();
+  expect((screen.getByRole('button', {name: 'Check shared data'}) as HTMLButtonElement).disabled).toBe(false);
+});
+
+test.each([
+  ['busy', 'A local server check is already running.', 'Wait for the current check to finish'],
+  ['timeout', 'Shared-data check timed out.', 'Wait for the server check to close'],
+  ['failed', 'Shared-data check failed.', 'Check that the installed AgenTown server'],
+])('shared-data %s offers explicit retry recovery', async (status, message, recovery) => {
+  let result = diagnosticResult(status);
+  vi.stubGlobal('fetch', vi.fn(async (path: string) => new Response(JSON.stringify(path === sharedPath ? result : setup))));
+  const user = await openDiagnostic();
+  const button = screen.getByRole('button', {name: 'Check shared data'});
+  await user.click(button);
+  await screen.findByText(message);
+  // Discovery and shared-data controls have separate status regions.
+  expect(screen.getAllByText(new RegExp(recovery)).length).toBeGreaterThan(0);
+  expect(screen.queryByText(/^Employees:/)).toBeNull();
+  result = sharedResult();
+  await user.click(button);
+  await screen.findByText('Employees: 2. Saved work: 3.');
+});
+
+test('shared-data sanitizes transport errors and aborts on unmount', async () => {
+  let fail = true;
+  let signal: AbortSignal | undefined;
+  vi.stubGlobal('fetch', vi.fn(async (path: string, options: RequestInit) => {
+    if (path !== sharedPath) return new Response(JSON.stringify(setup));
+    if (fail) throw new Error('private work text');
+    signal = options.signal as AbortSignal;
+    return new Promise<Response>(() => {});
+  }));
+  const user = await openDiagnostic();
+  await user.click(screen.getByRole('button', {name: 'Check shared data'}));
+  await screen.findByText('Shared-data check failed.');
+  expect(screen.queryByText(/private work text/)).toBeNull();
+  fail = false;
+  await user.click(screen.getByRole('button', {name: 'Check shared data'}));
+  cleanup();
+  expect(signal?.aborted).toBe(true);
+});
+
+test('shared-data deadline releases pending state with safe recovery', async () => {
+  vi.stubGlobal('fetch', vi.fn((path: string) => path === sharedPath
+    ? new Promise<Response>(() => {}) : Promise.resolve(new Response(JSON.stringify(setup)))));
+  await openDiagnostic();
+  vi.useFakeTimers();
+  const button = screen.getByRole('button', {name: 'Check shared data'});
+  await act(async () => {button.click();});
+  await act(async () => {await vi.advanceTimersByTimeAsync(REQUEST_DEADLINE_MS);});
+  expect(screen.getByText('Shared-data check timed out.')).toBeTruthy();
+  expect((button as HTMLButtonElement).disabled).toBe(false);
+  expect(screen.queryByText(/Saving or execution may already have occurred/)).toBeNull();
+});
+
+test('a late shared-data response cannot replace timeout or a later explicit retry', async () => {
+  const responses: ((response: Response) => void)[] = [];
+  const fetcher = vi.fn((path: string) => path === sharedPath
+    ? new Promise<Response>(resolve => {responses.push(resolve);})
+    : Promise.resolve(new Response(JSON.stringify(setup))));
+  vi.stubGlobal('fetch', fetcher);
+  await openDiagnostic();
+  vi.useFakeTimers();
+  const button = screen.getByRole('button', {name: 'Check shared data'});
+  await act(async () => {button.click();});
+  await act(async () => {await vi.advanceTimersByTimeAsync(REQUEST_DEADLINE_MS);});
+  expect(screen.getByText('Shared-data check timed out.')).toBeTruthy();
+  expect(fetcher.mock.calls.map(([path]) => path)).toEqual(['/api/connections/v1', sharedPath]);
+  await act(async () => {button.click();});
+  await act(async () => {responses[0](new Response(JSON.stringify(sharedResult(99, 99))));});
+  expect(screen.getByText(/Checking shared data…/)).toBeTruthy();
+  expect(screen.queryByText(/^Employees:/)).toBeNull();
+  await act(async () => {responses[1](new Response(JSON.stringify(sharedResult(0, 0))));});
+  expect(screen.getByText('Employees: 0. Saved work: 0.')).toBeTruthy();
+  expect(screen.queryByText(/Employees: 99/)).toBeNull();
+});
+
+test('ChatGPT never offers shared-data validation and selection change aborts the check', async () => {
+  const remote = {...setup, clients: [...setup.clients, {...setup.clients[0], id: 'chatgpt', name: 'ChatGPT'}]};
+  let signal: AbortSignal | undefined;
+  const fetcher = vi.fn(async (path: string, options: RequestInit) => {
+    if (path !== sharedPath) return new Response(JSON.stringify(remote));
+    signal = options.signal as AbortSignal;
+    return new Promise<Response>(() => {});
+  });
+  vi.stubGlobal('fetch', fetcher);
+  const user = await openDiagnostic();
+  await user.click(screen.getByRole('button', {name: 'Check shared data'}));
+  await user.selectOptions(screen.getByLabelText('Client'), 'chatgpt');
+  expect(signal?.aborted).toBe(true);
+  expect(screen.queryByRole('button', {name: 'Check shared data'})).toBeNull();
+  expect(screen.queryByText(/Checking shared data…/)).toBeNull();
+  expect(screen.getByText('Client readiness: Unknown')).toBeTruthy();
+  expect(fetcher.mock.calls.map(([path]) => path)).toEqual(['/api/connections/v1', sharedPath]);
+});

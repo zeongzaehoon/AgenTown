@@ -552,3 +552,40 @@ def test_connection_diagnostic_api_fixed_input_and_no_provider(tmp_path, monkeyp
         assert len(calls) == 2
         assert calls[0][-1] == str(db)
         assert provider.calls == 0
+
+
+def test_shared_data_api_fixed_input_and_no_provider(tmp_path, monkeypatch):
+    from llm_engine.connection_diagnostic import ConnectionDiagnostic, outcome
+    calls = []
+    async def check(self):
+        calls.append(self.command)
+        return dict(outcome('passed', 'shared_data_passed', 'Shared employee and work access passed.',
+                       'External connection and exercise remain unverified.'), employee_count=0, work_count=0)
+    monkeypatch.setattr(ConnectionDiagnostic, 'run_shared_data', check)
+    provider = TestProvider()
+    db = tmp_path / 'diagnostic.db'
+    # The check requires a valid selected store; app construction is lazy.
+    assert _native.list_agents(str(db)) == []
+    with TestClient(create_app(db, provider=provider), base_url=ORIGIN) as client:
+        route = '/api/connections/v1/shared-data'
+        before = db.read_bytes()
+        assert client.get(route).status_code == 405
+        assert not calls
+        for body in ({'command': 'evil'}, {'database': '/other'}, []):
+            assert client.post(route, json=body, headers=HEADERS).status_code == 400
+        # HTTPX treats json=None as no body, rather than a JSON null value.
+        assert client.post(route, content='null', headers={
+            **HEADERS, 'Content-Type': 'application/json',
+        }).status_code == 400
+        assert client.post(route, headers=HEADERS).status_code == 403
+        assert not calls
+        assert client.post(route, json={}).status_code == 403
+        for _ in range(2):
+            reply = client.post(route, json={}, headers=HEADERS)
+            assert reply.status_code == 200
+            assert reply.json()['status'] == 'passed'
+            assert reply.json()['employee_count'] == reply.json()['work_count'] == 0
+        assert len(calls) == 2
+        assert calls[0][-1] == str(db)
+        assert provider.calls == 0
+        assert db.read_bytes() == before

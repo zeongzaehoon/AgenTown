@@ -1,4 +1,4 @@
-"""Real subprocess fixtures exercise only initialization and discovery."""
+"""Real subprocess fixtures exercise explicit discovery and shared-data reads."""
 import asyncio
 import json
 import sys
@@ -131,3 +131,117 @@ def test_repeated_request_cancellation_releases_slot_after_cleanup(tmp_path):
         await service.close()
 
     asyncio.run(exercise())
+
+
+def shared_command(tmp_path, mode):
+    trace = tmp_path / 'shared.jsonl'
+    script = '''
+import sys, json, time
+mode, trace = sys.argv[1:]
+for line in sys.stdin:
+    msg = json.loads(line)
+    with open(trace, 'a') as log: log.write(json.dumps(msg) + '\\n')
+    if mode == 'timeout': time.sleep(60)
+    if msg['method'] == 'initialize':
+        result = {'protocolVersion': '2025-03-26', 'capabilities': {'tools': {}}}
+    elif msg['method'] == 'tools/call':
+        key = 'agents' if msg['params']['name'] == 'list_agents' else 'tasks'
+        row = {'id': '11111111-1111-4111-8111-111111111111'}
+        row.update({'name': 'private employee'} if key == 'agents' else
+                   {'title': 'private work', 'status': 'pending', 'assignees': []})
+        data = {key: [] if mode == 'empty' else [row]}
+        if mode == 'malformed': data[key][0]['id'] = 'invalid'
+        result = {'content': [{'type': 'text', 'text': json.dumps(data)}],
+                  'structuredContent': data, 'isError': mode == 'error'}
+    else: continue
+    print(json.dumps({'jsonrpc': '2.0', 'id': msg['id'], 'result': result}), flush=True)
+'''
+    return [sys.executable, '-u', '-c', script, mode, str(trace)], trace
+
+
+@pytest.mark.parametrize('mode,status', [('success', 'passed'), ('empty', 'passed'),
+    ('malformed', 'failed'), ('error', 'failed'), ('timeout', 'timeout')])
+def test_shared_data_exact_reads_validation_cleanup(tmp_path, monkeypatch, mode, status):
+    async def exercise():
+        database = tmp_path / 'company.db'
+        database.write_bytes(b'unchanged sentinel')
+        service = ConnectionDiagnostic(database, timeout=0.5)
+        service.command, trace = shared_command(tmp_path, mode)
+        original = asyncio.create_subprocess_exec
+        processes = []
+        async def spawn(*args, **kwargs):
+            process = await original(*args, **kwargs)
+            processes.append(process)
+            return process
+        monkeypatch.setattr(asyncio, 'create_subprocess_exec', spawn)
+        assert not trace.exists()  # construction never admits a check
+        result = await service.run_shared_data()
+        assert result['status'] == status
+        assert 'private' not in json.dumps(result)
+        if status == 'passed':
+            assert result['employee_count'] == result['work_count'] == (0 if mode == 'empty' else 1)
+        else:
+            assert 'employee_count' not in result and 'work_count' not in result
+        messages = [json.loads(line) for line in trace.read_text().splitlines()]
+        calls = [m for m in messages if m['method'] == 'tools/call']
+        assert all(m['params']['arguments'] == {} for m in calls)
+        assert [m['params']['name'] for m in calls] == (
+            ['list_agents', 'list_tasks'] if status == 'passed' else
+            [] if mode == 'timeout' else ['list_agents'])
+        assert {m['method'] for m in messages} <= {'initialize', 'notifications/initialized', 'tools/call'}
+        assert processes[0].returncode is not None and service.active is None
+        assert database.read_bytes() == b'unchanged sentinel'
+        await service.close()
+    asyncio.run(exercise())
+
+
+def test_shared_data_and_discovery_share_admission_and_cancel_cleanup(tmp_path):
+    async def exercise():
+        service = ConnectionDiagnostic(tmp_path / 'company.db')
+        service.command, trace = shared_command(tmp_path, 'timeout')
+        task = asyncio.create_task(service.run_shared_data())
+        while not trace.exists():
+            await asyncio.sleep(0.01)
+        assert (await service.run())['status'] == 'busy'
+        assert (await service.run_shared_data())['status'] == 'busy'
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert service.active is None
+        await service.close()
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize('change', [
+    lambda r: r.update(isError=True),
+    lambda r: r.update(content=[]),
+    lambda r: r.update(structuredContent={'agents': [], 'extra': 1}),
+    lambda r: r['content'][0].update(text='{}'),
+    lambda r: r.update(structuredContent={'agents': 'bad'}),
+])
+def test_shared_data_rejects_invalid_envelope(change):
+    from llm_engine.connection_diagnostic import validated_count, DiagnosticFailure
+    result = {'content': [{'type': 'text', 'text': '{"agents": []}'}],
+              'structuredContent': {'agents': []}, 'isError': False}
+    change(result)
+    with pytest.raises(DiagnosticFailure):
+        validated_count(result, 'agents')
+
+
+@pytest.mark.parametrize('change', [
+    lambda rows: rows.append(dict(rows[0])),
+    lambda rows: rows[0].update(status='completed'),
+    lambda rows: rows[0].update(assignees=['invalid']),
+    lambda rows: rows[0].update(assignees=['11111111-1111-4111-8111-111111111111'] * 2),
+    lambda rows: rows[0].update(title=None),
+    lambda rows: rows[0].update(output='private result'),
+])
+def test_shared_data_rejects_invalid_work_rows(change):
+    from llm_engine.connection_diagnostic import validated_count, DiagnosticFailure
+    data = {'tasks': [{'id': '11111111-1111-4111-8111-111111111111',
+                       'title': 'private work', 'status': 'pending', 'assignees': []}]}
+    change(data['tasks'])
+    result = {'content': [{'type': 'text', 'text': json.dumps(data)}],
+              'structuredContent': data, 'isError': False}
+    with pytest.raises((DiagnosticFailure, ValueError)):
+        validated_count(result, 'tasks')
