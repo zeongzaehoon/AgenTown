@@ -1608,3 +1608,13 @@ runs the declared frontend profile (frontend tests/build and ordinary Python
 checks), subject to its periodic full-check policy. Browser validation is pending;
 no browser or fresh-install evidence is claimed for this slice. Live LLM calls
 remain skipped, not passed.
+
+### Saved Hook trigger devices
+
+Launch `agentown-web --database PATH --port 8765` with an existing product database, then open `http://127.0.0.1:8765`. In Company overview, Hook trigger devices show each saved Hook's persisted ID, event, target kind/ID and configuration-enabled status. Configuration enabled does not mean automatic execution. No credentials or live provider calls are needed.
+
+Use Tab to focus a device and Enter or Space to open that exact ID in Configuration. Saved record receives focus after loading; opening the same device again also restores focus. Duplicate names remain distinguishable by ID. Edit a Hook draft, open another device, and return: its unsaved draft and the work-input draft remain. Switching to a Skill draft and back also retains both. Navigation never saves, enables, previews or executes work.
+
+Refresh Hook devices reloads the office snapshot. Loading, empty, unavailable and stale states are separate; failed refresh retains the last snapshot and a later successful refresh recovers. Refresh configuration independently reloads saved values without resending drafts. If a selected Hook has been removed, its ID and draft remain visible with saving disabled; refreshing after restoration recovers the record without discarding the draft.
+
+With frontend dependencies installed, run `cd frontend && npx tsc --noEmit` and `npx vitest run src/HookDevices.test.tsx src/SkillBooks.test.tsx src/CompanyOverview.test.tsx src/App.test.tsx`. These deterministic tests cover identity, keyboard activation, repeated focus, draft preservation, failure recovery, removed records and read-only configuration requests. Supervisor verification supplies the applicable consolidated checks and any browser validation; no browser or live-provider result is claimed by this implementation.

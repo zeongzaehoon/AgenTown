@@ -134,6 +134,7 @@ test('office characters and list share selection by identity with keyboard and s
 test('team room cards forward the exact saved Task identity through overview navigation', async () => {
   vi.stubGlobal('fetch', vi.fn(async (path: string) => {
     if (path === '/api/teams') return new Response(JSON.stringify({teams: [{id: 'team', name: 'Editors', members: ['a', 'b']}]}));
+    if (path === '/api/config/v1/hooks') return new Response('{"hooks":[]}');
     if (path === '/api/config/v1/skills') return new Response('{"skills":[]}');
     if (path === '/api/loops/v1') return new Response('{"schema_version":1,"control":{"state":"available","can_control":true,"message":""},"sessions":[],"attempts":[]}');
     throw new Error(`Unexpected request ${path}`);

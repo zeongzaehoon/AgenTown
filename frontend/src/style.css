@@ -47,3 +47,7 @@
 .room-work-cards li { min-width: 0; border: 1px solid #73836d; border-radius: 8px; padding: 12px; background: #fff; }
 .room-work-cards button { margin-top: 0; text-align: left; overflow-wrap: anywhere; max-width: 100%; }
 .team-room h5 { font-size: 1rem; margin-bottom: 8px; }
+
+.hook-device-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr)); gap: 16px; }
+.hook-device { display: flex; flex-direction: column; align-items: flex-start; text-align: left; gap: 6px; min-width: 0; overflow-wrap: anywhere; border: 3px solid #61766b; border-radius: 14px; }
+.hook-device:focus-visible { outline: 4px solid #a33b00; outline-offset: 5px; }

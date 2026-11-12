@@ -1,5 +1,7 @@
 import { REQUEST_DEADLINE_MS } from './api';
 export type ConfigurationKind = 'skills' | 'hooks' | 'loops';
+export interface ConfigurationNavigation { kind: ConfigurationKind; id: string }
+export type HookRecord = HookFields & {id: string; enabled: boolean};
 export interface SkillFields { name: string; instructions: string }
 export interface HookFields { name: string; skill_id: string; target_kind: 'agent' | 'team'; target_id: string; event: 'task_created' | 'run_completed' | 'run_failed' }
 export interface LoopFields { name: string; task_id: string; max_iterations: number; interval_seconds: number }
