@@ -349,3 +349,25 @@ impl Core {
         Ok(())
     }
 }
+
+impl Core {
+    /// Version-one composition is deterministic and bounded by text execution's byte limit.
+    pub fn compose_skill_input(&self, task: TaskId, skill: SkillId) -> Result<String, DomainError> {
+        let work = self.task(task)?;
+        let skill = self.skill(skill)?;
+        if !skill.enabled() {
+            return Err(DomainError::InvalidConfiguration("Skill must be enabled"));
+        }
+        let input = format!(
+            "Skill instructions:\n{}\n\nWork:\n{}",
+            skill.instructions(),
+            work.title()
+        );
+        if input.len() > 100_000 {
+            return Err(DomainError::InvalidConfiguration(
+                "combined input exceeds 100000 bytes",
+            ));
+        }
+        Ok(input)
+    }
+}

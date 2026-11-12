@@ -92,3 +92,62 @@ Rust-owned store. Result presentation has `schema_version: 1`.
 
 Use `--provider openai`, `--provider bedrock` or `--provider xai` for the official
 SDK adapters. Anthropic remains the default. See [configuration and limits](providers.md).
+
+## Apply one saved Skill explicitly (C27-T1)
+
+The HTTP API can preview one enabled Skill with saved work, without provider
+configuration or a provider call. Enabling a Skill alone does not execute it.
+Hooks and Loops remain inert. The preview's `input` is composed by Rust; clients
+must display it before explicitly submitting its opaque `preview_id`. Clients
+must not construct an execution input from local Skill text.
+
+Start the existing server with an explicit database and configured provider/model:
+
+```sh
+agentown-web --database /tmp/agentown-skill.sqlite --provider anthropic --model YOUR_MODEL
+```
+
+The following requests require `curl` and `jq`. They save configuration and work;
+only the final execute request can call the configured provider. Real provider
+calls are currently waived: skip that request without intentional configuration.
+
+```sh
+base=http://127.0.0.1:8765
+employee=$(curl -fsS "$base/api/employees" -H "Origin: $base" -H 'Content-Type: application/json' -d '{"name":"Writer"}' | jq -r .id)
+task=$(jq -n --arg employee "$employee" '{employee:$employee,input:"Draft a short project update."}' | curl -fsS "$base/api/work" -H "Origin: $base" -H 'Content-Type: application/json' --data-binary @- | jq -r .id)
+skill=$(curl -fsS "$base/api/config/v1/skills" -H "Origin: $base" -H 'Content-Type: application/json' -d '{"name":"Concise","instructions":"Use short sentences."}' | jq -r .id)
+curl -fsS -X PUT "$base/api/config/v1/skills/$skill/enabled" -H "Origin: $base" -H 'Content-Type: application/json' -d '{"enabled":true}'
+jq -n --arg skill "$skill" '{skill_id:$skill}' | curl -fsS "$base/api/work/$task/skill-preview" -H "Origin: $base" -H 'Content-Type: application/json' --data-binary @- > /tmp/agentown-preview.json
+jq . /tmp/agentown-preview.json
+# Explicit consent after inspecting input; this is the provider-calling step:
+jq '{preview_id,expected_runs}' /tmp/agentown-preview.json | curl -sS "$base/api/work/$task/execute" -H "Origin: $base" -H 'Content-Type: application/json' --data-binary @-
+# Durable attempts, outcome, exact admitted instructions and composed input:
+curl -fsS "$base/api/state" -H "Origin: $base" -H 'Content-Type: application/json' -d '{}'
+```
+
+Preview returns `schema_version: 1`, `preview_id`, `task_id`, `skill_id`, `input`
+and `expected_runs`. Admission accepts exactly `preview_id` and `expected_runs`.
+No input or instructions may be supplied at admission. A stale, disabled,
+changed, consumed or wrong-task preview returns HTTP 409 without provider I/O.
+Refreshing history and requesting a fresh preview is required for explicit retry;
+changing `expected_runs` does not make a consumed preview reusable. Existing
+execution with only `expected_runs` continues to execute without a Skill.
+
+Skill executions return the existing execution record plus `skill` provenance;
+`/api/state` exposes the same provenance per attempt, including `skill_id` and
+exact `instructions`. Subsequent Skill edits cannot rewrite admitted provenance.
+Provider failures persist a terminal attempt and its provenance. Provider success
+remains quality-unverified and does not complete a Task. Configured secret values
+are passed transiently to native validation, rejected before preview/admission
+persistence, and redacted from HTTP and persisted provider output.
+
+Deterministic acceptance command after native integration:
+
+```sh
+cd python
+python -m pytest tests/test_skill_execution.py tests/test_web.py tests/test_configuration.py
+```
+
+The fixture provider exercises exact preview input, success, persisted failure,
+fresh-preview retry, stale rejection, simultaneous duplicate submission, restart
+retention and secret handling. These tests do not contact a real provider.

@@ -121,3 +121,14 @@ has no installed product environment, native adapter or pytest. The real-process
 exercise and consolidated checks remain pending supervisor verification; this
 is not execution evidence. Browser validation remains pending. Live provider
 calls are skipped by user policy.
+
+### Explicit single-Skill execution
+
+Enabling configuration remains inert. The text-work HTTP API now accepts an
+explicit single-Skill preview and admission flow; see
+[text execution](text-execution.md#apply-one-saved-skill-explicitly-c27-t1) for
+runnable requests. `POST /api/work/{task}/skill-preview` accepts exactly
+`{"skill_id":"<enabled Skill ID>"}` and never invokes a provider. The returned
+combined `input` must be reviewed before sending `preview_id` and `expected_runs`
+to `POST /api/work/{task}/execute`. A fresh preview is required for each retry.
+Hooks and Loops have no runtime dispatch in this slice.

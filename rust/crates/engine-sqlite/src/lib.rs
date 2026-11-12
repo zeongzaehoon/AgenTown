@@ -7,10 +7,12 @@ use rusqlite::{Connection, OpenFlags, TransactionBehavior, params};
 use std::{collections::BTreeSet, error::Error, fmt, path::Path, time::Duration};
 
 const APPLICATION_ID: i32 = 0x4c4c4d45; // LLME
-const SCHEMA_VERSION: i32 = 6;
+const SCHEMA_VERSION: i32 = 7;
 mod configuration;
 mod execution;
+mod skill_execution;
 pub use execution::Execution;
+pub use skill_execution::{SkillPreview, SkillProvenance};
 
 #[derive(Debug)]
 pub enum StorageError {
@@ -110,7 +112,7 @@ impl SqliteStore {
         let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let version: i32 = tx.pragma_query_value(None, "user_version", |r| r.get(0))?;
         let application: i32 = tx.pragma_query_value(None, "application_id", |r| r.get(0))?;
-        if !matches!(version, 0 | 1 | 2 | 3 | 4 | 5 | SCHEMA_VERSION) {
+        if !matches!(version, 0 | 1 | 2 | 3 | 4 | 5 | 6 | SCHEMA_VERSION) {
             return Err(StorageError::UnsupportedVersion(version));
         }
         if version == 0 {
@@ -151,8 +153,12 @@ impl SqliteStore {
         }
         if version < 6 {
             tx.execute_batch(include_str!("migration-v6.sql"))?;
-            tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+            tx.pragma_update(None, "user_version", 6)?;
             load(&tx)?;
+        }
+        if version < 7 {
+            tx.execute_batch(include_str!("migration-v7.sql"))?;
+            tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         }
         tx.commit()?;
         Ok(Self { connection })
@@ -388,7 +394,7 @@ fn terminal_columns(state: RunState) -> (Option<&'static str>, Option<i64>) {
 
 fn check_version(connection: &Connection) -> Result<(), StorageError> {
     let version: i32 = connection.pragma_query_value(None, "user_version", |r| r.get(0))?;
-    if !matches!(version, 1 | 2 | 3 | 4 | 5 | SCHEMA_VERSION) {
+    if !matches!(version, 1 | 2 | 3 | 4 | 5 | 6 | SCHEMA_VERSION) {
         return Err(StorageError::UnsupportedVersion(version));
     }
     let application: i32 = connection.pragma_query_value(None, "application_id", |r| r.get(0))?;

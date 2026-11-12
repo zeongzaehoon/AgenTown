@@ -12,7 +12,7 @@ pub struct Execution {
     pub output: Option<String>,
     pub error: Option<String>,
 }
-fn now() -> Result<RunTimestamp, StorageError> {
+pub(super) fn now() -> Result<RunTimestamp, StorageError> {
     let ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_err(|_| StorageError::InvalidData("clock before epoch".into()))?
@@ -21,7 +21,7 @@ fn now() -> Result<RunTimestamp, StorageError> {
         |_| StorageError::InvalidData("clock overflow".into()),
     )?)?)
 }
-fn get(tx: &Connection, id: RunId) -> Result<Execution, StorageError> {
+pub(super) fn get(tx: &Connection, id: RunId) -> Result<Execution, StorageError> {
     Ok(tx.query_row(
         "SELECT input, provider, model, deadline, output, error FROM executions WHERE run_id=?1",
         [id.to_string()],
@@ -38,7 +38,7 @@ fn get(tx: &Connection, id: RunId) -> Result<Execution, StorageError> {
         },
     )?)
 }
-fn recover(tx: &Connection, timestamp: RunTimestamp) -> Result<(), StorageError> {
+pub(super) fn recover(tx: &Connection, timestamp: RunTimestamp) -> Result<(), StorageError> {
     let before = load(tx)?;
     let mut after = before.clone();
     let mut statement = tx.prepare(
@@ -584,8 +584,8 @@ mod tests {
         let mut store = SqliteStore::open(&path).unwrap();
         let (a, t) = seed(&mut store);
         let old = store.read().unwrap();
-        // Reconstruct v3, including removal of tables introduced after v5.
-        store.connection.execute_batch("DROP TABLE hooks; DROP TABLE loop_policies; DROP TABLE skills; DROP TABLE execution_sources; DROP TRIGGER execution_immutable; DROP TRIGGER execution_retained; DROP TABLE executions; PRAGMA user_version=3; CREATE TRIGGER execution_immutable BEFORE UPDATE ON runs BEGIN SELECT 1; END;").unwrap();
+        // Reconstruct v3 without later tables or triggers on legacy tables.
+        store.connection.execute_batch("DROP TRIGGER skill_preview_configuration; DROP TRIGGER skill_preview_work; DROP TRIGGER skill_preview_assignment_added; DROP TRIGGER skill_preview_assignment_removed; DROP TABLE skill_provenance; DROP TABLE skill_previews; DROP TABLE hooks; DROP TABLE loop_policies; DROP TABLE skills; DROP TABLE execution_sources; DROP TRIGGER execution_immutable; DROP TRIGGER execution_retained; DROP TABLE executions; PRAGMA user_version=3; CREATE TRIGGER execution_immutable BEFORE UPDATE ON runs BEGIN SELECT 1; END;").unwrap();
         drop(store);
         let sql = Connection::open(&path).unwrap();
         assert!(SqliteStore::open(&path).is_err());
@@ -903,8 +903,8 @@ mod mcp_tests {
             .unwrap();
         store
             .connection
-            // A v4 fixture must not retain the v6 configuration tables.
-            .execute_batch("DROP TABLE hooks; DROP TABLE loop_policies; DROP TABLE skills; DROP TABLE execution_sources; PRAGMA user_version=4;")
+            // A v4 fixture must not retain v6/v7 tables or their triggers.
+            .execute_batch("DROP TRIGGER skill_preview_configuration; DROP TRIGGER skill_preview_work; DROP TRIGGER skill_preview_assignment_added; DROP TRIGGER skill_preview_assignment_removed; DROP TABLE skill_provenance; DROP TABLE skill_previews; DROP TABLE hooks; DROP TABLE loop_policies; DROP TABLE skills; DROP TABLE execution_sources; PRAGMA user_version=4;")
             .unwrap();
         drop(store);
         let mut store = SqliteStore::open(&path).unwrap();
