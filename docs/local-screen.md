@@ -1618,3 +1618,40 @@ Use Tab to focus a device and Enter or Space to open that exact ID in Configurat
 Refresh Hook devices reloads the office snapshot. Loading, empty, unavailable and stale states are separate; failed refresh retains the last snapshot and a later successful refresh recovers. Refresh configuration independently reloads saved values without resending drafts. If a selected Hook has been removed, its ID and draft remain visible with saving disabled; refreshing after restoration recovers the record without discarding the draft.
 
 With frontend dependencies installed, run `cd frontend && npx tsc --noEmit` and `npx vitest run src/HookDevices.test.tsx src/SkillBooks.test.tsx src/CompanyOverview.test.tsx src/App.test.tsx`. These deterministic tests cover identity, keyboard activation, repeated focus, draft preservation, failure recovery, removed records and read-only configuration requests. Supervisor verification supplies the applicable consolidated checks and any browser validation; no browser or live-provider result is claimed by this implementation.
+
+
+### Saved Loop policy devices (C42-T1)
+
+Launch `agentown-web --database PATH --port 8765` and open
+`http://127.0.0.1:8765`. Save work and create two Loop policies in Configuration
+with the same name, different iteration limits/intervals and enabled states.
+No credentials are needed. In Company overview, **Saved Loop policy devices**
+show persisted policy ID, linked Task ID, iteration limit, interval in seconds
+and configuration-enabled state. The separate execution-session section keeps
+its existing inspection and explicit stop controls. A saved enabled policy is
+not evidence of an active session.
+
+Type a work draft and an unsaved configuration draft. Tab to a Loop device and
+press Enter or Space: Configuration opens the exact ID and focuses **Saved
+record**. Edit its name, open the other same-name device and return; each draft
+remains associated with its persisted ID. Activate the same device repeatedly
+and check focus returns to Saved record. Switch to a new Skill draft and back;
+that draft and the work input must remain intact. In the network inspector,
+opening devices must issue only inspection requests, with GET for configuration;
+there must be no saves, previews, session starts or stops.
+
+**Refresh Loop devices** reloads the office snapshot independently. Check loading,
+empty, unavailable, malformed-response and stale messages using deterministic
+fixtures. Failed refresh retains the last valid devices, marked stale; a
+successful refresh replaces them. **Refresh configuration** retains drafts when
+a selected policy disappears, shows its unavailable ID and disables saving.
+Restoring that policy and refreshing recovers it without discarding its draft.
+Malformed saved-policy snapshots are rejected in both office and Configuration.
+
+With frontend dependencies available, run `cd frontend` then
+`npx vitest run src/LoopDevices.test.tsx src/OverviewLoops.test.tsx src/Configuration.test.tsx src/HookDevices.test.tsx src/CompanyOverview.test.tsx`
+and `npx tsc --noEmit`. C42 implementation added deterministic component/App
+coverage; execution is pending because this isolated workspace has no frontend
+node_modules. Supervisor-selected consolidated verification and browser validation
+remain pending. No browser result is claimed here. Live LLM validation remains
+skipped, not passed.

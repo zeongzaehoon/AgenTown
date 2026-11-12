@@ -1,3 +1,4 @@
+import { LoopDevices } from './LoopDevices';
 import { HookDevices } from './HookDevices';
 import { workstationClients, type ConnectionClientId } from './Connections';
 import { TeamRooms } from './TeamRooms';
@@ -11,10 +12,11 @@ const categories: {key: WorkOutcome; label: string}[] = [
   {key: 'other', label: 'Other recorded work'},
 ];
 
-export function CompanyOverview({workspace, connected, error, onOpenWork, selectedEmployee = '', onSelectEmployee, onOpenHook, onOpenSkill, onOpenClient, onOpenTeam, onSelectTeamMember}: {
+export function CompanyOverview({workspace, connected, error, onOpenWork, selectedEmployee = '', onSelectEmployee, onOpenHook, onOpenLoop, onOpenSkill, onOpenClient, onOpenTeam, onSelectTeamMember}: {
   onSelectTeamMember?: (id: string) => void;
   onOpenTeam?: (id: string) => void;
   onOpenClient?: (id: ConnectionClientId) => void;
+  onOpenLoop?: (id: string) => void;
   onOpenHook?: (id: string) => void;
   onOpenSkill?: (id: string) => void; workspace: Workspace | null; connected: boolean; error: string; onOpenWork: (id: string) => void; selectedEmployee?: string; onSelectEmployee?: (id: string) => void;
 }) {
@@ -50,6 +52,7 @@ export function CompanyOverview({workspace, connected, error, onOpenWork, select
     <TeamRooms onOpenWork={onOpenWork} workspace={workspace} connected={connected} selectedEmployee={selectedEmployee} onSelectEmployee={onSelectTeamMember ?? onSelectEmployee} onOpenTeam={onOpenTeam} />
     <SkillBooks onOpenSkill={onOpenSkill} />
     <HookDevices onOpenHook={onOpenHook} />
+    <LoopDevices onOpenLoop={onOpenLoop} />
     <OverviewLoops workspace={workspace} onOpenWork={onOpenWork} />
     {workspace && <>
       {workspace.configuration && <p>Execution setup needed: {workspace.configuration} Employees and saved assignments are still shown.</p>}

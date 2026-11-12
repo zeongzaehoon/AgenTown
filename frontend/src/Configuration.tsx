@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { type Workspace, listTeams, type Team } from './api';
-import { configurationRequest, type ConfigurationNavigation, type ConfigurationFields, type ConfigurationKind, type ConfigurationRecord } from './configuration-api';
+import { savedLoopPolicies, configurationRequest, type ConfigurationNavigation, type ConfigurationFields, type ConfigurationKind, type ConfigurationRecord } from './configuration-api';
 
 type Draft = Record<string, string>;
 const labels = {skills: 'Skill', hooks: 'Hook', loops: 'Loop'};
@@ -53,7 +53,7 @@ function ConfigurationPanel({workspace, openSkill, openRecord}: {workspace: Work
           configurationRequest<{loops: ConfigurationRecord[]}>('loops', '', undefined, request.signal), listTeams(request.signal),
         ]);
         if (request.signal.aborted) return;
-        setRecords({skills: skills.skills, hooks: hooks.hooks, loops: loops.loops}); setTeams(teamList.teams); setStale(false);
+        setRecords({skills: skills.skills, hooks: hooks.hooks, loops: savedLoopPolicies(loops)}); setTeams(teamList.teams); setStale(false);
         setNotice('Saved values refreshed. Inspect them before explicitly retrying any uncertain save; refresh never resends changes.');
       }
     } catch (failure) {
