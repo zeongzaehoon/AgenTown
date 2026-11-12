@@ -1046,3 +1046,33 @@ status. Installation detection is a bounded hint only. Exact current settings
 paths, validation and recovery appear in the read-only instructions. Keyboard
 users can open Connections, select a client and activate either action with
 standard native controls. See `docs/desktop.md` for installed launch/recovery steps.
+
+### Preview and execute one Skill
+
+Launch `agentown-web --database /tmp/agentown-skill.sqlite --port 8765`
+and open http://127.0.0.1:8765. Create an employee and save work. In Configuration,
+create a Skill with instructions and enable it. Enabling configuration does not
+execute anything; Hooks and Loops remain inactive. Provider/model settings must
+be intentionally supplied for execution; live provider validation is skipped.
+
+In the saved work detail, choose an enabled Skill and activate **Preview Skill
+with saved work**. Native select and button controls support Tab, arrows, Space
+and Enter. Review the server's full effective instructions and saved work, then
+activate **Execute once with Skill**. Focus moves to that explicit action after
+preview; Cancel returns focus to preview. Preview performs no provider call.
+The ordinary Execute work / Retry explicitly action continues to use no Skill.
+A Skill preview always refers to saved work, never the unsaved draft.
+
+Editing the draft, changing selected work, recorded attempts, provider/model or
+Skill configuration, or losing connectivity invalidates consent. Skill records
+are refreshed periodically; the server also rejects changed/disabled/stale
+previews at admission. Each submission consumes the preview and uses the
+existing duplicate-admission guard. A retry requires a fresh preview and explicit
+execution. After uncertain delivery, inspect attempts with **Refresh connection**
+before retrying; background polling never clears this inspection requirement or
+resends work. The latest attempt shows immutable saved Skill name/ID, preview ID,
+instructions and effective input alongside its result/error and attempt ID.
+Subsequent configuration edits do not change saved provenance.
+
+Deterministic browser interaction and visual validation for this snapshot are
+pending the supervisor gate. A fixture response is not live-provider evidence.

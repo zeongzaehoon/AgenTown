@@ -15,7 +15,7 @@ function draftOf(record: ConfigurationRecord): Draft {
 export function Configuration({workspace}: {workspace: Workspace | null}) {
   const [open, setOpen] = useState(false);
   return <section aria-labelledby="configuration-title"><h2 id="configuration-title">Configuration</h2>
-    <p>Manage Skills, Hooks and Loop policies. Configuration does not execute work. Runtime execution of these policies is unavailable, even when enabled.</p>
+    <p>Manage Skills, Hooks and Loop policies. Configuration does not execute work. Enabled means configuration enabled. Apply a Skill only through the saved-work preview and explicit execution controls. Hooks and Loops do not execute automatically.</p>
     <button type="button" aria-expanded={open} aria-controls="configuration-panel" onClick={() => setOpen(true)}>Open configuration</button>
     <div id="configuration-panel">{open && <ConfigurationPanel workspace={workspace} />}</div>
   </section>;
@@ -96,7 +96,7 @@ function ConfigurationPanel({workspace}: {workspace: Workspace | null}) {
     {records?.[kind].length === 0 && <p>No saved {kind} yet.</p>}
     {selected && !record && <p>Selected record unavailable · ID: {selected}. Its draft is retained.</p>}
     {record && <><h3>Saved values · ID: {record.id}</h3><pre aria-label="Saved values">{JSON.stringify(record, null, 2)}</pre>
-      <p>Configuration {record.enabled ? 'enabled' : 'disabled'}. Runtime execution unavailable.</p>
+      <p>Configuration {record.enabled ? 'enabled' : 'disabled'}. No automatic execution. Apply enabled Skills through a saved-work preview; Hooks and Loops remain inactive.</p>
       <button type="button" disabled={blocked} onClick={() => void perform(async signal => {
         const saved = await configurationRequest<ConfigurationRecord>(kind, `/${encodeURIComponent(record.id)}/enabled`, {enabled: !record.enabled}, signal);
         if (!signal.aborted) remember(saved);

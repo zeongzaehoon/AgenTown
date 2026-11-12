@@ -12,6 +12,7 @@ function fixture(state = initial()) {
   let finish: (() => void) | undefined;
   const calls: {path: string; body: Record<string, unknown>}[] = [];
   const fetcher = vi.fn(async (path: string, options: RequestInit) => {
+    if (path === '/api/config/v1/skills') return new Response(JSON.stringify({skills: []}));
     const body = JSON.parse(options.body as string) as Record<string, unknown>;
     calls.push({path, body});
     if (disconnected) throw new TypeError('network');
@@ -882,4 +883,34 @@ test('employee assignment polling and disconnected navigation retain selected hi
   expect(draftInput().value).toBe('Keep draft offline');
   for (const detail of expanded) { expect(detail.isConnected).toBe(true); expect(detail.open).toBe(true); }
   expect(f.calls.every(c => c.path === '/api/state')).toBe(true);
+});
+
+test('saved Skill provenance remains visible from history', async () => {
+  const f = savedResults();
+  f.state.work[0].attempts.at(-1)!.skill = {run_id: 'r', preview_id: 'p', skill_id: 's', skill_name: 'Concise', instructions: 'Original instructions', input: 'Original effective input', admitted_at: 100};
+  render(<App />); await connected();
+  const region = screen.getByRole('region', {name: /saved Skill provenance/});
+  expect(within(region).getByText('Original instructions')).toBeTruthy();
+  expect(within(region).getByText('Original effective input')).toBeTruthy();
+  expect(within(region).getByText(/Skill ID: s/)).toBeTruthy();
+});
+
+test('uncertain execution requires explicit history refresh before retry', async () => {
+  const f = savedResults();
+  Object.assign(f.state.work[0].attempts.at(-1)!, {output: null, error: 'network'});
+  const fetcher = globalThis.fetch;
+  let submissions = 0;
+  vi.stubGlobal('fetch', (path: string, options: RequestInit) => {
+    if (path.endsWith('/execute')) { submissions++; return Promise.reject(new Error('offline')); }
+    return fetcher(path, options);
+  });
+  render(<App />); await connected();
+  fireEvent.click(retry());
+  await screen.findByText(/Submission needs inspection/);
+  expect((retry() as HTMLButtonElement).disabled).toBe(true);
+  refresh();
+  await waitFor(() => expect((retry() as HTMLButtonElement).disabled).toBe(false));
+  expect(submissions).toBe(1);
+  fireEvent.click(retry());
+  await waitFor(() => expect(submissions).toBe(2));
 });

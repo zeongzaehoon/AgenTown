@@ -1,3 +1,4 @@
+import { SkillExecution } from './SkillExecution';
 import { Configuration } from './Configuration';
 import { Teams } from './Teams';
 import { CompanyOverview } from './CompanyOverview';
@@ -68,6 +69,13 @@ function AttemptResult({ attempt, work, number, latest }: {attempt: Attempt; wor
     {attempt.error && <p>{advice[attempt.error] || 'Refresh history before retrying.'}</p>}
     {attempt.state === 'active' && !attempt.provider && <p>Caller-reported active attempt; no provider request is recorded.</p>}
     {attempt.state === 'active' && !!attempt.provider && <p>Waiting for the provider. After an unexpected stop, recovery can take up to 120 seconds. No work is automatically resent.</p>}
+    {attempt.skill && <section aria-label={`Attempt ${number} saved Skill provenance`}>
+      <h4>Saved Skill provenance</h4>
+      <p>{attempt.skill.skill_name} · Skill ID: {attempt.skill.skill_id}</p>
+      <p>Preview ID: {attempt.skill.preview_id}</p>
+      <p>Instructions saved at execution</p><pre>{attempt.skill.instructions}</pre>
+      <p>Effective input saved at execution</p><pre>{attempt.skill.input}</pre>
+    </section>}
     <p>Work ID: {work.id} · Attempt ID: {attempt.id}</p>
   </details>;
 }
@@ -77,6 +85,7 @@ export function App() {
   const [connected, setConnected] = useState(false);
   const [connectionError, setConnectionError] = useState('');
   const [notice, setNotice] = useState('');
+  const [inspectionRequired, setInspectionRequired] = useState(false);
   const [selected, setSelected] = useState('');
   const [search, setSearch] = useState('');
   const [viewEmployee, setViewEmployee] = useState('');
@@ -131,7 +140,7 @@ export function App() {
     try {
       const next = await api<Workspace>('/api/state', {}, controller.signal);
       if (current !== generation.current) return;
-      setState(next); setSelected(previous => previous || next.work[0]?.id || ''); setConnected(true); setConnectionError('');
+      setState(next); setSelected(previous => previous || next.work[0]?.id || ''); setConnected(true); setConnectionError(''); return true;
     } catch (error) {
       if (current !== generation.current) return;
       setConnected(false); setConnectionError((error as Error).message);
@@ -184,7 +193,7 @@ export function App() {
     catch (error) {
       if (controller.signal.aborted) return;
       if (key === 'work' && error instanceof WorkInputError) { setServerInputError(error.message); pendingFocus.current = 'input'; }
-      else setNotice((error as Error).message);
+      else { setNotice((error as Error).message); if (key !== 'employee' && key !== 'work') setInspectionRequired(true); }
     }
     finally {
       // Always inspect server state after uncertain delivery, never replay a request.
@@ -194,7 +203,7 @@ export function App() {
       if (!controller.signal.aborted) setBusy(new Set(locks.current));
     }
   }
-  const cannotExecute = !connected || !work || busy.has(work.id) || !!state?.configuration || work.status === 'cancelled' || work.assignees.length !== 1 || work.attempts.some(a => a.state === 'active');
+  const cannotExecute = inspectionRequired || !connected || !work || busy.has(work.id) || !!state?.configuration || work.status === 'cancelled' || work.assignees.length !== 1 || work.attempts.some(a => a.state === 'active');
   // Compare values, not snapshot identity: unchanged polling must retain consent.
   const executionSnapshot = JSON.stringify([work, state?.configuration, state?.provider, state?.model]);
   useLayoutEffect(() => {
@@ -240,7 +249,7 @@ export function App() {
     <main id="main">
       <p id="connection" role="status" aria-live="polite">{connected ? `Connected · ${work ? workStatus(work) : 'Ready for your first work'}` : connectionError ? `Disconnected — displayed history may be out of date. ${connectionError}` : 'Connecting to your workspace…'}</p>
       <p id="configuration">{state && (state.configuration || `Provider: ${state.provider} · Model: ${state.model} · ${['anthropic', 'openai', 'bedrock', 'xai'].includes(state.provider) ? 'Real provider requests' : 'Test responses — not live validation'}`)}</p>
-      <p id="notice" role="alert">{notice}</p><button id="refresh" type="button" onClick={() => void refresh()}>Refresh connection</button>
+      <p id="notice" role="alert">{notice}</p><button id="refresh" type="button" onClick={() => { void refresh().then(ok => { if (ok) setInspectionRequired(false); }); }}>Refresh connection</button>
       <CompanyOverview workspace={state} connected={connected} error={connectionError} selectedEmployee={viewEmployee} onSelectEmployee={setViewEmployee} onOpenWork={id => {
         setViewEmployee(''); setSearch(''); setOutcome('all'); setSelected(id); historyRef.current?.focus();
       }} />
@@ -301,7 +310,7 @@ export function App() {
           <div id="detail">{work && <>
             <h3>Saved work</h3><p>Work ID: {work.id}</p><p className="badge">{workStatus(work)}</p><pre>{work.input}</pre>
             <p>Assigned to: {work.assignees.map(id => state?.employees.find(e => e.id === id)?.name || id).join(', ') || 'No employee assigned'}</p>
-            <HistoryExport key={work.id} work={work} employees={state?.employees ?? []} connected={connected} />
+            <HistoryExport key={`history/${work.id}`} work={work} employees={state?.employees ?? []} connected={connected} />
             <button type="button" ref={draftActionRef} disabled={busy.has('work') || !!replacement} onClick={() => {
               if (locks.current.has('work')) return;
               if (input.length) setReplacement(work); else loadDraft(work);
@@ -314,6 +323,12 @@ export function App() {
               <button type="button" ref={cancelRef} onClick={cancelReplacement}>Cancel</button>
               <button type="button" disabled={busy.has('work')} onClick={() => loadDraft(replacement)}>Replace draft</button>
             </section>}
+            {inspectionRequired && <p role="status">Submission needs inspection. Choose Refresh connection, inspect the attempts below, then explicitly retry. Nothing is resent automatically.</p>}
+            <SkillExecution key={`skill/${work.id}`} work={work} workspace={state!} connected={connected}
+              draft={input} disabled={cannotExecute}
+              submit={preview => { void mutate(work.id, async signal => {
+                await api(`/api/work/${encodeURIComponent(work.id)}/execute`, {preview_id: preview.preview_id, expected_runs: preview.expected_runs}, signal);
+              }); }} />
             <button id="execute" ref={executeRef} type="button" disabled={cannotExecute} onClick={() => execute()}>{work.attempts.length ? 'Retry explicitly' : 'Execute work'}</button>
             {resubmission !== null && <section ref={resubmissionRef} role="region" aria-labelledby="resend-title" aria-describedby="resend-help" onKeyDown={event => {
               if (event.key === 'Escape') { event.preventDefault(); cancelResubmission(); }

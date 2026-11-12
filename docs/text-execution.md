@@ -151,3 +151,12 @@ python -m pytest tests/test_skill_execution.py tests/test_web.py tests/test_conf
 The fixture provider exercises exact preview input, success, persisted failure,
 fresh-preview retry, stale rejection, simultaneous duplicate submission, restart
 retention and secret handling. These tests do not contact a real provider.
+
+The React work screen now exposes this same preview/admission contract. See
+[local screen flow](local-screen.md#preview-and-execute-one-skill). The UI displays
+only the server-composed preview input, sends exactly `preview_id` and
+`expected_runs` on Skill execution, and displays `attempt.skill` as saved
+provenance. Ordinary execution still sends only `expected_runs`. Configuration
+records are polled; changed server configuration also invalidates admission even
+before the next screen refresh. Unknown submission outcomes require an explicit
+history refresh and a new preview, with no automatic resend.

@@ -58,7 +58,12 @@ test('App uses existing polling, retains stale counts and drafts, reconnects and
   vi.useFakeTimers();
   let state = workspace();
   let disconnected = false;
-  const fetcher = vi.fn(async (path: string) => {
+  const fetcher = vi.fn(async (path: string, init?: RequestInit) => {
+    if (path === '/api/config/v1/skills') {
+      expect(init?.method).toBe('GET');
+      expect(init?.body).toBeUndefined();
+      return new Response(JSON.stringify({skills: []}));
+    }
     expect(path).toBe('/api/state');
     if (disconnected) throw new TypeError('network');
     return new Response(JSON.stringify(state));
@@ -85,5 +90,6 @@ test('App uses existing polling, retains stale counts and drafts, reconnects and
   expect(within(overview).getByText('Showing recorded workload.')).toBeTruthy();
   expect(within(overview).getAllByText('No assigned work.')).toHaveLength(3);
   expect((screen.getByLabelText('What would you like help with?') as HTMLTextAreaElement).value).toBe('Keep draft');
-  expect(fetcher).toHaveBeenCalledTimes(4);
+  expect(fetcher.mock.calls.filter(([path]) => path === '/api/state')).toHaveLength(4);
+  expect(fetcher.mock.calls.every(([path]) => path === '/api/state' || path === '/api/config/v1/skills')).toBe(true);
 });

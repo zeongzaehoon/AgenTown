@@ -1,7 +1,16 @@
+export interface SkillPreview {
+  schema_version: 1; preview_id: string; task_id: string; skill_id: string;
+  input: string; expected_runs: number;
+}
+export interface SkillProvenance {
+  run_id: string; preview_id: string; skill_id: string; skill_name: string;
+  instructions: string; input: string; admitted_at: number;
+}
 export interface Employee { id: string; name: string }
 export interface Attempt {
   id: string; state: 'active' | 'finished'; outcome: string | null;
   started?: number | null; ended?: number | null; participants: string[]; provider?: string; model?: string;
+  skill?: SkillProvenance; input?: string;
   output?: string | null; error?: string | null; quality?: 'unverified';
 }
 export interface Work {
