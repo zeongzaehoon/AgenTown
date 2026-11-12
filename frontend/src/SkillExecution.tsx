@@ -1,3 +1,4 @@
+import { validSkillPreview } from './execution-preview';
 import { useEffect, useRef, useState } from 'react';
 import { api, type SkillPreview, type Work, type Workspace } from './api';
 import { configurationRequest, savedSkills, type SkillRecord } from './configuration-api';
@@ -54,9 +55,9 @@ export function SkillExecution({work, workspace, connected, draft, disabled, sub
     const captured = snapshot;
     const capturedRevision = revision.current;
     try {
-      const value = await api<SkillPreview>(`/api/work/${encodeURIComponent(work.id)}/skill-preview`, {skill_id: selected});
+      const value = await api<unknown>(`/api/work/${encodeURIComponent(work.id)}/skill-preview`, {skill_id: selected});
       if (current.current !== captured || revision.current !== capturedRevision) { setMessage('Work or configuration changed. Preview again.'); return; }
-      if (value.schema_version !== 1 || value.task_id !== work.id || value.skill_id !== selected || value.expected_runs !== work.attempts.length || typeof value.input !== 'string' || !value.preview_id) throw new Error('Unsupported preview. Refresh history before trying again.');
+      if (!validSkillPreview(value, work, selected)) throw new Error('Preview response is invalid or unsupported. Refresh history and configuration, then preview again.');
       setPreview({value, snapshot: captured}); setMessage('Preview ready. Review the effective input before executing.');
     } catch (error) { setMessage((error as Error).message); }
     finally { lock.current = false; setBusy(false); }

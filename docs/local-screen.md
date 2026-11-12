@@ -1931,3 +1931,42 @@ must display `Unknown session state: <state>` and keep history readable. The
 company stop control must remain unavailable; saved-work must offer no stop for
 that session. Merely inspecting must issue no preview, start, or stop request.
 These cases are covered in `OverviewLoops.test.tsx` and `LoopExecution.test.tsx`.
+
+### Skill and Hook preview consent validation (C52-T1)
+
+Launch `agentown-web --database PATH --port 8765` using an existing saved-work
+fixture database; open http://127.0.0.1:8765 and select assigned saved work.
+Use an enabled Skill, or an enabled employee Hook whose event matches the latest
+finished attempt and whose Skill is enabled. Keep an unsaved draft in the editor.
+No credentials or live provider calls are needed for preview.
+
+With deterministic network response overrides for POST
+`/api/work/WORK_ID/skill-preview` or `/api/work/WORK_ID/hook-preview`:
+
+1. Start from a valid preview response for that saved work/configuration. Replace
+   `preview_id` with `1`, `true`, `{}`, `[]`, an empty string or whitespace.
+   Also exercise null/array responses, unsupported `schema_version`, nonstring
+   `input`, string/mismatched `expected_runs`, and mismatched `task_id`/`skill_id`.
+   For Hooks, mismatch `hook_id`, `agent_id`, `source_run_id`, `source_outcome`
+   or `event`; replace either enabled flag with `"true"`, `1`, or `false`.
+2. Explicitly click preview. Expect actionable invalid/unsupported feedback and
+   no execution button. Saved work, attempt history, selection and draft remain.
+3. Restore the valid fixture response. This alone must neither preview nor
+   authorize execution. Click preview again, inspect the effective saved input,
+   then explicitly execute once. Rapid double clicks submit only once; inspect
+   Network for one execution request. Intercept execution with the existing
+   deterministic fixture to avoid a provider call.
+
+Focused interaction coverage: from `frontend/`, run
+`npm exec -- vitest run src/execution-configuration.test.tsx src/execution-preview.test.tsx src/SkillExecution.test.tsx src/HookExecution.test.tsx`
+and `npm exec -- tsc --noEmit`. The new matrix exercises each invalid response,
+recovery, retained work/draft and explicit single submission. Only product polling
+intervals are suppressed; interaction timeout queues remain active. Integration
+repaired the configuration-recovery Hook fixture to include the required string
+`hook_name`, matching the API contract without relaxing response validation.
+All 89 tests in these four files and TypeScript checking passed during integration.
+The isolated workspace reused existing dependencies and used `--configLoader runner`
+for Vitest to avoid writing bundled configuration into the shared dependency tree.
+The consolidated supervisor frontend/build and ordinary Python gate remain pending.
+Browser validation is pending supervisor verification. Live validation is skipped,
+not passed.

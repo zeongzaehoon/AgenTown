@@ -1,3 +1,4 @@
+import { validHookPreview } from './execution-preview';
 import { useEffect, useRef, useState } from 'react';
 import { api, type HookPreview, type Work, type Workspace } from './api';
 import { configurationRequest, savedSkills, savedHooks, type HookRecord, type SkillRecord } from './configuration-api';
@@ -60,9 +61,9 @@ export function HookExecution({work, workspace, connected, draft, disabled, subm
     const captured = snapshot;
     const capturedRevision = revision.current;
     try {
-      const value = await api<HookPreview>(`/api/work/${encodeURIComponent(work.id)}/hook-preview`, {hook_id: selected});
+      const value = await api<unknown>(`/api/work/${encodeURIComponent(work.id)}/hook-preview`, {hook_id: selected});
       if (current.current !== captured || revision.current !== capturedRevision) { setMessage('Work or configuration changed. Preview again.'); return; }
-      if (value.schema_version !== 1 || value.task_id !== work.id || value.hook_id !== selected || value.agent_id !== work.assignees[0] || value.skill_id !== hooks.find(h => h.id === selected)?.skill_id || value.source_outcome !== source?.outcome || value.source_run_id !== source?.id || value.event !== event || !value.hook_enabled || !value.skill_enabled || value.expected_runs !== work.attempts.length || typeof value.input !== 'string' || !value.preview_id) throw new Error('Unsupported preview. Refresh history before trying again.');
+      if (!validHookPreview(value, work, selected, hooks.find(h => h.id === selected)?.skill_id, event)) throw new Error('Preview response is invalid or unsupported. Refresh history and configuration, then preview again.');
       setPreview({value, snapshot: captured}); setMessage('Preview ready. Review the effective input before executing.');
     } catch (error) { setMessage((error as Error).message); }
     finally { lock.current = false; setBusy(false); }

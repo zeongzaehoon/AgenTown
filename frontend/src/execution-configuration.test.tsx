@@ -29,7 +29,7 @@ test.each([{kind: 'Skill', broken: 'skills'}, {kind: 'Hook', broken: 'skills'}, 
   const fetcher = vi.fn(async (path: string) => new Response(JSON.stringify(
     path.endsWith('/skills') ? {skills: malformed && broken === 'skills' ? [null] : [skill]} :
     path.endsWith('/hooks') ? {hooks: malformed && broken === 'hooks' ? [{...hook, enabled: 'yes'}] : [hook]} :
-    {schema_version: 1, preview_id: 'p', task_id: 'w', skill_id: 's', hook_id: 'h', agent_id: 'e', expected_runs: 1, input: 'Concise Saved request', source_run_id: 'r', source_outcome: 'reported_success', event: 'run_completed', hook_enabled: true, skill_enabled: true}
+    {schema_version: 1, preview_id: 'p', task_id: 'w', skill_id: 's', hook_id: 'h', hook_name: hook.name, agent_id: 'e', expected_runs: 1, input: 'Concise Saved request', source_run_id: 'r', source_outcome: 'reported_success', event: 'run_completed', hook_enabled: true, skill_enabled: true}
   )));
   vi.stubGlobal('fetch', fetcher);
   const Component = kind === 'Skill' ? SkillExecution : HookExecution;
