@@ -179,3 +179,55 @@ mod processes {
         assert!(!fixture.paths.data.join("leaked").exists());
     }
 }
+
+#[cfg(windows)]
+#[test]
+fn windows_job_eof_arguments_timeout_and_descendant_cleanup() {
+    use agentown_desktop::{Paths, Service};
+    use std::{
+        process::Command,
+        time::{Duration, Instant},
+    };
+    let root =
+        std::env::temp_dir().join(format!("AgenTown space & unicode-é-{}", std::process::id()));
+    std::fs::create_dir_all(root.join("python")).unwrap();
+    assert!(
+        Command::new("rustc")
+            .arg("--edition=2024")
+            .arg(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/windows_fixture.rs"
+            ))
+            .arg("-o")
+            .arg(root.join("python/python.exe"))
+            .status()
+            .unwrap()
+            .success()
+    );
+    let paths = Paths::create(root.join("data"), root.join("config"), root.join("logs")).unwrap();
+    let database = paths.data.join("agentown.sqlite3");
+    std::fs::write(&database, b"retained").unwrap();
+    for _ in 0..2 {
+        let mut service =
+            Service::launch(&root, &paths, agentown_desktop::endpoint().unwrap()).unwrap();
+        assert!(service.wait_ready(Duration::from_millis(100)).is_err());
+        service.shutdown();
+        assert!(!service.alive());
+        assert!(paths.data.join("stopped").exists());
+        assert_eq!(std::fs::read(&database).unwrap(), b"retained");
+        service.shutdown();
+    }
+    std::fs::write(paths.data.join("force"), b"yes").unwrap();
+    let mut service =
+        Service::launch(&root, &paths, agentown_desktop::endpoint().unwrap()).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !paths.data.join("started").exists() {
+        assert!(Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    service.shutdown_with_budget(Duration::from_millis(50));
+    assert!(!service.alive());
+    std::thread::sleep(Duration::from_secs(3));
+    assert!(!paths.data.join("leaked").exists());
+    std::fs::remove_dir_all(root).unwrap();
+}

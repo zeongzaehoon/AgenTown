@@ -43,11 +43,7 @@ symlinks) resolving outside that copy. It does not modify the developer's Python
 The tracked `desktop/resources/README.md` keeps Tauri's resource directory present
 for native compile checks in a clean checkout. Only the build command assembles
 the runtime; a compile check with that placeholder is not a runnable distribution.
-On Windows the source command is `py -3.13 desktop/build.py`; it produces
-`desktop/target/release/agentown-desktop.exe` with its sibling `service/` directory.
-Keep them together. This is an unbundled source build, requiring the Tauri Windows
-prerequisites including WebView2. Windows installer delivery and actual Windows
-host validation are left to C25-T3.
+Windows installer commands and host-validation limits are documented below.
 
 For lifecycle checks without a webview:
 
@@ -251,3 +247,72 @@ manual visual/form interaction evidence separate from these API-driven checks.
 
 Implementation-stage evidence and outstanding validation are recorded in
 [evidence/c25-t2/implementation.md](evidence/c25-t2/implementation.md).
+
+## Windows NSIS delivery (C25-T3)
+
+On a Windows x64 build host with the development prerequisites above, including
+MSVC Build Tools and the Windows SDK, run:
+
+```powershell
+py -3.13 desktop/build.py
+```
+
+Tauri automatically merges `tauri.windows.conf.json`. The unsigned installer is
+`desktop/target/release/bundle/nsis/*-setup.exe`; the bundled application includes
+`agentown-desktop.exe`, `launch-agentown.bat`, and `service/python/python.exe`
+with all product dependencies and built React assets. The Windows ICO contains
+the existing product PNG. macOS continues using its existing configuration.
+No signing certificate, release publication or workflow dispatch is required.
+Unsigned downloads may encounter Windows reputation prompts; signing is a
+separate release step.
+
+The NSIS installer uses `currentUser`, placing registration under HKCU and
+installing without administrator access by default. The app and batch launcher
+do not request elevation. Run the installed Start menu shortcut, executable, or
+its sibling `launch-agentown.bat` from any working directory. The batch file uses
+its own quoted directory, disables delayed expansion and forwards `%*` directly
+without CALL, START or another shell expansion. Quote arguments containing
+spaces or cmd metacharacters as usual. The shell currently has no user command-line
+options; forwarding is tested with a capture executable, including spaces,
+ampersands, Unicode, exclamation marks and exit status.
+
+WebView2 uses Tauri's embedded Evergreen bootstrapper: existing WebView2 is
+reused; a machine without it needs network access to download the runtime.
+This is not an offline installer. Organization policy can restrict WebView2
+installation; install Evergreen through the organization's approved mechanism
+before launching in that case. Python and Node are never runtime prerequisites.
+The decisions follow the official [Windows installer guide](https://v2.tauri.app/distribute/windows-installer/)
+and [NSIS configuration reference](https://v2.tauri.app/reference/config/#nsisconfig).
+
+Windows data/database and configuration remain under
+`%APPDATA%\com.agentown.desktop\`; logs remain under
+`%LOCALAPPDATA%\com.agentown.desktop\logs\`. Close the application before an
+upgrade, backup or uninstall. Application replacement does not migrate these
+folders elsewhere. Uninstall should preserve them for reinstall; if the stock
+uninstaller offers a separate application-data removal option, leave it
+unchecked to retain work. Intentional data deletion is destructive and optional.
+Actual uninstall/reinstall preservation still needs Windows-host evidence.
+
+`.github/workflows/windows-desktop.yml` configures Windows Server 2022 CI to run
+build-helper and real cmd launcher tests, the separate desktop Rust lifecycle
+suite (including a Windows Job Object fixture), the complete bundled-runtime
+readiness/EOF/persistence check, and NSIS assembly. It installs that installer
+in the disposable runner account and runs `desktop/check_windows.py` against the
+installed files. That smoke check copies the app outside the checkout into a
+spaced Unicode path, empties PATH, requires the React rendered signal, saves an
+employee and work, closes the native window, requires service exit, restarts and
+compares saved IDs/content. It uses the runner account's normal platform data
+folders; use a disposable Windows account when running it manually. No LLM calls
+occur. Graphical runner restrictions cause a failing smoke check, never a silent
+pass. Installer and actual log files are retained with `upload-artifact`, including
+on failure; creating this workflow does not execute it or publish a release.
+
+Remaining Windows-host evidence: actual CI build and install output; launcher
+argument and Windows Job Object fixture results; native first-run/render and
+restart results; standard-user/no-developer-runtime installation; missing-WebView2
+bootstrapper behavior; duplicate-launch and unexpected-service dialog inspection;
+normal and forced process cleanup; uninstall/reinstall with saved employee/work
+IDs; failed upgrade/interrupted install recovery; and manual visual/form use.
+None was executed by the implementation invocation on macOS. Supervisor browser
+and consolidated product verification are also pending. macOS delivery evidence
+is not Windows proof.

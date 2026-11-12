@@ -17,7 +17,10 @@ RESOURCES = DESKTOP / "resources"
 
 
 def run(*args, cwd=ROOT):
-    subprocess.run([str(arg) for arg in args], cwd=cwd, check=True)
+    command = [str(arg) for arg in args]
+    if os.name == "nt" and command[0] == "npm":
+        command[0] = shutil.which("npm.cmd") or "npm.cmd"
+    subprocess.run(command, cwd=cwd, check=True)
 
 
 def managed_runtime(managed):
@@ -79,10 +82,11 @@ def main():
     # executables on PATH, before embedding it in the native distribution.
     run(sys.executable, DESKTOP / "check_runtime.py", RESOURCES)
     if os.name == "nt":
-        run("cargo", "tauri", "build", "--no-bundle", cwd=DESKTOP)
+        run("cargo", "tauri", "build", "--bundles", "nsis", cwd=DESKTOP)
         # Windows resource_dir is the executable directory for an unbundled app.
         shutil.copytree(RESOURCES, DESKTOP / "target/release/service", dirs_exist_ok=True)
-        print("Desktop executable: desktop/target/release/agentown-desktop.exe (keep service/ beside it)")
+        shutil.copy2(DESKTOP / "launch-agentown.bat", DESKTOP / "target/release/launch-agentown.bat")
+        print("Unsigned Windows installer: desktop/target/release/bundle/nsis/*-setup.exe")
     else:
         run("cargo", "tauri", "build", "--bundles", "app", cwd=DESKTOP)
         if sys.platform == "darwin":

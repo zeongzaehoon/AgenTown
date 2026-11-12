@@ -1,0 +1,55 @@
+name: Windows desktop installer
+on:
+  pull_request:
+    paths: ['desktop/**', 'frontend/**', 'python/**', 'rust/**', '.github/workflows/windows-desktop.yml']
+  push:
+    branches: [main]
+    paths: ['desktop/**', 'frontend/**', 'python/**', 'rust/**', '.github/workflows/windows-desktop.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: astral-sh/setup-uv@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Tauri build CLI
+        run: cargo install tauri-cli --version '^2' --locked
+      - name: Deterministic packaging and launcher checks
+        run: |
+          python desktop/tests/test_build.py
+          python desktop/tests/test_windows_delivery.py
+      - name: Build unsigned NSIS installer and test service lifecycle
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force windows-evidence
+          python desktop/build.py 2>&1 | Tee-Object windows-evidence/build.txt
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Install in disposable runner account
+        shell: pwsh
+        run: |
+          $installer = @(Get-ChildItem desktop/target/release/bundle/nsis/*-setup.exe)
+          if ($installer.Count -ne 1) { throw 'Expected one NSIS installer' }
+          $destination = Join-Path $env:RUNNER_TEMP 'AgenTown installed space'
+          $result = Start-Process -FilePath $installer[0].FullName -ArgumentList "/S /D=$destination" -Wait -PassThru
+          if ($result.ExitCode -ne 0) { throw "Installer exit $($result.ExitCode)" }
+          python desktop/check_windows.py "$destination" 2>&1 | Tee-Object windows-evidence/installed.txt
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Retain unsigned installer and actual check output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agentown-windows-unsigned-x64
+          path: |
+            desktop/target/release/bundle/nsis/*-setup.exe
+            windows-evidence/
+          if-no-files-found: warn
