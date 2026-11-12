@@ -16,6 +16,37 @@ export interface ConnectionSetup {
   clients: { id: string; name: string; readiness: 'unknown'; status?: {detected: boolean | null; configured: 'unknown'; connected: 'unverified'; exercised: 'unverified'}; platforms: Platform[] }[];
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+function isText(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+function hasUniqueIds(items: Record<string, unknown>[]): boolean {
+  return new Set(items.map(item => item.id)).size === items.length;
+}
+// Validate every rendered/copied field atomically. Inspection must never trim or
+// rewrite configuration text, and absent optional presentation hints stay valid.
+function isConnectionSetup(value: unknown): value is ConnectionSetup {
+  if (!isRecord(value) || value.schema_version !== 1 || value.workflow_version !== 1 || value.transport !== 'stdio') return false;
+  if (!['evidence', 'preparation', 'consent', 'recovery'].every(key => isText(value[key]))) return false;
+  if (!Array.isArray(value.actions) || !value.actions.length || !value.actions.every(isText)) return false;
+  if (!Array.isArray(value.clients) || !value.clients.length) return false;
+  if (!value.clients.every((client: unknown) => {
+    if (!isRecord(client) || !isText(client.id) || !isText(client.name) || client.readiness !== 'unknown') return false;
+    if ('status' in client) {
+      const status = client.status;
+      if (!isRecord(status) || ![true, false, null].includes(status.detected as boolean | null) ||
+          status.configured !== 'unknown' || status.connected !== 'unverified' || status.exercised !== 'unverified') return false;
+    }
+    if (!Array.isArray(client.platforms) || !client.platforms.length) return false;
+    return client.platforms.every((platform: unknown) => isRecord(platform) &&
+      ['id', 'name', 'configuration', 'destination', 'inspection'].every(key => isText(platform[key])) &&
+      (!('filename' in platform) || isText(platform.filename))) && hasUniqueIds(client.platforms);
+  })) return false;
+  return hasUniqueIds(value.clients);
+}
+
 interface DiagnosticResponse {
   schema_version: 1;
   status: 'passed' | 'timeout' | 'failed' | 'busy';
@@ -177,9 +208,9 @@ function Setup({workspaceConnected, openClient, active}: {active: boolean; works
     const request = new AbortController(); controller.current = request;
     setLoading(true);
     try {
-      const next = await api<ConnectionSetup>('/api/connections/v1', {}, request.signal);
+      const next = await api<unknown>('/api/connections/v1', {}, request.signal);
       if (request.signal.aborted) return;
-      if (next.schema_version !== 1 || next.workflow_version !== 1 || next.transport !== 'stdio' || !next.clients?.length || next.clients.some(c => c.readiness !== 'unknown' || !c.platforms?.length)) throw new Error('Unsupported setup');
+      if (!isConnectionSetup(next)) throw new Error('Unsupported setup');
       setData(next); setError(false);
     } catch { if (!request.signal.aborted) setError(true); }
     finally { if (!request.signal.aborted) setLoading(false); }
@@ -236,7 +267,7 @@ function Setup({workspaceConnected, openClient, active}: {active: boolean; works
     <p>Opening setup does not connect a client or execute provider work.</p>
     <p>Workspace: {workspaceConnected ? 'Connected' : 'Disconnected — loaded work may be stale'}. This does not establish an external client connection.</p>
     <button type="button" disabled={loading} onClick={() => void refresh()}>Refresh setup</button>
-    <p role="status">{loading ? 'Loading setup…' : error ? 'Setup service disconnected or unavailable. Loaded instructions may be stale. Check the local server and refresh setup.' : 'Setup service available.'}</p>
+    <p role="status" aria-live="polite" aria-atomic="true">{loading ? 'Loading setup…' : error ? `Setup service disconnected or unavailable. ${data ? 'Previously loaded instructions may be stale.' : 'No setup instructions are available.'} Check the local server and refresh setup.` : 'Setup service available.'}</p>
     {data && !client && <p role="status">Selected client setup unavailable. Refresh setup to try again. Detected: Unknown. Configured: Unknown. Connected: Unverified. Exercised: Unverified.</p>}
     {!data && <p>Detected: Unknown. Configured: Unknown. Connected: Unverified. Exercised: Unverified.</p>}
     {data && <>

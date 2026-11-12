@@ -11,6 +11,95 @@ const setup: ConnectionSetup = {
   clients: ['codex', 'claude-code'].map(id => ({id, name: id === 'codex' ? 'Codex' : 'Claude Code', readiness: 'unknown', platforms: ['macos', 'windows'].map(p => ({id: p, name: p, destination: `${id}-${p}`, configuration: `config-${id}-${p}`, inspection: 'Inspect /mcp'}))})),
 };
 
+const recoverySetup: ConnectionSetup = {...setup, clients: [...fragmentClients(), {
+  ...setup.clients[0], id: 'chatgpt', name: 'ChatGPT',
+  status: {detected: null, configured: 'unknown', connected: 'unverified', exercised: 'unverified'},
+  platforms: [{...setup.clients[0].platforms[0], configuration: 'Provide HTTPS\nProvide OAuth\n', filename: 'chatgpt-prerequisites.txt'}],
+}]};
+function fragmentClients() {
+  return setup.clients.map(client => ({...client, platforms: client.platforms.map(platform => ({
+    ...platform, configuration: `  ${platform.configuration}\n\n  trailing space \n`, filename: `${client.id}-${platform.id}.txt`,
+  }))}));
+}
+// Mutations include unselected clients/platforms: a response is accepted as a
+// whole, never just the currently visible fragment.
+const malformedFields: [string, unknown][] = [
+  ...['schema_version', 'workflow_version', 'transport', 'evidence', 'preparation', 'consent', 'recovery', 'actions', 'clients']
+    .flatMap(field => [[field, undefined], [field, {}]] as [string, unknown][]),
+  ['actions', []], ['actions.0', null], ['actions.0', '  '], ['clients', []], ['clients.1', null],
+  ...['id', 'name', 'readiness', 'platforms'].flatMap(field =>
+    [[`clients.1.${field}`, undefined], [`clients.1.${field}`, 42]] as [string, unknown][]),
+  ['clients.1.id', 'codex'], ['clients.1.platforms', []], ['clients.1.platforms.1', null],
+  ...['id', 'name', 'configuration', 'destination', 'inspection'].flatMap(field =>
+    [[`clients.1.platforms.1.${field}`, undefined], [`clients.1.platforms.1.${field}`, {}], [`clients.1.platforms.1.${field}`, '  ']] as [string, unknown][]),
+  ['clients.1.platforms.1.id', 'macos'], ['clients.1.platforms.1.filename', null],
+  ['clients.1.platforms.1.filename', ''], ['clients.1.platforms.1.filename', 17],
+  ['clients.2.status', null], ['clients.2.status.detected', undefined], ['clients.2.status.detected', 'yes'],
+  ...['configured', 'connected', 'exercised'].flatMap(field =>
+    [[`clients.2.status.${field}`, undefined], [`clients.2.status.${field}`, 'verified']] as [string, unknown][]),
+  ['clients.2.platforms.0.configuration', undefined], ['clients.2.platforms.0.configuration', []],
+  ['clients.2.platforms.0.configuration', '  '],
+];
+
+test.each(malformedFields)('setup recovery rejects malformed %s (%j) atomically', async (path, invalid) => {
+  const malformed = structuredClone(recoverySetup);
+  const keys = path.split('.');
+  let target: Record<string, unknown> = malformed as unknown as Record<string, unknown>;
+  for (const key of keys.slice(0, -1)) target = target[key] as Record<string, unknown>;
+  target[keys[keys.length - 1]] = invalid;
+  let response: unknown = malformed;
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(response))));
+  const user = userEvent.setup();
+  render(<Connections workspaceConnected />);
+  await user.click(screen.getByRole('button', {name: 'Open connections'}));
+  const unavailable = await screen.findByText(/No setup instructions are available/);
+  expect(unavailable.getAttribute('role')).toBe('status');
+  expect(screen.queryByLabelText('Client')).toBeNull();
+  expect(screen.queryByLabelText('Setup instructions')).toBeNull();
+  expect(screen.queryByRole('button', {name: /Copy|Download/})).toBeNull();
+
+  response = recoverySetup;
+  await user.click(screen.getByRole('button', {name: 'Refresh setup'}));
+  await screen.findByLabelText('Client');
+  // Exercise both the local fragment and the ChatGPT checklist paths.
+  const remote = path.startsWith('clients.2');
+  await user.selectOptions(screen.getByLabelText('Client'), remote ? 'chatgpt' : 'claude-code');
+  if (!remote) await user.selectOptions(screen.getByLabelText('Platform'), 'windows');
+  const previous = (screen.getByLabelText('Setup instructions') as HTMLTextAreaElement).value;
+  const configuration = remote ? recoverySetup.clients[2].platforms[0].configuration : recoverySetup.clients[1].platforms[1].configuration;
+  response = malformed;
+  await user.click(screen.getByRole('button', {name: 'Refresh setup'}));
+  await screen.findByText(/Previously loaded instructions may be stale/);
+  expect((screen.getByLabelText('Setup instructions') as HTMLTextAreaElement).value).toBe(previous);
+  expect((screen.getByLabelText('Client') as HTMLSelectElement).value).toBe(remote ? 'chatgpt' : 'claude-code');
+  const copy = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue();
+  await user.click(screen.getByRole('button', {name: remote ? 'Copy setup instructions' : 'Copy configuration'}));
+  expect(copy).toHaveBeenLastCalledWith(remote ? previous : configuration);
+  const create = vi.fn((_blob: Blob) => 'blob:valid-setup');
+  vi.stubGlobal('URL', {createObjectURL: create, revokeObjectURL: vi.fn()});
+  const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+  await user.click(screen.getByRole('button', {name: 'Download setup artifact'}));
+  expect(create).toHaveBeenCalledOnce();
+  expect(create.mock.calls[0][0].size).toBe(new Blob([configuration]).size);
+  expect(click).toHaveBeenCalledOnce();
+  expect(screen.getByText(/Configured: Unknown. Connected: Unverified. Exercised: Unverified/)).toBeTruthy();
+  response = {...recoverySetup, preparation: 'Recovered setup instructions.'};
+  await user.click(screen.getByRole('button', {name: 'Refresh setup'}));
+  await screen.findByText('Setup service available.');
+  expect((screen.getByLabelText('Setup instructions') as HTMLTextAreaElement).value).toContain('Recovered setup instructions.');
+  expect(screen.queryByText(/Previously loaded instructions may be stale/)).toBeNull();
+});
+
+test.each([null, [], 'invalid'])('non-object setup %j is unavailable and retryable', async response => {
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(response))));
+  const user = userEvent.setup();
+  render(<Connections workspaceConnected />);
+  await user.click(screen.getByRole('button', {name: 'Open connections'}));
+  await screen.findByText(/No setup instructions are available/);
+  expect(screen.queryByRole('button', {name: /Copy|Download/})).toBeNull();
+  expect((screen.getByRole('button', {name: 'Refresh setup'}) as HTMLButtonElement).disabled).toBe(false);
+});
+
 test('keyboard selection copies exact instructions without establishing readiness or mutating work', async () => {
   const fetcher = vi.fn(async () => new Response(JSON.stringify(setup)));
   vi.stubGlobal('fetch', fetcher);

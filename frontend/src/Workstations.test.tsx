@@ -84,7 +84,7 @@ test('requested setup receives focus on initial failure, retains stale evidence 
   expect(screen.getByText(/Detected: Installation hint only/)).toBeTruthy();
   response = null;
   await user.click(screen.getByRole('button', {name: 'Refresh setup'}));
-  expect(await screen.findByText(/Loaded instructions may be stale/)).toBeTruthy();
+  expect(await screen.findByText(/Previously loaded instructions may be stale/)).toBeTruthy();
   view.rerender(<Connections workspaceConnected={false} openClient={{id: 'claude-code'}} />);
   await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('heading', {name: 'Claude Code setup'})));
   expect(screen.getByText(/Detected: Not detected \(inconclusive\)/)).toBeTruthy();

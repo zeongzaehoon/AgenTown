@@ -1690,3 +1690,39 @@ This isolated implementation workspace has no frontend node_modules; execution,
 frontend build, ordinary Python checks and browser validation remain pending
 supervisor verification under its selected profile. Live LLM calls remain skipped,
 not passed. No external client or credentials are required for this exercise.
+
+### Recover from malformed Connections setup (C46-T1)
+
+Launch `agentown-web --database PATH --port 8765` with an existing database, or
+open the desktop product, then open **Connections**. The screen validates the
+complete setup response before replacing instructions, including unselected
+clients/platforms, action text, optional status/filename fields when present,
+and ChatGPT prerequisite text. Configuration whitespace is preserved exactly.
+
+For deterministic reproduction, run `cd frontend` then
+`npx vitest run src/Connections.test.tsx src/Workstations.test.tsx` and
+`npx tsc --noEmit` with frontend dependencies available. The setup recovery cases
+serve a malformed initial response, a valid retry, a malformed refresh, and a
+valid recovery. Cases cover missing/invalid actions, client and platform fields,
+configuration text, duplicate selection IDs and invalid status hints, including
+ChatGPT. Existing clipboard, download and workstation interaction cases remain.
+
+For manual inspection, use a development response override for
+`/api/connections/v1` (do not change client settings). Remove `actions`, replace
+it with an object, or replace any client's platform `configuration` with null.
+Open Connections: the live status announces unavailable instructions, Refresh
+setup stays usable, and no copy/download artifacts are offered. Restore the
+original response and refresh, select a client/platform, then apply the malformed
+override again and refresh. Previous selections and exact valid instructions
+remain available with explicit stale feedback. Repeat using ChatGPT: malformed
+checklist text cannot crash rendering or replace the valid checklist. Restore
+the original response and refresh to clear the stale status and load current
+instructions. Copy/download still use the validated artifact; readiness remains
+unknown and connection/exercise remain unverified throughout.
+
+Integration validation passed TypeScript checking (`tsc --noEmit`) and the two
+focused interaction files above (113 tests). The workstation stale-state assertion
+now matches the explicit “Previously loaded instructions may be stale” feedback.
+The supervisor-selected consolidated profile and browser checks remain pending.
+No live provider or external client configuration is required. Live LLM tests
+remain skipped.
