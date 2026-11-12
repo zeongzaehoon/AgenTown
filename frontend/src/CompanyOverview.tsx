@@ -1,3 +1,4 @@
+import { workstationClients, type ConnectionClientId } from './Connections';
 import { SkillBooks } from './SkillBooks';
 import { OverviewLoops } from './OverviewLoops';
 import { classifyWork, type WorkOutcome, type Workspace } from './api';
@@ -8,7 +9,8 @@ const categories: {key: WorkOutcome; label: string}[] = [
   {key: 'other', label: 'Other recorded work'},
 ];
 
-export function CompanyOverview({workspace, connected, error, onOpenWork, selectedEmployee = '', onSelectEmployee, onOpenSkill}: {
+export function CompanyOverview({workspace, connected, error, onOpenWork, selectedEmployee = '', onSelectEmployee, onOpenSkill, onOpenClient}: {
+  onOpenClient?: (id: ConnectionClientId) => void;
   onOpenSkill?: (id: string) => void; workspace: Workspace | null; connected: boolean; error: string; onOpenWork: (id: string) => void; selectedEmployee?: string; onSelectEmployee?: (id: string) => void;
 }) {
   const employees = workspace?.employees ?? [];
@@ -31,6 +33,15 @@ export function CompanyOverview({workspace, connected, error, onOpenWork, select
     <p role="status">{!workspace
       ? error ? 'Company data unavailable. Refresh connection to try again.' : 'Loading company overview…'
       : connected ? 'Showing recorded workload.' : 'Disconnected — showing stale company data from the last successful refresh.'}</p>
+    <section aria-labelledby="workstations-title">
+      <h3 id="workstations-title">Client workstations</h3>
+      <p>Choose a workstation to open Connections setup and inspect detected, configured, connected and exercised evidence. These desks do not indicate an active client or provider execution.</p>
+      <div className="office-floor">{workstationClients.map(client => <button type="button" className="office-desk client-workstation" key={client.id}
+        aria-label={`Open ${client.name} workstation setup`} aria-controls="connections-content" disabled={!onOpenClient}
+        onClick={() => onOpenClient?.(client.id)}>
+        <span className="workstation-monitor" aria-hidden="true">▣</span><strong>{client.name}</strong><span>Open client setup</span>
+      </button>)}</div>
+    </section>
     <SkillBooks onOpenSkill={onOpenSkill} />
     <OverviewLoops workspace={workspace} onOpenWork={onOpenWork} />
     {workspace && <>

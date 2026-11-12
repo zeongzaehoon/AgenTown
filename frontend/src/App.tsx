@@ -4,7 +4,7 @@ import { SkillExecution } from './SkillExecution';
 import { Configuration } from './Configuration';
 import { Teams } from './Teams';
 import { CompanyOverview } from './CompanyOverview';
-import { Connections } from './Connections';
+import { Connections, type OpenClientRequest } from './Connections';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { HistoryExport } from './history-export';
 import { advice, api, classifyWork, type WorkOutcome, workStatus, workInputError, WorkInputError, type Attempt, type Work, type Workspace } from './api';
@@ -101,6 +101,7 @@ export function App() {
   const [inspectionRequired, setInspectionRequired] = useState(false);
   const [selected, setSelected] = useState('');
   const [search, setSearch] = useState('');
+  const [clientRequest, setClientRequest] = useState<OpenClientRequest | null>(null);
   const [skillRequest, setSkillRequest] = useState<{id: string} | null>(null);
   const [viewEmployee, setViewEmployee] = useState('');
   const [outcome, setOutcome] = useState<WorkOutcome | 'all'>('all');
@@ -267,7 +268,7 @@ export function App() {
       <p id="connection" role="status" aria-live="polite">{connected ? `Connected · ${work ? workStatus(work) : 'Ready for your first work'}` : connectionError ? `Disconnected — displayed history may be out of date. ${connectionError}` : 'Connecting to your workspace…'}</p>
       <p id="configuration">{state && (state.configuration || `Provider: ${state.provider} · Model: ${state.model} · ${['anthropic', 'openai', 'bedrock', 'xai'].includes(state.provider) ? 'Real provider requests' : 'Test responses — not live validation'}`)}</p>
       <p id="notice" role="alert">{notice}</p><button id="refresh" type="button" onClick={() => { void refresh().then(ok => { if (ok) setInspectionRequired(false); }); }}>Refresh connection</button>
-      <CompanyOverview onOpenSkill={id => setSkillRequest({id})} workspace={state} connected={connected} error={connectionError} selectedEmployee={viewEmployee} onSelectEmployee={setViewEmployee} onOpenWork={id => {
+      <CompanyOverview onOpenClient={id => setClientRequest({id})} onOpenSkill={id => setSkillRequest({id})} workspace={state} connected={connected} error={connectionError} selectedEmployee={viewEmployee} onSelectEmployee={setViewEmployee} onOpenWork={id => {
         setViewEmployee(''); setSearch(''); setOutcome('all'); setSelected(id); historyRef.current?.focus();
       }} />
       <Teams workspace={state} connected={connected} onSelectEmployee={id => {
@@ -378,7 +379,7 @@ export function App() {
         </section></div>
       <footer>Responses are unverified. Read and check the full result before using it.</footer>
       <Configuration workspace={state} openSkill={skillRequest} />
-      <Connections workspaceConnected={connected} />
+      <Connections openClient={clientRequest} workspaceConnected={connected} />
     </main>
   </>;
 }

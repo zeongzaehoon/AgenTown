@@ -1504,3 +1504,29 @@ unavailable, stale snapshots, duplicate names and native keyboard activation;
 the App test covers ID navigation, focus, repeated opening, draft retention and
 an unavailable selection. Supervisor browser validation is pending for this
 change. Live provider calls are skipped under the current user policy.
+
+### Company-office client workstations
+
+Launch `agentown-web --database PATH --port 8765` with your product database,
+then open `http://127.0.0.1:8765`. In Company overview, Tab to **Open Codex
+workstation setup** (or Claude Code, Claude Desktop, Cursor or ChatGPT) and press
+Enter or Space. Connections opens with that client selected and keyboard focus
+on its setup heading, including when the setup service is unavailable. Continue
+with Tab to Refresh setup, Client, Platform and the existing copy/download
+controls. ChatGPT still requires the remote HTTPS prerequisites shown there.
+
+Type a work draft or edit a Skill in Configuration, then open several
+workstations: those drafts remain intact. Choose a platform, hide Connections
+and reopen a workstation: the platform choice and loaded setup remain available.
+Opening a workstation only navigates; it never saves configuration, edits another
+application's settings or executes work. Installation detection is an inconclusive
+hint; configured remains unknown, connected and exercised remain unverified.
+Workspace connectivity does not establish client connectivity. Failed refreshes
+retain explicitly stale instructions; an absent selected client shows unavailable
+setup rather than another client's instructions. Refresh setup to recover.
+
+Deterministic coverage: with frontend dependencies installed, run
+`cd frontend && npx vitest run src/Workstations.test.tsx src/Connections.test.tsx`
+and `npx tsc --noEmit`. Supervisor verification supplies the current check profile
+and any browser checks. These steps do not prove actual client integration or
+live-provider execution; live LLM validation is skipped under the user policy.

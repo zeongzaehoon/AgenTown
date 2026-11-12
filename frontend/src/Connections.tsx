@@ -1,5 +1,13 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { api } from './api';
+
+export const workstationClients = [
+  {id: 'codex', name: 'Codex'}, {id: 'claude-code', name: 'Claude Code'},
+  {id: 'claude-desktop', name: 'Claude Desktop'}, {id: 'cursor', name: 'Cursor'},
+  {id: 'chatgpt', name: 'ChatGPT'},
+] as const;
+export type ConnectionClientId = typeof workstationClients[number]['id'];
+export interface OpenClientRequest { id: ConnectionClientId }
 
 interface Platform { id: string; name: string; configuration: string; destination: string; inspection: string; filename?: string }
 export interface ConnectionSetup {
@@ -8,23 +16,34 @@ export interface ConnectionSetup {
   clients: { id: string; name: string; readiness: 'unknown'; status?: {detected: boolean | null; configured: 'unknown'; connected: 'unverified'; exercised: 'unverified'}; platforms: Platform[] }[];
 }
 
-export function Connections({workspaceConnected}: {workspaceConnected: boolean}) {
+export function Connections({workspaceConnected, openClient}: {workspaceConnected: boolean; openClient?: OpenClientRequest | null}) {
   const [open, setOpen] = useState(false);
+  const [visited, setVisited] = useState(false);
+  useLayoutEffect(() => {
+    if (openClient) { setVisited(true); setOpen(true); }
+  }, [openClient]);
   return <section aria-labelledby="connections-heading">
     <h2 id="connections-heading">Connections</h2>
-    <button type="button" aria-expanded={open} aria-controls="connections-content" onClick={() => setOpen(!open)}>{open ? 'Hide connections' : 'Open connections'}</button>
-    <div id="connections-content" hidden={!open}>{open && <Setup workspaceConnected={workspaceConnected} />}</div>
+    <button type="button" aria-expanded={open} aria-controls="connections-content" onClick={() => {setVisited(true); setOpen(!open);}}>{open ? 'Hide connections' : 'Open connections'}</button>
+    <div id="connections-content" hidden={!open}>{visited && <Setup active={open} workspaceConnected={workspaceConnected} openClient={openClient} />}</div>
   </section>;
 }
 
-function Setup({workspaceConnected}: {workspaceConnected: boolean}) {
+function Setup({workspaceConnected, openClient, active}: {active: boolean; workspaceConnected: boolean; openClient?: OpenClientRequest | null}) {
   const [data, setData] = useState<ConnectionSetup | null>(null);
-  const [clientId, setClientId] = useState('codex');
+  const [clientId, setClientId] = useState<string>(openClient?.id ?? 'codex');
   const [platformId, setPlatformId] = useState('macos');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
   const [feedback, setFeedback] = useState('');
   const [copying, setCopying] = useState(false);
+  const heading = useRef<HTMLHeadingElement | null>(null);
+  useLayoutEffect(() => {
+    if (openClient) { setClientId(openClient.id); setFeedback(''); }
+  }, [openClient]);
+  useLayoutEffect(() => {
+    if (openClient && active) heading.current?.focus();
+  }, [openClient, active]);
   const controller = useRef<AbortController | null>(null);
   const copyingLock = useRef(false);
   async function refresh() {
@@ -40,7 +59,7 @@ function Setup({workspaceConnected}: {workspaceConnected: boolean}) {
     finally { if (!request.signal.aborted) setLoading(false); }
   }
   useEffect(() => { void refresh(); return () => controller.current?.abort(); }, []);
-  const client = data?.clients.find(c => c.id === clientId) ?? data?.clients[0];
+  const client = data?.clients.find(c => c.id === clientId);
   const platform = client?.platforms.find(p => p.id === platformId) ?? client?.platforms[0];
   const instructions = data && client && platform ? [
     `${client.name} · ${platform.name} · ${client.id === 'chatgpt' ? 'Remote HTTPS prerequisites' : 'stdio workflow v1'}`, data.preparation,
@@ -73,13 +92,23 @@ function Setup({workspaceConnected}: {workspaceConnected: boolean}) {
     } catch { setFeedback('Could not copy. Clipboard access is unavailable or denied. Select the setup instructions below and copy manually.'); }
     finally { copyingLock.current = false; setCopying(false); }
   }
+  const clientName = workstationClients.find(c => c.id === clientId)?.name ?? client?.name ?? clientId;
   return <>
+    <h3 tabIndex={-1} ref={heading}>{clientName} setup</h3>
+    <p>Opening setup does not connect a client or execute provider work.</p>
     <p>Workspace: {workspaceConnected ? 'Connected' : 'Disconnected — loaded work may be stale'}. This does not establish an external client connection.</p>
     <button type="button" disabled={loading} onClick={() => void refresh()}>Refresh setup</button>
     <p role="status">{loading ? 'Loading setup…' : error ? 'Setup service disconnected or unavailable. Loaded instructions may be stale. Check the local server and refresh setup.' : 'Setup service available.'}</p>
-    {data && client && platform && <>
+    {data && !client && <p role="status">Selected client setup unavailable. Refresh setup to try again. Detected: Unknown. Configured: Unknown. Connected: Unverified. Exercised: Unverified.</p>}
+    {!data && <p>Detected: Unknown. Configured: Unknown. Connected: Unverified. Exercised: Unverified.</p>}
+    {data && <>
       <label htmlFor="connection-client">Client</label>
-      <select id="connection-client" value={client.id} onChange={e => {setClientId(e.target.value); setFeedback('');}}>{data.clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
+      <select id="connection-client" value={clientId} onChange={e => {setClientId(e.target.value); setFeedback('');}}>
+        {!client && <option value={clientId}>{clientName} · setup unavailable</option>}
+        {data.clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+      </select>
+    </>}
+    {data && client && platform && <>
       <label htmlFor="connection-platform">Platform</label>
       <select id="connection-platform" value={platform.id} onChange={e => {setPlatformId(e.target.value); setFeedback('');}}>{client.platforms.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
       <p>Client readiness: Unknown</p>

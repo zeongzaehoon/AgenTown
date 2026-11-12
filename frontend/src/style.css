@@ -32,3 +32,8 @@
 .skill-book { display: flex; flex-direction: column; align-items: flex-start; text-align: left; gap: 6px; border-left: 12px double #d5d9bc; overflow-wrap: anywhere; min-width: 0; }
 .skill-book:focus-visible { outline: 4px solid #a33b00; outline-offset: 5px; }
 @media (prefers-reduced-motion: reduce) { .skill-library * { animation: none !important; transition: none !important; scroll-behavior: auto; } }
+
+.client-workstation { display: flex; flex-direction: column; align-items: center; gap: .5rem; }
+.workstation-monitor { font-size: 2.5rem; border-bottom: .3rem solid currentColor; }
+.client-workstation { color: #24362e; }
+.client-workstation:hover { background: #e5eee5; }
