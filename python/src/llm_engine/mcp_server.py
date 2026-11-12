@@ -70,6 +70,42 @@ class Skills(Record):
     skills: list[Skill]
 
 
+class Hook(Record):
+    id: UUID
+    name: str
+    enabled: bool
+    target_kind: Literal["agent", "team"]
+    target_id: UUID
+    event: Literal["task_created", "run_completed", "run_failed"]
+    skill_id: UUID
+
+
+class Hooks(Record):
+    schema_version: Literal[1] = 1
+    hooks: list[Hook]
+
+
+class HookProvenance(Record):
+    schema_version: Literal[1] = 1
+    run_id: UUID
+    preview_id: str
+    task_id: UUID
+    hook_id: UUID
+    hook_name: str
+    hook_enabled: Literal[True]
+    target_kind: Literal["agent"]
+    agent_id: UUID
+    event: Literal["run_completed", "run_failed"]
+    source_run_id: UUID
+    source_outcome: Literal["reported_success", "failure"]
+    skill_id: UUID
+    skill_name: str
+    skill_enabled: Literal[True]
+    instructions: str
+    input: str
+    admitted_at: int
+
+
 class SkillPreview(Record):
     schema_version: Literal[1] = 1
     preview_id: str
@@ -103,6 +139,7 @@ class Run(Record):
     participants: list[UUID]
     execution: Execution | None
     skill: SkillProvenance | None = None
+    hook: HookProvenance | None = None
 
 
 class WorkHistory(Record):
@@ -173,6 +210,11 @@ def create_server(database: str, *, provider_factory=None, auth=None) -> FastMCP
         """List saved Skill IDs, names and enabled configuration; does not execute."""
         return Skills(skills=[Skill(id=row["id"], name=row["name"], enabled=row["enabled"])
                               for row in query(_native.list_skills)])
+
+    @server.tool(annotations=annotations)
+    def list_hooks_v1() -> Hooks:
+        """List saved Hook configuration, including disabled Hooks; does not execute."""
+        return Hooks(hooks=[Hook(**row) for row in query(_native.list_hooks)])
 
     @server.tool(annotations=mutations)
     def preview_skill_work_v1(task_id: str, skill_id: str) -> SkillPreview:
@@ -261,6 +303,8 @@ def create_server(database: str, *, provider_factory=None, auth=None) -> FastMCP
         sources = dict(query(_native.execution_sources))
         provenance = {row["run_id"]: SkillProvenance(**row)
                       for row in query(_native.skill_provenance)}
+        hooks = {row["run_id"]: HookProvenance(**row)
+                 for row in query(_native.hook_provenance)}
         results = {row[0]: Execution(**record(row)) for row in executions}
         saved = next(((work, runs) for work, runs in tasks if work[0] == task_id), None)
         if saved is None:
@@ -271,7 +315,7 @@ def create_server(database: str, *, provider_factory=None, auth=None) -> FastMCP
             attempts.append(Run(**dict(zip(("id", "task_id", "stage", "reporting_source",
                 "started_at", "ended_at", "state", "outcome", "participants"), row, strict=True)),
                 execution=results.get(row[0]), declared_source=sources.get(row[0]),
-                skill=provenance.get(row[0])))
+                skill=provenance.get(row[0]), hook=hooks.get(row[0])))
         return WorkHistory(task=work, attempts=attempts)
 
     return server

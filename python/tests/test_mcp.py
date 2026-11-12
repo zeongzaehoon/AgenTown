@@ -92,10 +92,10 @@ async def discover(client):
     assert set(tools) == {"list_agents", "get_agent", "list_tasks", "get_task",
                           "create_employee_v1", "save_text_work_v1",
                           "execute_text_work_v1", "get_work_history_v1", "list_skills_v1",
-                          "preview_skill_work_v1", "execute_skill_work_v1"}
+                          "preview_skill_work_v1", "execute_skill_work_v1", "list_hooks_v1"}
     for name, tool in tools.items():
         assert tool.annotations.readOnlyHint == (name in {
-            "list_agents", "get_agent", "list_tasks", "get_task", "list_skills_v1"})
+            "list_agents", "get_agent", "list_tasks", "get_task", "list_skills_v1", "list_hooks_v1"})
         assert tool.outputSchema
         jsonschema.Draft202012Validator.check_schema(tool.outputSchema)
         if name.endswith("_v1"):
@@ -292,6 +292,7 @@ async def test_explicit_workflow_retry_failure_and_reopen(cli, tmp_path, server_
         assert recovered["output"] and recovered["run_id"] != failure["run_id"]
         history = await call(client, tools, "get_work_history_v1", {"task_id": work["id"]})
         assert all(run["skill"] is None for run in history["attempts"])
+        assert all(run["hook"] is None for run in history["attempts"])
         assert len(history["attempts"]) == 3
         assert {r["declared_source"] for r in history["attempts"]} == {"test-client"}
         assert {r["reporting_source"] for r in history["attempts"]} == {"anthropic"}
@@ -498,3 +499,79 @@ async def test_skill_consent_protocol_and_dispatch_count(cli, tmp_path, server_p
         tools = await discover(client)
         assert await call(client, tools, "get_work_history_v1", {"task_id": work["id"]}) == history
         assert count() == 3
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("failed,event,outcome", [
+    (False, "run_completed", "reported_success"), (True, "run_failed", "failure"),
+])
+async def test_hook_discovery_and_immutable_history(
+    cli, tmp_path, server_processes, failed, event, outcome,
+):
+    from llm_engine import _native
+
+    cli("agent", "list")
+    database = tmp_path / "product.sqlite"
+    db = str(database)
+    async with fixture_session(database, forbid_provider=True) as client:
+        tools = await discover(client)
+        discovery = tools["list_hooks_v1"]
+        assert discovery.annotations.idempotentHint
+        assert not discovery.annotations.openWorldHint
+        assert discovery.inputSchema["properties"] == {}
+        assert await call(client, tools, "list_hooks_v1") == {"schema_version": 1, "hooks": []}
+        employee = cli("agent", "create", "Writer")["id"]
+        team = cli("team", "create", "Delivery")["id"]
+        work = cli("task", "create", "Saved work")["id"]
+        cli("task", "assign", work, employee)
+        skill = _native.create_skill(db, "Concise", "Use short sentences.")["id"]
+        _native.set_skill_enabled(db, skill, True)
+        hook = _native.create_hook(db, "Follow up", skill, "agent", employee, event)
+        disabled = _native.create_hook(db, "Disabled", skill, "team", team, "task_created")
+        assert await call(client, tools, "list_hooks_v1") == {
+            "schema_version": 1,
+            "hooks": sorted([hook, disabled], key=lambda row: row["id"]),
+        }
+        assert not hook["enabled"] and not disabled["enabled"]
+        enabled = _native.set_hook_enabled(db, hook["id"], True)
+        expected = {"schema_version": 1, "hooks": sorted([enabled, disabled], key=lambda r: r["id"])}
+        before = database.read_bytes()
+        assert await call(client, tools, "list_hooks_v1") == expected
+        assert database.read_bytes() == before
+        legacy = cli("run", "start", work, "--stage", "implement",
+                     "--reporting-source", "operator", "--participants", employee)["id"]
+        cli("run", "finish", legacy, "--outcome", "failure")
+        source = _native.start_web_execution(db, work, "anthropic", "fixture", 1)
+        _native.finish_execution(db, source[0], None if failed else "Source result",
+                                 "provider_error" if failed else None)
+        preview = _native.preview_hook(db, work, hook["id"])
+        execution = _native.start_hook_execution(
+            db, work, preview["preview_id"], "anthropic", "fixture", 2)
+        _native.finish_execution(db, execution[0], "Follow-up result", None)
+        admitted = next(row for row in _native.hook_provenance(db) if row["run_id"] == execution[0])
+        history = await call(client, tools, "get_work_history_v1", {"task_id": work})
+        attempts = {row["id"]: row for row in history["attempts"]}
+        assert attempts[legacy]["hook"] is None
+        assert attempts[source[0]]["hook"] is None
+        assert attempts[execution[0]]["hook"] == admitted
+        assert admitted["source_run_id"] == source[0]
+        assert admitted["source_outcome"] == outcome
+        assert admitted["event"] == event
+        assert admitted["hook_name"] == "Follow up"
+        assert admitted["agent_id"] == employee
+        assert admitted["skill_name"] == "Concise"
+        assert admitted["instructions"] == "Use short sentences."
+        assert admitted["input"] == preview["input"]
+        assert admitted["hook_enabled"] and admitted["skill_enabled"]
+        assert attempts[execution[0]]["execution"]["input"] == preview["input"]
+        _native.update_hook(db, hook["id"], "Edited", skill, "team", team, "task_created")
+        edited = _native.set_hook_enabled(db, hook["id"], False)
+        _native.update_skill(db, skill, "Edited Skill", "Different instructions.")
+        _native.set_skill_enabled(db, skill, False)
+        assert await call(client, tools, "get_work_history_v1", {"task_id": work}) == history
+    async with fixture_session(database, forbid_provider=True) as client:
+        tools = await discover(client)
+        assert await call(client, tools, "list_hooks_v1") == {
+            "schema_version": 1, "hooks": sorted([edited, disabled], key=lambda r: r["id"])}
+        assert await call(client, tools, "get_work_history_v1", {"task_id": work}) == history
+    assert not Path(db + ".dispatches").exists()

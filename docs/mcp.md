@@ -638,3 +638,47 @@ after building native bindings and installing the locked product dependencies.
 The fixture exercises real stdio MCP and SQLite with a dispatch counter, success,
 provider failure and concurrent consent. Live provider validation is skipped,
 not passed; fixture output does not demonstrate a real model response.
+
+## Saved Hook discovery and immutable follow-up history
+
+Launch `agentown-mcp --database /absolute/path/company.sqlite` with the installed
+product environment. In a connected client, call `list_hooks_v1({})`. The response
+is `{"schema_version":1,"hooks":[]}` when no Hooks are saved. Saved entries include
+disabled Hooks and have this shape (UUIDs below are illustrative):
+
+```json
+{"schema_version":1,"hooks":[{"id":"11111111-1111-4111-8111-111111111111","name":"Follow up","enabled":false,"target_kind":"agent","target_id":"22222222-2222-4222-8222-222222222222","event":"run_completed","skill_id":"33333333-3333-4333-8333-333333333333"}]}
+```
+
+Use the runnable SDK inspection above, adding this call inside its client context:
+
+```python
+print((await client.call_tool("list_hooks_v1", {})).data)
+```
+
+Discovery reads current native configuration in stable ID order. Targets are
+`agent` or `team`; events are `task_created`, `run_completed`, or `run_failed`.
+Enabled configuration alone does not establish that a Hook can execute.
+Discovery is read-only and idempotent and never constructs a provider.
+
+Call `get_work_history_v1({"task_id":"TASK_UUID"})` to inspect admitted follow-ups.
+Each attempt now also contains nullable `hook`: ordinary, Skill-only and legacy
+attempts have `null`. An admitted Hook snapshot contains `schema_version: 1`,
+`run_id`, opaque `preview_id`, `task_id`, `hook_id`, `hook_name`, `hook_enabled`,
+`target_kind`, `agent_id`, `event`, `source_run_id`, `source_outcome`, `skill_id`,
+`skill_name`, `skill_enabled`, `instructions`, composed `input`, and integer
+`admitted_at` (Unix milliseconds). Admitted snapshots describe an enabled employee
+Hook and enabled Skill; `target_kind` is `agent`, `source_outcome` is `reported_success` or
+`failure`, and the matching event is `run_completed` or `run_failed`.
+
+These fields come from native immutable admission provenance joined by Run ID.
+Editing or disabling the Hook or Skill changes discovery but preserves the saved
+snapshot, including its source Run and outcome, across database/server reopen.
+History retains lease recovery and quality `unverified`. These reads authorize no
+execution; MCP Hook preview and execution are deferred to the next Task.
+
+Deterministic coverage: `python -m pytest python/tests/test_mcp.py -k hook -q`
+in the installed product test environment. Tests use actual stdio processes and
+SQLite for empty/disabled/team discovery, typed schemas, both source outcomes,
+ordinary/legacy nulls, edits and reopen, with provider construction forbidden.
+Supervisor checks remain pending. Live provider calls are skipped, not passed.
