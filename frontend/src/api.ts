@@ -102,7 +102,8 @@ export function classifyWork(work: Work): {outcome: WorkOutcome; label: string} 
   if (last?.error || last?.outcome === 'failure') return {outcome: 'failed', label: 'Failed — retry available'};
   if (last) return {outcome: 'other', label: 'Recorded attempt — no provider result'};
   if (work.status === 'pending') return {outcome: 'pending', label: 'Pending — ready to execute'};
-  return {outcome: 'other', label: ({cancelled: 'Cancelled', blocked: 'Blocked', in_progress: 'In progress — no provider result'} as Record<string, string>)[work.status] || 'Recorded work — no provider result'};
+  const labels: Record<string, string> = {cancelled: 'Cancelled', blocked: 'Blocked', in_progress: 'In progress — no provider result'};
+  return {outcome: 'other', label: Object.hasOwn(labels, work.status) ? labels[work.status] : 'Recorded work — no provider result'};
 }
 export function workStatus(work: Work): string {
   return classifyWork(work).label;

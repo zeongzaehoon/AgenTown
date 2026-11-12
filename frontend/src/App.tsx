@@ -1,3 +1,4 @@
+import { validateWorkspace } from './workspace-validation';
 import { type ConfigurationNavigation } from './configuration-api';
 import { LoopExecution } from './LoopExecution';
 import { HookExecution } from './HookExecution';
@@ -71,7 +72,7 @@ function AttemptResult({ attempt, work, number, latest }: {attempt: Attempt; wor
       </div>
       <p role="status" aria-live="polite" aria-atomic="true">{feedback}</p>
     </>}
-    {attempt.error && <p>{advice[attempt.error] || 'Refresh history before retrying.'}</p>}
+    {attempt.error && <p>{Object.hasOwn(advice, attempt.error) ? advice[attempt.error] : 'Refresh history before retrying.'}</p>}
     {attempt.state === 'active' && !attempt.provider && <p>Caller-reported active attempt; no provider request is recorded.</p>}
     {attempt.state === 'active' && !!attempt.provider && <p>Waiting for the provider. After an unexpected stop, recovery can take up to 120 seconds. No work is automatically resent.</p>}
     {attempt.hook && <section aria-label={`Attempt ${number} saved Hook provenance`}>
@@ -157,12 +158,14 @@ export function App() {
     poll.current = controller;
     const current = ++generation.current;
     try {
-      const next = await api<Workspace>('/api/state', {}, controller.signal);
+      const next = validateWorkspace(await api<unknown>('/api/state', {}, controller.signal));
       if (current !== generation.current) return;
       setState(next); setSelected(previous => previous || next.work[0]?.id || ''); setConnected(true); setConnectionError(''); return true;
     } catch (error) {
       if (current !== generation.current) return;
-      setConnected(false); setConnectionError((error as Error).message);
+      setConnected(false); setConnectionError(error instanceof SyntaxError
+        ? 'Workspace data unavailable: the server returned unreadable data. Check the local server, then choose Refresh connection. Loaded history and unsaved drafts are retained; nothing is automatically resent.'
+        : (error as Error).message);
     } finally {
       if (current === generation.current) poll.current = null;
     }
@@ -267,7 +270,7 @@ export function App() {
     <a className="skip" href="#main">Skip to workspace</a>
     <header><p className="eyebrow">AGENTOWN / LOCAL WORKSPACE</p><h1>Where agents come alive.</h1><p>Create an employee. Give them text to work on. Review what comes back.</p></header>
     <main id="main">
-      <p id="connection" role="status" aria-live="polite">{connected ? `Connected · ${work ? workStatus(work) : 'Ready for your first work'}` : connectionError ? `Disconnected — displayed history may be out of date. ${connectionError}` : 'Connecting to your workspace…'}</p>
+      <p id="connection" role="status" aria-live="polite">{connected ? `Connected · ${work ? workStatus(work) : 'Ready for your first work'}` : connectionError ? `${state ? 'Disconnected — displayed history may be out of date.' : 'Workspace unavailable.'} ${connectionError}` : 'Connecting to your workspace…'}</p>
       <p id="configuration">{state && (state.configuration || `Provider: ${state.provider} · Model: ${state.model} · ${['anthropic', 'openai', 'bedrock', 'xai'].includes(state.provider) ? 'Real provider requests' : 'Test responses — not live validation'}`)}</p>
       <p id="notice" role="alert">{notice}</p><button id="refresh" type="button" onClick={() => { void refresh().then(ok => { if (ok) setInspectionRequired(false); }); }}>Refresh connection</button>
       <CompanyOverview onSelectTeamMember={id => { setViewEmployee(id); setSearch(''); setOutcome('all'); searchRef.current?.focus(); }} onOpenTeam={id => setTeamRequest({id})} onOpenClient={id => setClientRequest({id})} onOpenSkill={id => setConfigurationRequest({kind: 'skills', id})} onOpenHook={id => setConfigurationRequest({kind: 'hooks', id})} onOpenLoop={id => setConfigurationRequest({kind: 'loops', id})} workspace={state} connected={connected} error={connectionError} selectedEmployee={viewEmployee} onSelectEmployee={setViewEmployee} onOpenWork={id => {

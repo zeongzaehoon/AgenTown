@@ -1794,3 +1794,51 @@ dependencies available, run `cd frontend`, `npx vitest run src/Connections.test.
 and `npx tsc --noEmit`. This implementation workspace has no frontend dependencies;
 these checks and supervisor-selected consolidated/browser validation remain pending.
 Live LLM calls remain skipped, not passed.
+
+### Malformed workspace snapshots and recovery (C49-T1)
+
+Launch `agentown-web --database /ABSOLUTE/PATH/workspace.sqlite3 --port 8765`
+with an existing product database, then open `http://127.0.0.1:8765`.
+The company overview and work screen share one validated workspace snapshot.
+Employee/work/attempt identities, assignment and participant lists, result metadata,
+and saved Skill/Hook provenance are checked before replacing that snapshot.
+Unknown extension fields, absent optional metadata and legacy null metadata are
+preserved; historical employee references do not require a current employee.
+
+Runnable deterministic interaction coverage (no provider credentials required):
+
+```sh
+cd frontend
+npm exec -- vitest run src/workspace-validation.test.tsx src/App.test.tsx src/CompanyOverview.test.tsx src/deadlines.test.tsx
+```
+
+To reproduce visually with browser developer tools or an HTTP response override:
+
+1. Load saved work with results. Select it, expand a historical attempt, and enter
+   unsaved request and employee-name drafts.
+2. Override the POST `/api/state` JSON response: replace an attempt's `participants`
+   with `[{}]`, a work's `assignees` with `[null]`, or its `hook` with
+   `{"hook_name": {"invalid": true}}`. Choose **Refresh connection**.
+3. Confirm disconnected/stale feedback explains that the snapshot is invalid and
+   offers Refresh connection. The company and work views retain loaded history,
+   selection, expanded results and drafts. Execution stays disabled.
+4. Remove the override, add work through another product client, and refresh.
+   Confirm connected feedback, newly added work in history, unchanged selection
+   and drafts, and restored execution controls. Inspect network requests: recovery
+   only reads state and supporting inspection endpoints; no mutation is replayed.
+5. Reload with the malformed response override enabled to test initial failure.
+   Confirm actionable **Workspace unavailable** feedback, disabled save/execution
+   controls and no rendering crash. Remove the override and refresh to recover.
+
+The focused tests exercise these failures and recovery using deterministic API
+responses; they do not establish live provider behavior. Supervisor-selected
+consolidated checks and browser validation run after implementation handoff.
+Live provider calls remain skipped under the user policy.
+
+Prototype-name regression: set an attempt's `error` to `"__proto__"`,
+`"constructor"` or `"toString"`, or set an attempt-free work's `status` to one
+of those strings. Test both initial load and Refresh connection. These unknown
+string values retain the generic error advice/status label without crashing;
+only own dictionary entries select specialized text. The focused App interaction
+regressions also verify retained selection/draft and externally added work after
+refresh, with no mutation replay.

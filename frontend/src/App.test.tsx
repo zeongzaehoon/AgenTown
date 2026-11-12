@@ -965,3 +965,92 @@ test('caller-declared attribution stays per attempt, safe and unverified across 
   expect(document.activeElement).toBe(focused);
   expect(f.calls.every(call => call.path === '/api/state')).toBe(true);
 });
+
+for (const malformed of [
+  {employees: [null], work: []},
+  {...initial(), work: [{id: 'bad', input: 'Bad', status: 'pending', assignees: [], attempts: [{id: 'a', state: 'finished', outcome: null, participants: [{}]}]}]},
+]) test('malformed initial workspace stays unavailable and recovers through a read without replay', async () => {
+  const f = fixture();
+  const fetcher = globalThis.fetch;
+  let invalid = true;
+  vi.stubGlobal('fetch', (path: string, options: RequestInit) => path === '/api/state' && invalid
+    ? Promise.resolve(new Response(JSON.stringify(malformed))) : fetcher(path, options));
+  render(<App />);
+  await waitFor(() => expect(document.querySelector('#connection')!.textContent).toContain('Workspace unavailable'));
+  expect(document.body.textContent).toContain('choose Refresh connection');
+  expect((screen.getByRole('button', {name: 'Create employee'}) as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByRole('button', {name: 'Save work'}) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.change(screen.getByLabelText('Employee name'), {target: {value: 'Keep initial draft'}});
+  invalid = false;
+  f.state.employees.push({id: 'external', name: 'External writer'});
+  f.state.work.push({id: 'external-work', input: 'Externally added work', status: 'pending', assignees: ['external'], attempts: []});
+  refresh(); await connected();
+  expect(document.body.textContent).toContain('Externally added work');
+  expect((screen.getByLabelText('Employee name') as HTMLInputElement).value).toBe('Keep initial draft');
+  expect(f.calls.every(call => call.path === '/api/state')).toBe(true);
+});
+
+test('malformed nested refresh retains selected work, expanded result and drafts; valid refresh restores execution and external work', async () => {
+  const f = savedResults();
+  const fetcher = globalThis.fetch;
+  let corruption = '';
+  vi.stubGlobal('fetch', async (path: string, options: RequestInit) => {
+    const response = await fetcher(path, options);
+    if (path !== '/api/state' || !corruption) return response;
+    const value = await response.json();
+    if (corruption === 'provenance') value.work[0].attempts[0].hook = {hook_name: {unsafe: true}};
+    else value.work[0].assignees = [{}];
+    return new Response(JSON.stringify(value));
+  });
+  render(<App />); await connected();
+  fireEvent.change(draftInput(), {target: {value: 'Keep unsaved request'}});
+  fireEvent.change(screen.getByLabelText('Employee name'), {target: {value: 'Keep employee draft'}});
+  fireEvent.click(screen.getByText('Attempt 1 · Result available · Unverified'));
+  const expanded = document.querySelector<HTMLDetailsElement>('#detail details[data-attempt-id]')!;
+  await waitFor(() => expect(expanded.open).toBe(true));
+  for (const kind of ['provenance', 'assignees']) {
+    corruption = kind; refresh();
+    await waitFor(() => expect(document.querySelector('#connection')!.textContent).toContain('Disconnected'));
+    expect(document.body.textContent).toContain('invalid snapshot');
+    expect(history().value).toBe('w');
+    expect(expanded.isConnected).toBe(true); expect(expanded.open).toBe(true);
+    expect(draftInput().value).toBe('Keep unsaved request');
+    expect((screen.getByLabelText('Employee name') as HTMLInputElement).value).toBe('Keep employee draft');
+    expect((retry() as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(retry());
+  }
+  corruption = '';
+  f.state.work.push({id: 'external', input: 'Externally added work', status: 'pending', assignees: ['e'], attempts: []});
+  refresh(); await connected();
+  expect(history().value).toBe('w');
+  expect([...history().options].map(option => option.value)).toContain('external');
+  expect(expanded.isConnected).toBe(true); expect(expanded.open).toBe(true);
+  expect(draftInput().value).toBe('Keep unsaved request');
+  expect((retry() as HTMLButtonElement).disabled).toBe(false);
+  expect(f.calls.every(call => call.path === '/api/state')).toBe(true);
+});
+
+// Server strings may coincide with Object.prototype property names. They are
+// still unknown labels, never dictionary entries or renderable object values.
+test.each(['__proto__', 'constructor', 'toString'])('prototype-named workspace labels render safely on initial load and refresh: %s', async key => {
+  const state = (): Workspace => ({...initial(), employees: [{id: 'e', name: 'Writer'}], work: [
+    {id: 'status', input: 'Unknown status work', status: key, assignees: ['e'], attempts: []},
+    {id: 'error', input: 'Unknown error work', status: 'pending', assignees: ['e'], attempts: [
+      {id: 'a', state: 'finished', outcome: 'failure', participants: ['e'], error: key},
+    ]},
+  ]});
+  const f = fixture(state());
+  render(<App />); await connected();
+  expect(document.body.textContent).toContain('Recorded work — no provider result');
+  fireEvent.change(history(), {target: {value: 'error'}});
+  expect(await screen.findByText('Refresh history before retrying.')).toBeTruthy();
+  fireEvent.change(draftInput(), {target: {value: 'Retain draft'}});
+  f.state.work = state().work;
+  f.state.work.push({id: 'external', input: 'Externally added work', status: 'pending', assignees: ['e'], attempts: []});
+  refresh(); await connected();
+  await waitFor(() => expect([...history().options].map(option => option.value)).toContain('external'));
+  expect(history().value).toBe('error');
+  expect(draftInput().value).toBe('Retain draft');
+  expect(screen.getByText('Refresh history before retrying.')).toBeTruthy();
+  expect(f.calls.every(call => call.path === '/api/state')).toBe(true);
+});
