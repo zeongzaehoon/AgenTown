@@ -1970,3 +1970,38 @@ for Vitest to avoid writing bundled configuration into the shared dependency tre
 The consolidated supervisor frontend/build and ordinary Python gate remain pending.
 Browser validation is pending supervisor verification. Live validation is skipped,
 not passed.
+
+### Configuration response recovery (C53-T1)
+
+In the existing product, open **Configuration**. No credentials are needed;
+configuration saves and enables do not execute work. With a deterministic API
+fixture or browser network response override, exercise each of Skill, Hook and
+Loop:
+
+1. Return null, a non-list, an invalid record or duplicate IDs from one of
+   GET `/api/config/v1/skills`, `/hooks`, `/loops`. An invalid initial load must
+   show unavailable feedback, no invented empty list, and disabled save controls.
+   Restore valid responses and explicitly activate **Refresh configuration**.
+2. Select saved records and edit drafts in all three types. Make a refresh return
+   a valid changed Skill list but an invalid Hook or Loop list. All three previous
+   saved lists, selections and drafts must remain; saves and enables are disabled.
+3. Restore valid responses, refresh explicitly, then explicitly save or enable.
+   Override the mutation response with null, an array, invalid fields, or (for
+   update/enable) a valid record with a different ID. Expect uncertain-save
+   feedback, retained drafts and selections, the prior saved snapshot and disabled
+   mutations. The server may already have saved the request: inspect refreshed
+   saved values before choosing whether to retry.
+4. Restore valid responses. Use Tab to reach **Refresh configuration** and Enter
+   to activate it. Refresh must send only reads; switching types retains drafts.
+   Only a new explicit save or enable sends another mutation. Successful saves
+   return keyboard focus to **Saved record**.
+
+Deterministic interaction coverage is runnable from `frontend/` with
+`npm exec -- vitest run src/Configuration.test.tsx` and
+`npm exec -- tsc --noEmit` after the normal frontend dependencies are available.
+The matrix covers each list's invalid initial load and atomic refresh, malformed
+create/update/enable responses, wrong update/enable IDs, keyboard recovery,
+retained drafts and mutation counts before and after explicit recovery.
+This implementation workspace has no frontend test dependencies; these checks
+and browser validation are pending supervisor verification. Live LLM validation
+is skipped, not passed.

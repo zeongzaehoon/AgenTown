@@ -11,22 +11,23 @@ const response = (value: unknown, status = 200) => new Response(JSON.stringify(v
 function fixture() {
   const rows: Record<string, ConfigurationRecord[]> = {skills: [], hooks: [], loops: []};
   let offline = false;
+  let transform: ((value: unknown, mutation: boolean, kind: string) => unknown) = value => value;
   let rejectSave = false;
   const fetcher = vi.fn(async (path: string, init: RequestInit) => {
     if (offline) throw new Error('offline');
     if (path === '/api/teams') return response({teams: [{id: 't', name: 'Editors', members: []}]});
     const [, , , , kind, id, enabled] = path.split('/');
-    if (init.method === 'GET') return response({[kind]: rows[kind]});
+    if (init.method === 'GET') return response(transform({[kind]: rows[kind]}, false, kind));
     if (rejectSave) return response({error: 'Reference unavailable'}, 404);
     const body = JSON.parse(init.body as string);
     const saved = id ? {...rows[kind].find(item => item.id === id), ...body} : {...body, id: `${kind}-${rows[kind].length}`, enabled: false};
     rows[kind] = [...rows[kind].filter(item => item.id !== saved.id), saved];
     expect(init.method).toBe(id ? 'PUT' : 'POST');
     if (enabled) expect(Object.keys(body)).toEqual(['enabled']);
-    return response(saved);
+    return response(transform(saved, true, kind));
   });
   vi.stubGlobal('fetch', fetcher);
-  return {rows, fetcher, offline: (value: boolean) => { offline = value; }, rejectSave: (value: boolean) => { rejectSave = value; }};
+  return {rows, fetcher, transform: (value: typeof transform) => { transform = value; }, offline: (value: boolean) => { offline = value; }, rejectSave: (value: boolean) => { rejectSave = value; }};
 }
 function change(label: string, value: string) { fireEvent.change(screen.getByLabelText(label), {target: {value}}); }
 async function open() {
@@ -118,3 +119,89 @@ test('keyboard opens the labeled workspace and saves with focus returned to sele
   await user.keyboard('{Enter}'); await saved('Skill');
   expect(document.activeElement).toBe(screen.getByLabelText('Saved record'));
 });
+
+const savedRows: Record<string, ConfigurationRecord> = {
+  skills: {id: 's', name: 'Saved Skill', enabled: false, instructions: 'Saved instructions'},
+  hooks: {id: 'h', name: 'Saved Hook', enabled: false, skill_id: 's', target_kind: 'agent', target_id: 'a', event: 'task_created'},
+  loops: {id: 'l', name: 'Saved Loop', enabled: false, task_id: 'w', max_iterations: 2, interval_seconds: 60},
+};
+const kinds = ['skills', 'hooks', 'loops'] as const;
+function mutationCount(f: ReturnType<typeof fixture>) {
+  return f.fetcher.mock.calls.filter(([, init]) => init.method !== 'GET').length;
+}
+function fillDraft(kind: typeof kinds[number]) {
+  change('Name', 'Retained draft');
+  if (kind === 'skills') change('Instructions', 'Retained instructions');
+  if (kind === 'hooks') { change('Skill', 's'); change('Target', 'a'); }
+  if (kind === 'loops') change('Saved work', 'w');
+}
+for (const kind of kinds) {
+  for (const bad of [null, [], {[kind]: null}, {[kind]: [null]}, {[kind]: [{...savedRows[kind], enabled: "true"}]}, {[kind]: [savedRows[kind], savedRows[kind]]}]) {
+    test(`${kind} malformed initial load is unavailable and recovers only on refresh: ${JSON.stringify(bad)}`, async () => {
+      const f = fixture();
+      f.transform((value, mutation, requested) => !mutation && requested === kind ? bad : value);
+      render(<Configuration workspace={workspace} />);
+      fireEvent.click(screen.getByRole('button', {name: 'Open configuration'}));
+      await screen.findByRole('alert');
+      expect(screen.queryByText('No saved skills yet.')).toBeNull();
+      change('Record type', kind); fillDraft(kind);
+      expect((screen.getByRole('button', {name: /^Create /}) as HTMLButtonElement).disabled).toBe(true);
+      f.transform(value => value);
+      fireEvent.click(screen.getByRole('button', {name: 'Refresh configuration'}));
+      await screen.findByText('Showing saved configuration.');
+      expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('Retained draft');
+      expect(mutationCount(f)).toBe(0);
+    });
+  }
+  test(`${kind} malformed refresh retains the complete snapshot, selections and drafts`, async () => {
+    const f = fixture(); for (const key of kinds) f.rows[key] = [savedRows[key]];
+    render(<Configuration workspace={workspace} />); await open();
+    for (const key of kinds) { change('Record type', key); change('Saved record', savedRows[key].id); fillDraft(key); }
+    // Earlier valid lists in this response must not partially replace state.
+    f.rows.skills = [{...savedRows.skills, name: 'Unexpected replacement'}];
+    f.transform((value, mutation, requested) => !mutation && requested === kind ? {[kind]: [{}]} : value);
+    fireEvent.click(screen.getByRole('button', {name: 'Refresh configuration'})); await screen.findByRole('alert');
+    for (const key of kinds) {
+      change('Record type', key);
+      expect((screen.getByLabelText('Saved record') as HTMLSelectElement).value).toBe(savedRows[key].id);
+      expect(screen.getByLabelText('Saved values').textContent).toContain(savedRows[key].name);
+      expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('Retained draft');
+      expect((screen.getByRole('button', {name: 'Save changes'}) as HTMLButtonElement).disabled).toBe(true);
+      expect((screen.getByRole('button', {name: 'Enable configuration'}) as HTMLButtonElement).disabled).toBe(true);
+    }
+    expect(mutationCount(f)).toBe(0);
+  });
+  for (const action of ['create', 'update', 'enable'] as const) {
+    for (const invalid of ['null', 'array', 'fields', ...(action === 'create' ? [] : ['identity'])]) {
+      test(`${kind} ${action} rejects ${invalid} response and requires keyboard refresh and explicit action`, async () => {
+        const f = fixture(); for (const key of kinds) f.rows[key] = [savedRows[key]];
+        const user = userEvent.setup(); render(<Configuration workspace={workspace} />); await open();
+        change('Record type', kind);
+        if (action !== 'create') change('Saved record', savedRows[kind].id);
+        fillDraft(kind);
+        f.transform((value, mutation) => !mutation ? value : invalid === 'null' ? null
+          : invalid === 'array' ? [] : invalid === 'identity' ? {...value as object, id: 'wrong-id'} : {...value as object, enabled: 'true'});
+        const button = () => screen.getByRole('button', {name: action === 'create' ? /^Create / : action === 'update' ? 'Save changes' : 'Enable configuration'});
+        fireEvent.click(button()); await screen.findByRole('alert');
+        expect(screen.getByRole('alert').textContent).toContain('Nothing is automatically resent');
+        expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('Retained draft');
+        expect((screen.getByLabelText('Saved record') as HTMLSelectElement).value).toBe(action === 'create' ? '' : savedRows[kind].id);
+        if (action !== 'create') expect(screen.getByLabelText('Saved values').textContent).toContain(savedRows[kind].name);
+        expect((button() as HTMLButtonElement).disabled).toBe(true);
+        expect(mutationCount(f)).toBe(1);
+        f.transform(value => value);
+        // Restore a confirmed disabled snapshot so recovery can explicitly enable.
+        if (action === 'enable') f.rows[kind] = [savedRows[kind]];
+        const refresh = screen.getByRole('button', {name: 'Refresh configuration'});
+        refresh.focus(); await user.keyboard('{Enter}'); await screen.findByText('Showing saved configuration.');
+        change('Record type', kind === 'skills' ? 'loops' : 'skills'); change('Record type', kind);
+        expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('Retained draft');
+        expect(mutationCount(f)).toBe(1);
+        button().focus(); await user.keyboard('{Enter}');
+        await screen.findByText(new RegExp(`${kind === 'skills' ? 'Skill' : kind === 'hooks' ? 'Hook' : 'Loop'} saved · ID:`));
+        expect(mutationCount(f)).toBe(2);
+        if (action !== 'enable') expect(document.activeElement).toBe(screen.getByLabelText('Saved record'));
+      });
+    }
+  }
+}

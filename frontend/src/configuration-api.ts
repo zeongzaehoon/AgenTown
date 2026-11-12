@@ -59,3 +59,14 @@ export function savedHooks(response: unknown): HookRecord[] {
     (item.target_kind === 'agent' || item.target_kind === 'team') &&
     (item.event === 'task_created' || item.event === 'run_completed' || item.event === 'run_failed'));
 }
+
+/** Mutation responses must satisfy the same contract as loaded records. */
+export function savedConfigurationRecord(kind: ConfigurationKind, response: unknown, expectedId?: string): ConfigurationRecord {
+  const saved = kind === 'skills' ? savedSkills({skills: [response]})[0]
+    : kind === 'hooks' ? savedHooks({hooks: [response]})[0]
+    : savedLoopPolicies({loops: [response]})[0];
+  if (expectedId !== undefined && saved.id !== expectedId) {
+    throw new Error('Saved configuration identity could not be confirmed.');
+  }
+  return saved;
+}

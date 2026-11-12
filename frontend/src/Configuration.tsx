@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { type Workspace, listTeams, type Team } from './api';
-import { savedLoopPolicies, configurationRequest, type ConfigurationNavigation, type ConfigurationFields, type ConfigurationKind, type ConfigurationRecord } from './configuration-api';
+import { savedSkills, savedHooks, savedLoopPolicies, savedConfigurationRecord, configurationRequest, type ConfigurationNavigation, type ConfigurationFields, type ConfigurationKind, type ConfigurationRecord } from './configuration-api';
 
 type Draft = Record<string, string>;
 const labels = {skills: 'Skill', hooks: 'Hook', loops: 'Loop'};
@@ -53,11 +53,11 @@ function ConfigurationPanel({workspace, openSkill, openRecord}: {workspace: Work
           configurationRequest<{loops: ConfigurationRecord[]}>('loops', '', undefined, request.signal), listTeams(request.signal),
         ]);
         if (request.signal.aborted) return;
-        setRecords({skills: skills.skills, hooks: hooks.hooks, loops: savedLoopPolicies(loops)}); setTeams(teamList.teams); setStale(false);
+        setRecords({skills: savedSkills(skills), hooks: savedHooks(hooks), loops: savedLoopPolicies(loops)}); setTeams(teamList.teams); setStale(false);
         setNotice('Saved values refreshed. Inspect them before explicitly retrying any uncertain save; refresh never resends changes.');
       }
     } catch (failure) {
-      if (!request.signal.aborted) { setStale(true); setError(`${(failure as Error).message} Disconnected or unavailable. Drafts retained. A mutation may have been saved. Refresh configuration and inspect saved values before explicitly retrying. Nothing is automatically resent.`); }
+      if (!request.signal.aborted) { setStale(true); setError(`${failure instanceof Error ? failure.message : 'Invalid configuration response.'} Disconnected or unavailable. Drafts retained. ${action ? 'A mutation may have been saved. Refresh configuration and inspect saved values before explicitly retrying.' : 'Refresh configuration to load valid saved values before saving or enabling.'} Nothing is automatically resent.`); }
     } finally { if (controller.current === request) { lock.current = false; if (!request.signal.aborted) setBusy(false); } }
   }
   useEffect(() => { void perform(); return () => { controller.current?.abort(); lock.current = false; }; }, []);
@@ -106,14 +106,15 @@ function ConfigurationPanel({workspace, openSkill, openRecord}: {workspace: Work
       <p>Configuration {record.enabled ? 'enabled' : 'disabled'}. No automatic execution. Apply enabled Skills through a saved-work preview; Hooks and Loops remain inactive.</p>
       <button type="button" disabled={blocked} onClick={() => void perform(async signal => {
         const saved = await configurationRequest<ConfigurationRecord>(kind, `/${encodeURIComponent(record.id)}/enabled`, {enabled: !record.enabled}, signal);
-        if (!signal.aborted) remember(saved);
+        if (!signal.aborted) remember(savedConfigurationRecord(kind, saved, record.id));
       })}>{record.enabled ? 'Disable configuration' : 'Enable configuration'}</button></>}
     <form onSubmit={event => {
       event.preventDefault(); if (blocked || validation) return;
       const fields = kind === 'loops' ? {...draft, max_iterations: Number(draft.max_iterations), interval_seconds: Number(draft.interval_seconds)} : draft;
       void perform(async signal => {
-        const saved = await configurationRequest<ConfigurationRecord>(kind, selected ? `/${encodeURIComponent(selected)}` : '', fields as unknown as ConfigurationFields, signal);
+        const response = await configurationRequest<unknown>(kind, selected ? `/${encodeURIComponent(selected)}` : '', fields as unknown as ConfigurationFields, signal);
         if (signal.aborted) return;
+        const saved = savedConfigurationRecord(kind, response, selected || undefined);
         remember(saved); setSelection(previous => ({...previous, [kind]: saved.id}));
         setDrafts(previous => { const next = {...previous}; delete next[key]; delete next[`${kind}/${saved.id}`]; return next; });
         focusSelection.current = true;
