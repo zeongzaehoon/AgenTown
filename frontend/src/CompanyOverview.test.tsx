@@ -137,7 +137,7 @@ test('team room cards forward the exact saved Task identity through overview nav
     if (path === '/api/config/v1/hooks') return new Response('{"hooks":[]}');
     if (path === '/api/config/v1/loops') return new Response('{"loops":[]}');
     if (path === '/api/config/v1/skills') return new Response('{"skills":[]}');
-    if (path === '/api/loops/v1') return new Response('{"schema_version":1,"control":{"state":"available","can_control":true,"message":""},"sessions":[],"attempts":[]}');
+    if (path === '/api/loops/v1') return new Response('{"schema_version":1,"control":{"state":"available","can_control":true,"message":""},"sessions":[],"attempts":[],"cancellation":""}');
     throw new Error(`Unexpected request ${path}`);
   }));
   const open = vi.fn(); const user = userEvent.setup();

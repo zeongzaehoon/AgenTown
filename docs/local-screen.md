@@ -1899,3 +1899,35 @@ available local frontend dependencies. Polling intervals are controlled in the
 recovery tests while keyboard interaction timeout queues run normally. The
 supervisor's applicable consolidated/browser verification remains pending. Live
 provider calls remain skipped, not passed.
+
+### Loop inspection recovery (C51-T1)
+
+Launch `agentown-web --database PATH --model MODEL` with an existing AgenTown
+SQLite database. Open company **Bounded Loop activity**, then open linked saved
+work and **Run a bounded Loop**. No provider call is needed to inspect history
+or preview. Keep an unsaved work draft while exercising recovery.
+
+For deterministic reproduction run, from `frontend/`:
+`npx vitest run src/loop-response.test.tsx src/OverviewLoops.test.tsx src/LoopExecution.test.tsx`.
+The fixtures control polling intervals independently of request and Testing
+Library timeouts. They supply null initial responses, malformed nested sessions,
+previews, execution output/error, and saved policies, followed by valid recovery.
+
+Expected: initial invalid data shows unavailable feedback; subsequent invalid
+data leaves the last valid history and selected policy visible with stale
+feedback. Stop and preview are unavailable. Focused preview consent disappears
+and focus returns to the Loop region; overview stop focus remains reachable.
+Recovery retains selection and the parent-owned draft and never replays preview,
+start or stop. A new explicit preview and authorization are required to start.
+Unknown session states remain readable; missing execution records remain
+unavailable, and absent/unknown authority grants no execution permission.
+Live provider calls are skipped. Supervisor browser verification remains pending.
+
+
+Loop unknown-state regression: with the existing deterministic Loop inspection fixture,
+set a session's `state` to `__proto__`, `constructor`, or `toString` and inspect
+both company Loop activity and that session's saved-work Loop execution. Each
+must display `Unknown session state: <state>` and keep history readable. The
+company stop control must remain unavailable; saved-work must offer no stop for
+that session. Merely inspecting must issue no preview, start, or stop request.
+These cases are covered in `OverviewLoops.test.tsx` and `LoopExecution.test.tsx`.

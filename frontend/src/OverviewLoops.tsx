@@ -1,7 +1,8 @@
 import { canControl, controlText, sourceText, type LoopControl } from './loop-control';
 import { useEffect, useRef, useState } from 'react';
 import { ApiError, api, type Workspace } from './api';
-import { loopLabel, type LoopInspection } from './LoopExecution';
+import { loopLabel } from './LoopExecution';
+import { loopInspection, type LoopInspection } from './loop-response';
 
 /** Polling and navigation inspect only; stopping requires explicit session consent. */
 export function OverviewLoops({workspace, onOpenWork}: {workspace: Workspace | null; onOpenWork: (id: string) => void}) {
@@ -46,8 +47,7 @@ export function OverviewLoops({workspace, onOpenWork}: {workspace: Workspace | n
       pending = true;
       const generation = epoch.current;
       try {
-        const value = await api<LoopInspection>('/api/loops/v1', {}, controller.signal, 'GET');
-        if (value.schema_version !== 1 || !Array.isArray(value.sessions) || !Array.isArray(value.attempts)) throw new Error('Unsupported Loop inspection');
+        const value = loopInspection(await api<unknown>('/api/loops/v1', {}, controller.signal, 'GET'));
         if (live && generation === epoch.current) { inspectedAt.current = Date.now(); setNow(Date.now()); setInspection(value); setControl(value.control ?? null); setStatus('ready'); }
       } catch (error) { if (live && generation === epoch.current) { setStatus('unavailable'); setControl(error instanceof ApiError ? error.control ?? null : null); } }
       finally { pending = false; }

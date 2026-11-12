@@ -69,7 +69,7 @@ test('App opens exact team repeatedly, focuses selector and retains per-team and
     if (path === '/api/config/v1/skills') return response({skills: []});
     if (path === '/api/config/v1/hooks') return response({hooks: []});
     if (path === '/api/config/v1/loops') return response({loops: []});
-    if (path === '/api/loops/v1') return response({schema_version: 1, control: {state: 'available', can_control: true, message: ''}, sessions: [], attempts: []});
+    if (path === '/api/loops/v1') return response({schema_version: 1, control: {state: 'available', can_control: true, message: ''}, sessions: [], attempts: [], cancellation: ''});
     throw new Error(`Unexpected request ${path}`);
   });
   vi.stubGlobal('fetch', fetcher); const user = userEvent.setup(); render(<App />);

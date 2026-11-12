@@ -1,27 +1,26 @@
 import { canControl, controlText, sourceText, type LoopControl } from './loop-control';
 import { useEffect, useRef, useState } from 'react';
-import { ApiError, api, type Attempt, type Work, type Workspace } from './api';
-import { configurationRequest, type LoopFields } from './configuration-api';
+import { ApiError, api, type Work, type Workspace } from './api';
+import { configurationRequest, savedLoopPolicies, type LoopRecord } from './configuration-api';
 
-type Policy = LoopFields & {id: string; enabled: boolean};
-export interface LoopPreview {
-  schema_version: 1; preview_id: string; policy_id: string; policy_name: string;
-  task_id: string; agent_id: string; input: string; max_iterations: number;
-  interval_seconds: number; expected_runs: number; policy_enabled: boolean;
-}
-export interface LoopSession {
-  session_id: string; preview: LoopPreview; state: string; admitted: number;
-  declared_source?: string | null; next_at: number; provider: string; model: string;
-}
-interface LoopAttempt {session_id: string; run_id: string; ordinal: number; execution: Partial<Attempt> | null}
-export interface LoopInspection {schema_version: number; control?: LoopControl; sessions: LoopSession[]; attempts: LoopAttempt[]; cancellation: string}
+import { loopInspection, loopPreview, type LoopAttempt, type LoopInspection, type LoopPreview, type LoopSession } from './loop-response';
+export type { LoopInspection, LoopPreview, LoopSession } from './loop-response';
+type Policy = LoopRecord;
 function attemptState(a: LoopAttempt): string {
   if (!a.execution) return 'unavailable';
   return a.execution.state || (a.execution.output != null || a.execution.error != null ? 'finished' : 'active');
 }
 export function loopLabel(session: LoopSession, attempts: LoopAttempt[]): string {
   if (session.state === 'complete') return 'Exhausted — bounded attempts completed';
-  if (session.state !== 'active') return ({stopped: 'Stopped', failed: 'Failed', expired: 'Expired', restarted: 'Restarted — explicit new consent required', stale: 'Stale — work or configuration changed'} as Record<string, string>)[session.state] || `Unknown session state: ${session.state}`;
+  switch (session.state) {
+    case 'stopped': return 'Stopped';
+    case 'failed': return 'Failed';
+    case 'expired': return 'Expired';
+    case 'restarted': return 'Restarted — explicit new consent required';
+    case 'stale': return 'Stale — work or configuration changed';
+    case 'active': break;
+    default: return `Unknown session state: ${session.state}`;
+  }
   const rows = attempts.filter(a => a.session_id === session.session_id);
   if (rows.some(a => attemptState(a) === 'active')) return 'Active — waiting for provider response';
   if (rows.length === session.admitted && rows.length > 0 && rows.every(a => attemptState(a) === 'finished') && session.admitted < session.preview.max_iterations) return 'Waiting — next admission controlled by the server';
@@ -59,16 +58,17 @@ export function LoopExecution({work, workspace, connected, draft, disabled, avai
     let pending = false;
     const controller = new AbortController();
     async function load() {
-      if (pending) return;
+      if (pending || lock.current) return;
       pending = true;
       const generation = epoch.current;
       try {
         const [config, state] = await Promise.all([
-          configurationRequest<{loops: Policy[]}>('loops', '', undefined, controller.signal),
-          api<LoopInspection>('/api/loops/v1', {}, controller.signal, 'GET'),
+          configurationRequest<unknown>('loops', '', undefined, controller.signal),
+          api<unknown>('/api/loops/v1', {}, controller.signal, 'GET'),
         ]);
-        if (!Array.isArray(config.loops) || state.schema_version !== 1 || !Array.isArray(state.sessions) || !Array.isArray(state.attempts)) throw new Error('Unsupported Loop response');
-        if (live && generation === epoch.current) { setPolicies(config.loops); setInspection(state); setControl(state.control ?? null); setAvailable(true); }
+        const saved = savedLoopPolicies(config);
+        const inspected = loopInspection(state);
+        if (live && generation === epoch.current) { setPolicies(saved); setInspection(inspected); setControl(inspected.control ?? null); setAvailable(true); }
       } catch (error) { if (live && generation === epoch.current) { setAvailable(false); setControl(error instanceof ApiError ? error.control ?? null : null); } }
       finally { pending = false; }
     }
@@ -91,7 +91,7 @@ export function LoopExecution({work, workspace, connected, draft, disabled, avai
     const captured = snapshot;
     const capturedRevision = revision.current;
     try {
-      const value = await api<LoopPreview>('/api/loops/v1/preview', {policy_id: selected});
+      const value = loopPreview(await api<unknown>('/api/loops/v1/preview', {policy_id: selected}));
       if (current.current !== captured || revision.current !== capturedRevision) { setMessage('Work or configuration changed. Preview again.'); return; }
       const policy = policies.find(p => p.id === selected && eligible(p));
       if (!policy || value.schema_version !== 1 || !value.preview_id || !value.policy_enabled || value.policy_id !== policy.id || value.task_id !== work.id || value.agent_id !== work.assignees[0] || value.input !== work.input || value.expected_runs !== work.attempts.length || value.max_iterations !== policy.max_iterations || value.interval_seconds !== policy.interval_seconds) throw new Error('Unsupported or stale Loop preview. Refresh before trying again.');

@@ -162,3 +162,57 @@ test('authority loss invalidates focused preview and recovery requires fresh con
   expect(screen.queryByRole('button', {name: 'Authorize and start bounded Loop'})).toBeNull();
   expect(f.props.submit).not.toHaveBeenCalled();
 });
+
+test.each(['policy', 'preview', 'attempt', 'session', 'null'])('malformed %s responses preserve selection and drafts, invalidate focused consent and recover without replay', async kind => {
+  let poll: () => void = () => {};
+  const realInterval = globalThis.setInterval;
+  const interval = vi.spyOn(globalThis, 'setInterval').mockImplementation((callback, delay, ...args) => {
+    if (delay === 800) { poll = callback as () => void; return 1 as unknown as ReturnType<typeof setInterval>; }
+    return realInterval(callback, delay, ...args);
+  });
+  const f = setup();
+  f.data.sessions = [{...session, state: 'stopped'}];
+  const original = globalThis.fetch;
+  let broken = true;
+  vi.stubGlobal('fetch', async (path: string, options: RequestInit) => {
+    if (broken && path === '/api/config/v1/loops' && kind === 'policy') return new Response(JSON.stringify({loops: [{id: 'l', name: {bad: true}}]}));
+    if (broken && path === '/api/loops/v1' && kind !== 'policy') return new Response(JSON.stringify(kind === 'null' ? null : {...f.data,
+      sessions: kind === 'session' ? [null] : kind === 'preview' ? [{...session, preview: {bad: true}}] : [],
+      attempts: kind === 'attempt' ? [{session_id: 'session', run_id: 'r', ordinal: 1, execution: {error: {bad: true}}}] : [],
+    }));
+    return original(path, options);
+  });
+  try {
+    const view = render(<LoopExecution {...f.props} draft="Keep my draft" />);
+    await act(async () => {});
+    expect(screen.getByLabelText('Loop inspection').textContent).toMatch(/unavailable/);
+    broken = false; await act(async () => poll());
+    await inspect();
+    broken = true; await act(async () => poll());
+    expect(screen.queryByRole('button', {name: 'Authorize and start bounded Loop'})).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole('region', {name: 'Run a bounded Loop'}));
+    expect((screen.getByLabelText('Saved Loop') as HTMLSelectElement).value).toBe('l');
+    expect(screen.getByRole('region', {name: 'Loop session session'})).toBeTruthy();
+    expect((screen.getByRole('button', {name: 'Preview Loop with saved work'}) as HTMLButtonElement).disabled).toBe(true);
+    view.rerender(<LoopExecution {...f.props} draft="Keep my draft" />);
+    broken = false; await act(async () => poll());
+    expect((screen.getByLabelText('Saved Loop') as HTMLSelectElement).value).toBe('l');
+    expect(screen.queryByRole('button', {name: 'Authorize and start bounded Loop'})).toBeNull();
+    expect(f.props.submit).not.toHaveBeenCalled();
+    expect(f.fetcher.mock.calls.filter(([path]) => path.endsWith('/preview'))).toHaveLength(1);
+    await inspect();
+    expect(f.fetcher.mock.calls.filter(([path]) => path.endsWith('/preview'))).toHaveLength(2);
+    expect(f.props.submit).not.toHaveBeenCalled();
+  } finally { interval.mockRestore(); }
+});
+
+
+test.each(['__proto__', 'constructor', 'toString'])('renders prototype-named session state %s without mutations', async state => {
+  const f = setup();
+  f.data.sessions = [{...session, state}];
+  render(<LoopExecution {...f.props} />);
+  expect(await screen.findByText(content => content.startsWith(`Unknown session state: ${state} ·`))).toBeTruthy();
+  expect(screen.queryByRole('button', {name: 'Stop Loop session'})).toBeNull();
+  expect(f.props.submit).not.toHaveBeenCalled();
+  expect(f.fetcher.mock.calls.every(([path]) => path === '/api/loops/v1' || path === '/api/config/v1/loops')).toBe(true);
+});

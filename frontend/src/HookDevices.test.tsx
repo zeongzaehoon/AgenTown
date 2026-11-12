@@ -53,7 +53,7 @@ test('App opens exact IDs repeatedly, retains configuration and work drafts and 
     if (path === '/api/config/v1/skills') return new Response('{"skills":[]}');
     if (path === '/api/config/v1/loops') return new Response('{"loops":[]}');
     if (path === '/api/teams') return new Response('{"teams":[]}');
-    if (path === '/api/loops/v1') return new Response('{"schema_version":1,"control":{"state":"available","can_control":true,"message":""},"sessions":[],"attempts":[]}');
+    if (path === '/api/loops/v1') return new Response('{"schema_version":1,"control":{"state":"available","can_control":true,"message":""},"sessions":[],"attempts":[],"cancellation":""}');
     throw new Error(`Unexpected request ${path}`);
   });
   vi.stubGlobal('fetch', fetcher);

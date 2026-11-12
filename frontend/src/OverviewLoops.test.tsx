@@ -230,3 +230,50 @@ test('terminal, ungranted, stale and unavailable inspection prevents stop', asyn
   expect(button.getAttribute('aria-disabled')).toBe('true'); fireEvent.click(button);
   expect(fetcher.mock.calls.every(call => !String(call[0]).endsWith('/stop'))).toBe(true);
 });
+
+test.each([null, {sessions: [null]}, {sessions: [{...session, preview: null}]},
+  {sessions: [{...session, declared_source: {bad: true}}]},
+  {attempts: [{session_id: 's', run_id: 'r', ordinal: 1, execution: {output: {bad: true}}}]}])('malformed inspection retains history, keyboard navigation and explicit stop safety: %j', async malformed => {
+  let poll: () => void = () => {};
+  const realInterval = globalThis.setInterval;
+  const interval = vi.spyOn(globalThis, 'setInterval').mockImplementation((callback, delay, ...args) => {
+    if (delay === 800) { poll = callback as () => void; return 1 as unknown as ReturnType<typeof setInterval>; }
+    return realInterval(callback, delay, ...args);
+  });
+  let value: unknown = malformed === null ? null : {...initial(), ...malformed};
+  const fetcher = vi.fn(async (_path: string, init?: RequestInit) => {
+    expect(init?.method).toBe('GET');
+    return new Response(JSON.stringify(value));
+  });
+  vi.stubGlobal('fetch', fetcher);
+  try {
+    render(<OverviewLoops workspace={workspace} onOpenWork={vi.fn()} />);
+    await act(async () => {});
+    expect(screen.getByText(/No session data loaded/)).toBeTruthy();
+    value = initial(); await act(async () => poll());
+    const stop = screen.getByRole('button', {name: 'Stop Loop s from overview'});
+    stop.focus();
+    value = malformed === null ? null : {...initial(), ...malformed};
+    await act(async () => poll());
+    expect(screen.getByText(/showing stale sessions/)).toBeTruthy();
+    expect(document.activeElement).toBe(stop);
+    expect(stop.getAttribute('aria-disabled')).toBe('true');
+    fireEvent.click(stop);
+    expect(screen.getByRole('button', {name: /Open work:/})).toBeTruthy();
+    value = initial(); await act(async () => poll());
+    expect(stop.getAttribute('aria-disabled')).toBe('false');
+    expect(fetcher).toHaveBeenCalledTimes(4);
+  } finally { interval.mockRestore(); }
+});
+
+
+test.each(['__proto__', 'constructor', 'toString'])('renders prototype-named session state %s without mutations', async state => {
+  const fetcher = vi.fn(async (_path: string, _init?: RequestInit) => new Response(JSON.stringify({...initial(), sessions: [{...session, state}]})));
+  vi.stubGlobal('fetch', fetcher);
+  render(<OverviewLoops workspace={workspace} onOpenWork={vi.fn()} />);
+  expect(await screen.findByText(content => content.startsWith(`Unknown session state: ${state} ·`))).toBeTruthy();
+  const stop = screen.getByRole('button', {name: 'Stop Loop s from overview'});
+  expect(stop.getAttribute('aria-disabled')).toBe('true');
+  fireEvent.click(stop);
+  expect(fetcher.mock.calls.every(([path, init]) => path === '/api/loops/v1' && init?.method === 'GET' && init.body === undefined)).toBe(true);
+});
