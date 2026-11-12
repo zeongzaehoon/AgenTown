@@ -251,7 +251,7 @@ Implementation-stage evidence and outstanding validation are recorded in
 ### GitHub Release publication
 
 `.github/workflows/release-macos.yml` is the release boundary. Pushing a version
-tag such as `v0.1.0` starts a fresh Apple Silicon `macos-15` build, runs the deterministic
+tag such as `v0.1.0` starts a fresh Apple Silicon `macos-26` build, runs the deterministic
 helper tests, assembles the complete bundled service, mounts the produced DMG,
 and exercises install, first launch, restart, reinstall, persistence and owned
 process cleanup through `desktop/check_dmg.py`. Only after those checks pass does
