@@ -13,6 +13,8 @@ DECLARED_SOURCE = 'agentown-local-product'
 
 
 class LocalMcpExecution:
+    result_type = SelectedWorkExecutionResult
+    busy_code = 'execution_busy'
     def __init__(self, database, provider, model, *, configured=True, timeout=75):
         self.command = installed_server_command(database)
         self.provider, self.model = provider, model
@@ -23,9 +25,9 @@ class LocalMcpExecution:
 
     async def execute_work(self, request):
         if not self.configured:
-            return SelectedWorkExecutionResult('rejected', 'configuration_unavailable')
+            return self.result_type('rejected', 'configuration_unavailable')
         if self.closed or self.active is not None:
-            return SelectedWorkExecutionResult('rejected', 'execution_busy')
+            return self.result_type('rejected', self.busy_code)
         task = asyncio.create_task(self._execute(request))
         self.active = task
         def release(completed):
@@ -90,36 +92,11 @@ class LocalMcpExecution:
                 await send(dict(jsonrpc='2.0', method='notifications/initialized'))
                 # Mark uncertainty before writing: even a failed drain may deliver.
                 dispatched = True
-                await send(dict(jsonrpc='2.0', id=2, method='tools/call', params={
-                    'name': 'execute_text_work_v1', 'arguments': {
-                        'task_id': selected.task_id, 'expected_runs': selected.expected_runs,
-                        'resubmission_consent': selected.resubmission_consent,
-                        'provider': self.provider, 'model': self.model,
-                        'declared_source': DECLARED_SOURCE}}))
+                await send(dict(jsonrpc='2.0', id=2, method='tools/call', params=self._tool_call(selected)))
                 result = await receive(2)
-                if result.get('isError') is True:
-                    # Only known pre-admission errors are safe to classify as rejected.
-                    content = result.get('content', [])
-                    message = ' '.join(item.get('text', '') for item in content if isinstance(item, dict))
-                    if 'Provider configuration unavailable;' in message:
-                        return SelectedWorkExecutionResult('rejected', 'configuration_unavailable')
-                    for category in ('schema', 'invalid', 'unknown', 'stale', 'consent', 'owner', 'active', 'duplicate', 'assigned', 'storage'):
-                        if f'Operation rejected ({category});' in message:
-                            return SelectedWorkExecutionResult('rejected', 'admission_rejected')
-                    raise ValueError('Uncertain tool failure')
-                data = inspection_payload(result)
-                expected = {'schema_version', 'run_id', 'input', 'provider', 'model', 'deadline_unix_ms', 'output', 'error', 'quality'}
-                if (set(data) != expected or type(data['schema_version']) is not int or data['schema_version'] != 1
-                        or str(UUID(data['run_id'])) != data['run_id']
-                        or data['provider'] != self.provider or data['model'] != self.model
-                        or not isinstance(data['input'], str) or type(data['deadline_unix_ms']) is not int
-                        or data['quality'] != 'unverified'
-                        or not ((isinstance(data['output'], str) and data['error'] is None)
-                                or (data['output'] is None and isinstance(data['error'], str)))):
-                    raise ValueError('Invalid execution')
-                return SelectedWorkExecutionResult('completed', 'execution_recorded', InspectedExecution(**data))
+                return self._receipt(result, selected)
         except Exception:
-            return SelectedWorkExecutionResult('uncertain' if dispatched else 'unavailable',
+            return self.result_type('uncertain' if dispatched else 'unavailable',
                                                'delivery_uncertain' if dispatched else 'transport_unavailable')
         finally:
             if process is not None:
@@ -138,3 +115,32 @@ class LocalMcpExecution:
                 reaped.result()
                 if interrupted:
                     raise asyncio.CancelledError()
+
+    def _tool_call(self, selected):
+        return {'name': 'execute_text_work_v1', 'arguments': {
+            'task_id': selected.task_id, 'expected_runs': selected.expected_runs,
+            'resubmission_consent': selected.resubmission_consent,
+            'provider': self.provider, 'model': self.model, 'declared_source': DECLARED_SOURCE}}
+
+    def _receipt(self, result, selected):
+        if result.get('isError') is True:
+            # Only known pre-admission errors are safe to classify as rejected.
+            content = result.get('content', [])
+            message = ' '.join(item.get('text', '') for item in content if isinstance(item, dict))
+            if 'Provider configuration unavailable;' in message:
+                return self.result_type('rejected', 'configuration_unavailable')
+            for category in ('schema', 'invalid', 'unknown', 'stale', 'consent', 'owner', 'active', 'duplicate', 'assigned', 'storage'):
+                if f'Operation rejected ({category});' in message:
+                    return self.result_type('rejected', 'admission_rejected')
+            raise ValueError('Uncertain tool failure')
+        data = inspection_payload(result)
+        expected = {'schema_version', 'run_id', 'input', 'provider', 'model', 'deadline_unix_ms', 'output', 'error', 'quality'}
+        if (set(data) != expected or type(data['schema_version']) is not int or data['schema_version'] != 1
+                or str(UUID(data['run_id'])) != data['run_id']
+                or data['provider'] != self.provider or data['model'] != self.model
+                or not isinstance(data['input'], str) or type(data['deadline_unix_ms']) is not int
+                or data['quality'] != 'unverified'
+                or not ((isinstance(data['output'], str) and data['error'] is None)
+                        or (data['output'] is None and isinstance(data['error'], str)))):
+            raise ValueError('Invalid execution')
+        return self.result_type('completed', 'execution_recorded', InspectedExecution(**data))

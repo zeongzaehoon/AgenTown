@@ -372,3 +372,66 @@ a separate temporary-database launch on port 18765 returned HTTP 200 for state
 and `configuration_unavailable` for execution without settings. No existing
 service was changed. Consolidated supervisor checks, fresh installed-package
 validation and browser validation are pending; live provider calls were skipped.
+
+### Explicit expired-attempt recovery through local MCP
+
+Start the installed product against a disposable database (no API key or model
+is required for recovery):
+
+```sh
+agentown-web --database /tmp/agentown-recovery.sqlite --port 8765
+```
+
+Use an existing selected Task UUID from that database. Ordinary selected-work
+inspection is read-only:
+
+```sh
+curl -s http://127.0.0.1:8765/api/connections/v1/inspect-work \
+  -H 'Origin: http://127.0.0.1:8765' -H 'Content-Type: application/json' \
+  -d '{"task_id":"REPLACE_WITH_CANONICAL_TASK_UUID"}'
+```
+
+After separately consenting to expired-lease reconciliation, send:
+
+```sh
+curl -s http://127.0.0.1:8765/api/connections/v1/reconcile-work \
+  -H 'Origin: http://127.0.0.1:8765' -H 'Content-Type: application/json' \
+  -d '{"task_id":"REPLACE_WITH_CANONICAL_TASK_UUID","recovery_consent":true}'
+```
+
+The endpoint invokes the installed local MCP `get_work_history_v1` operation
+with `read_only=false` exactly once. Rust owns expiry and persistent transitions.
+Expired execution attempts become finished with `error: interrupted`; live leases
+remain active. Recovery creates no Run and performs no provider execution. It is
+separate from execution/retry consent and does not require provider configuration.
+The current MCP operation takes a database history snapshot and **may reconcile
+other expired leases in that snapshot**. The selected Task limits the returned
+history, not the mutation scope. Obtain consent with this scope understood.
+
+`status: confirmed`, `code: reconciliation_confirmed` confirms a validated
+selected-Task history receipt, not that every attempt was interrupted or that
+anything changed. `inspection.attempts` contains the resulting observed state;
+`evidence.mutation_scope` is `snapshot_expired_leases`. MCP tool errors remain uncertain: their sanitized category does not establish
+whether reconciliation already occurred. Failure before dispatch is
+`unavailable/transport_unavailable`. Missing/malformed receipts, timeouts or
+transport loss after dispatch are `uncertain/delivery_uncertain`: reconciliation
+may already have persisted. Inspect read-only before deciding on a new explicit
+request. The adapter never automatically replays. A busy/closing adapter returns
+`rejected/recovery_busy`. These operational outcomes use HTTP 200; malformed or
+unconsented bodies use 400, oversized bodies 413, and origin violations 403.
+No credentials, model, provider, or additional fields are accepted.
+
+Deterministic coverage, including installed `agentown-web` and its installed MCP
+child against a temporary database:
+
+```sh
+uv run --directory python --locked python -m pytest tests/test_selected_work_recovery.py
+```
+
+The installed-process test uses the shared fresh-wheel fixture. It records
+`selected-work-recovery.json` under `LLM_ENGINE_PACKAGE_EVIDENCE` when set (or
+its temporary directory), containing persisted before/after history and the API
+receipt. Fixtures seed historical expired attempts without waiting for expiry;
+a live attempt stays active. Provider construction is forbidden by the
+stdio-fixture tests, and no real provider calls are used. Building the wheel
+requires the repository's normal native/frontend build prerequisites.

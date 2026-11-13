@@ -55,7 +55,7 @@ class LocalBoundary:
         await self.app(scope, receive, secured)
 
 
-def create_app(database, model=None, *, port=8765, provider=None, provider_name="anthropic", execution_port=None):
+def create_app(database, model=None, *, port=8765, provider=None, provider_name="anthropic", execution_port=None, recovery_port=None):
     database = str(database)
     # Injection is for tests only. The CLI uses the selected configured provider.
     configuration = None
@@ -77,12 +77,19 @@ def create_app(database, model=None, *, port=8765, provider=None, provider_name=
         database, provider_name, model, configured=configuration is None)
     execute_selected_work = ExecuteSelectedWork(local_execution)
 
+    from .application.reconcile_selected_work import ReconcileSelectedWork, SelectedWorkRecoveryRequest
+    from .local_mcp_recovery import LocalMcpRecovery
+    local_recovery = recovery_port if recovery_port is not None else LocalMcpRecovery(database)
+    reconcile_selected_work = ReconcileSelectedWork(local_recovery)
+
     @asynccontextmanager
     async def lifespan(app):
         try:
             yield
         finally:
             await diagnostic.close()
+            if recovery_port is None:
+                await local_recovery.close()
             if execution_port is None:
                 await local_execution.close()
             await loops.close()
@@ -137,6 +144,18 @@ def create_app(database, model=None, *, port=8765, provider=None, provider_name=
             return response({"error": "Inspection request exceeds 120,000 bytes."}, 413)
         except (ValueError, TypeError, UnicodeError):
             return response({"error": "Send only task_id as a canonical Task UUID."}, 400)
+
+    async def connection_reconcile_work(request):
+        try:
+            data = await body(request)
+            if set(data) != {"task_id", "recovery_consent"}:
+                raise ValueError("Unexpected recovery fields")
+            selected = SelectedWorkRecoveryRequest(**data)
+        except RequestTooLarge:
+            return response({"error": "Recovery request exceeds 120,000 bytes."}, 413)
+        except (ValueError, TypeError, UnicodeError):
+            return response({"error": "Send canonical task_id and recovery_consent: true only."}, 400)
+        return response(await reconcile_selected_work.execute(selected))
 
     async def connection_execute_work(request):
         try:
@@ -381,6 +400,7 @@ def create_app(database, model=None, *, port=8765, provider=None, provider_name=
         Route("/api/loops/v1", loop_api, methods=["GET"]),
         Route("/api/loops/v1/{action}", loop_api, methods=["POST"]),
         Route("/api/connections/v1", connections, methods=["POST"]),
+        Route("/api/connections/v1/reconcile-work", connection_reconcile_work, methods=["POST"]),
         Route("/api/connections/v1/execute-work", connection_execute_work, methods=["POST"]),
         Route("/api/connections/v1/inspect-work", connection_inspect_work, methods=["POST"]),
         Route("/api/connections/v1/shared-data", connection_shared_data, methods=["POST"]),

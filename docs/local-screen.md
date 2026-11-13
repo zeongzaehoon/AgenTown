@@ -2802,3 +2802,10 @@ must finish or be reconciled through the existing recovery procedure in
 Real provider calls remain skipped under the user’s live-test policy. React
 interaction fixtures exercise consent and recovery without credentials; their
 outputs are deterministic fixtures, not live LLM validation.
+
+Selected-work expired attempts can now be explicitly reconciled through the
+same-origin `POST /api/connections/v1/reconcile-work` API with
+`{"task_id":"<canonical UUID>","recovery_consent":true}`. This is separate
+from inspection and execution; the screen recovery control is subsequent work.
+See [runnable recovery steps](text-execution.md#explicit-expired-attempt-recovery-through-local-mcp)
+for consent scope, response outcomes, and deterministic installed-process coverage.

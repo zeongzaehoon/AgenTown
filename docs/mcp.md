@@ -1184,3 +1184,12 @@ installed stdio server against the selected database. It declares
 credentials or model overrides in execution requests. It does not establish an
 external-client connection. The separate read-only inspection port stays unchanged.
 See [request and recovery contract](text-execution.md#explicit-local-product-execution-api).
+
+The local web recovery endpoint `POST /api/connections/v1/reconcile-work` calls
+installed `get_work_history_v1(task_id, read_only=false)` once after separate
+`recovery_consent: true`. Ordinary web inspection continues to pass
+`read_only=true`. The mutating history operation may reconcile **other expired
+leases in its database snapshot**; its Task argument selects returned history,
+not Task-isolated mutation. It never starts a Run or provider call. See
+[the recovery API procedure](text-execution.md#explicit-expired-attempt-recovery-through-local-mcp)
+for delivery uncertainty and no-replay behavior.

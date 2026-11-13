@@ -138,3 +138,14 @@ request/result values and `SelectedWorkExecutionPort`, separate from
 the selected database using server configuration. Rust remains the sole admission
 and persistence authority. Transport uncertainty produces no replay. See
 [text execution](text-execution.md#explicit-local-product-execution-api) for the API.
+
+Explicit selected-work recovery enters through the same-origin web boundary,
+then `ReconcileSelectedWork` and `SelectedWorkRecoveryPort`. `LocalMcpRecovery`
+reuses the execution adapter's bounded single-dispatch stdio lifecycle while
+specializing the tool and validated receipt. It invokes only the installed MCP
+`get_work_history_v1(read_only=false)` operation, without provider configuration.
+Rust remains the lease-expiry and persistence authority. The operation's snapshot
+may reconcile other expired leases; selected-Task receipt filtering does not
+restrict mutation scope. Inspection stays read-only, and uncertain dispatch is
+never replayed automatically. Receipt validation reuses the selected-work history
+validator; a confirmed receipt does not imply all attempts ended.
