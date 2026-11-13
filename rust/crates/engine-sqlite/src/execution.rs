@@ -113,7 +113,59 @@ pub(super) fn validate(tx: &Connection, core: &Core) -> Result<(), StorageError>
     }
     Ok(())
 }
+/// Advisory saved-work state. Never grants admission or records consent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TextWorkPreflight {
+    pub task: TaskId,
+    pub input: Option<String>,
+    pub assignees: Vec<AgentId>,
+    pub expected_runs: usize,
+    pub active_attempt: bool,
+    pub eligibility: &'static str,
+}
+
+fn text_work_eligibility(core: &Core, task: TaskId) -> Result<Vec<AgentId>, StorageError> {
+    let work = core.task(task)?;
+    let assignees: Vec<_> = work.assignees().collect();
+    if assignees.len() != 1 {
+        return Err(StorageError::InvalidData(
+            "work must have exactly one assigned employee".into(),
+        ));
+    }
+    if work.title().trim().is_empty() || work.title().len() > 100_000 {
+        return Err(StorageError::InvalidData("invalid saved work text".into()));
+    }
+    core.validate_run_start(task, "text_execution", "preflight", &assignees)?;
+    Ok(assignees)
+}
+
 impl ReadOnlyStore {
+    /// One read transaction; expired attempts remain active until a mutation recovers them.
+    pub fn preflight_text_work(&mut self, task: TaskId) -> Result<TextWorkPreflight, StorageError> {
+        let (core, _) = self.execution_snapshot()?;
+        let mut result = TextWorkPreflight {
+            task,
+            input: None,
+            assignees: Vec::new(),
+            expected_runs: 0,
+            active_attempt: false,
+            eligibility: "missing",
+        };
+        if let Ok(work) = core.task(task) {
+            result.input = Some(work.title().to_owned());
+            result.assignees = work.assignees().collect();
+            let runs: Vec<_> = core.runs_for_task(task)?.collect();
+            result.expected_runs = runs.len();
+            result.active_attempt = runs.iter().any(|r| r.state() == RunState::Active);
+            result.eligibility = if text_work_eligibility(&core, task).is_ok() {
+                "eligible"
+            } else {
+                "ineligible"
+            };
+        }
+        Ok(result)
+    }
+
     /// Inspect one coherent history snapshot without recovering expired leases.
     /// The read-only connection cannot initialize, migrate, or persist state.
     pub fn execution_snapshot(&mut self) -> Result<(Core, Vec<Execution>), StorageError> {
@@ -255,12 +307,7 @@ impl SqliteStore {
         recover(&tx, timestamp)?;
         let before = load(&tx)?;
         let work = before.task(task)?;
-        let assignees: Vec<_> = work.assignees().collect();
-        if assignees.len() != 1 {
-            return Err(StorageError::InvalidData(
-                "work must have exactly one assigned employee".into(),
-            ));
-        }
+        let assignees = text_work_eligibility(&before, task)?;
         let count = before.runs_for_task(task)?.count();
         if count != expected_runs {
             return Err(StorageError::InvalidData(
@@ -273,9 +320,6 @@ impl SqliteStore {
             ));
         }
         let input = work.title();
-        if input.trim().is_empty() || input.len() > 100_000 {
-            return Err(StorageError::InvalidData("invalid saved work text".into()));
-        }
         let mut after = before.clone();
         let id = after.start_run(task, "text_execution", provider, timestamp, &assignees)?;
         persist_execution_changes(&tx, &before, &after, true)?;
@@ -381,17 +425,23 @@ mod tests {
             .start_execution(t, a, "Summarize: hello", "test", "fixture")
             .unwrap();
         let mut other = SqliteStore::open(&path).unwrap();
-        assert!(other
-            .start_execution(t, a, "duplicate", "test", "fixture")
-            .is_err());
-        assert!(other
-            .transact(|c| c.finish_run(first.run, RunOutcome::Failure, now().unwrap()))
-            .is_err());
+        assert!(
+            other
+                .start_execution(t, a, "duplicate", "test", "fixture")
+                .is_err()
+        );
+        assert!(
+            other
+                .transact(|c| c.finish_run(first.run, RunOutcome::Failure, now().unwrap()))
+                .is_err()
+        );
         // Inject failure after result write, during terminal Run write.
         store.connection.execute_batch("CREATE TRIGGER fail_finish BEFORE UPDATE ON runs BEGIN SELECT RAISE(ABORT,'injected'); END;").unwrap();
-        assert!(store
-            .finish_execution(first.run, Some("result"), None)
-            .is_err());
+        assert!(
+            store
+                .finish_execution(first.run, Some("result"), None)
+                .is_err()
+        );
         drop(store);
         let mut store = SqliteStore::open(&path).unwrap();
         assert_eq!(store.execution(first.run).unwrap(), first);
@@ -406,12 +456,16 @@ mod tests {
         let finished = store
             .finish_execution(first.run, Some("result"), None)
             .unwrap();
-        assert!(store
-            .finish_execution(first.run, Some("late"), None)
-            .is_err());
-        assert!(store
-            .finish_execution(first.run, None, Some("secret error"))
-            .is_err());
+        assert!(
+            store
+                .finish_execution(first.run, Some("late"), None)
+                .is_err()
+        );
+        assert!(
+            store
+                .finish_execution(first.run, None, Some("secret error"))
+                .is_err()
+        );
         let retry = store
             .start_execution(t, a, "Draft next", "test", "fixture")
             .unwrap();
@@ -450,17 +504,23 @@ mod tests {
         let run = store
             .start_execution(t, a, "original", "test", "model")
             .unwrap();
-        assert!(store
-            .finish_execution(run.run, Some("partial"), Some("output_limit"))
-            .is_err());
-        assert!(store
-            .finish_execution(run.run, None, Some("output_limit: private provider detail"))
-            .is_err());
+        assert!(
+            store
+                .finish_execution(run.run, Some("partial"), Some("output_limit"))
+                .is_err()
+        );
+        assert!(
+            store
+                .finish_execution(run.run, None, Some("output_limit: private provider detail"))
+                .is_err()
+        );
         assert_eq!(store.execution(run.run).unwrap(), run);
         store.connection.execute_batch("CREATE TRIGGER fail_limit BEFORE UPDATE ON runs BEGIN SELECT RAISE(ABORT,'injected'); END;").unwrap();
-        assert!(store
-            .finish_execution(run.run, None, Some("output_limit"))
-            .is_err());
+        assert!(
+            store
+                .finish_execution(run.run, None, Some("output_limit"))
+                .is_err()
+        );
         drop(store);
         let mut store = SqliteStore::open(&path).unwrap();
         assert_eq!(store.execution(run.run).unwrap(), run);
@@ -725,9 +785,11 @@ mod tests {
         assert_eq!(ReadOnlyStore::open(&path).unwrap().read().unwrap(), old);
         let mut store = SqliteStore::open(&path).unwrap();
         assert_eq!(store.read().unwrap(), old);
-        assert!(store
-            .start_execution(t, a, "input", "test", "fixture")
-            .is_ok());
+        assert!(
+            store
+                .start_execution(t, a, "input", "test", "fixture")
+                .is_ok()
+        );
     }
 }
 
@@ -778,20 +840,24 @@ mod integrity_tests {
                 ("run".into(), retry.run.to_string())
             ]
         );
-        assert!(store
-            .connection
-            .execute(
-                "UPDATE executions SET input='changed' WHERE run_id=?1",
-                [first.run.to_string()]
-            )
-            .is_err());
-        assert!(store
-            .connection
-            .execute(
-                "DELETE FROM executions WHERE run_id=?1",
-                [first.run.to_string()]
-            )
-            .is_err());
+        assert!(
+            store
+                .connection
+                .execute(
+                    "UPDATE executions SET input='changed' WHERE run_id=?1",
+                    [first.run.to_string()]
+                )
+                .is_err()
+        );
+        assert!(
+            store
+                .connection
+                .execute(
+                    "DELETE FROM executions WHERE run_id=?1",
+                    [first.run.to_string()]
+                )
+                .is_err()
+        );
         // Corrupt fixture bypasses SQL protection; opening must reject, never repair.
         store
             .connection
@@ -833,16 +899,20 @@ mod web_admission_tests {
         let first = store
             .start_execution_guarded(task, agent, "Draft text", "test", "model", Some(0))
             .unwrap();
-        assert!(other
-            .start_execution_guarded(task, agent, "Draft text", "test", "model", Some(0))
-            .is_err());
+        assert!(
+            other
+                .start_execution_guarded(task, agent, "Draft text", "test", "model", Some(0))
+                .is_err()
+        );
         store
             .finish_execution(first.run, Some("response"), None)
             .unwrap();
         // Even a duplicate arriving after completion is not a new explicit retry.
-        assert!(other
-            .start_execution_guarded(task, agent, "Draft text", "test", "model", Some(0))
-            .is_err());
+        assert!(
+            other
+                .start_execution_guarded(task, agent, "Draft text", "test", "model", Some(0))
+                .is_err()
+        );
         drop(store);
         let mut reopened = SqliteStore::open(&path).unwrap();
         assert_eq!(
@@ -869,6 +939,122 @@ mod web_admission_tests {
 mod mcp_tests {
     use super::*;
     #[test]
+    fn preflight_is_advisory_and_preserves_all_records() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("preflight.db");
+        let mut store = SqliteStore::open(&path).unwrap();
+        let (task, unassigned, cancelled, multiple, agent) = store
+            .transact(|c| {
+                let a = c.create_agent("Writer")?;
+                let b = c.create_agent("Editor")?;
+                let t = c.create_text_work("Saved input")?;
+                c.assign(t, a)?;
+                let u = c.create_task("Unassigned")?;
+                let cancelled = c.create_task("Cancelled")?;
+                c.assign(cancelled, a)?;
+                c.transition(cancelled, TaskStatus::Cancelled)?;
+                let multiple = c.create_task("Two employees")?;
+                c.assign(multiple, a)?;
+                c.assign(multiple, b)?;
+                Ok((t, u, cancelled, multiple, a))
+            })
+            .unwrap();
+        let missing: TaskId = "00000000-0000-4000-8000-000000000001".parse().unwrap();
+        drop(store);
+        let bytes = std::fs::read(&path).unwrap();
+        let mut reader = ReadOnlyStore::open(&path).unwrap();
+        let initial = reader.preflight_text_work(task).unwrap();
+        assert_eq!(initial.input.as_deref(), Some("Saved input"));
+        assert_eq!(initial.assignees, vec![agent]);
+        assert_eq!(initial.expected_runs, 0);
+        assert!(!initial.active_attempt);
+        assert_eq!(initial.eligibility, "eligible");
+        for id in [unassigned, cancelled, multiple] {
+            assert_eq!(
+                reader.preflight_text_work(id).unwrap().eligibility,
+                "ineligible"
+            );
+        }
+        let absent = reader.preflight_text_work(missing).unwrap();
+        assert_eq!(absent.eligibility, "missing");
+        assert_eq!(absent.input, None);
+        drop(reader);
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+
+        let mut store = SqliteStore::open(&path).unwrap();
+        let run = store
+            .start_mcp_execution(task, "test", "fixture", 0, false, "client")
+            .unwrap();
+        let mut reader = ReadOnlyStore::open(&path).unwrap();
+        let active = reader.preflight_text_work(task).unwrap();
+        assert_eq!(active.expected_runs, 1);
+        assert!(active.active_attempt);
+        assert_eq!(active.eligibility, "ineligible");
+        assert!(
+            store
+                .start_mcp_execution(task, "test", "fixture", 1, true, "client")
+                .is_err()
+        );
+        store
+            .finish_execution(run.run, Some("Result"), None)
+            .unwrap();
+        let prior = reader.preflight_text_work(task).unwrap();
+        assert_eq!(prior.expected_runs, 1);
+        assert!(!prior.active_attempt);
+        assert_eq!(prior.eligibility, "eligible");
+        // The initial preflight is stale; neither it nor a fresh read is authority.
+        assert!(
+            store
+                .start_mcp_execution(
+                    task,
+                    "test",
+                    "fixture",
+                    initial.expected_runs,
+                    true,
+                    "client"
+                )
+                .is_err()
+        );
+        assert!(
+            store
+                .start_mcp_execution(
+                    task,
+                    "test",
+                    "fixture",
+                    prior.expected_runs,
+                    false,
+                    "client"
+                )
+                .is_err()
+        );
+        let expired = store
+            .transact(|c| {
+                c.start_run(
+                    task,
+                    "text_execution",
+                    "test",
+                    RunTimestamp::from_unix_millis(1).unwrap(),
+                    &[agent],
+                )
+            })
+            .unwrap();
+        store.connection.execute(
+            "INSERT INTO executions(run_id,input,provider,model,deadline) VALUES (?1,'Saved input','test','fixture',120001)",
+            [expired.to_string()],
+        ).unwrap();
+        drop(store);
+        let bytes = std::fs::read(&path).unwrap();
+        let before = reader.execution_snapshot().unwrap();
+        let expired_state = reader.preflight_text_work(task).unwrap();
+        assert!(expired_state.active_attempt);
+        assert_eq!(expired_state.expected_runs, 2);
+        assert_eq!(expired_state.eligibility, "ineligible");
+        assert_eq!(reader.execution_snapshot().unwrap(), before);
+        drop(reader);
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+    }
+
+    #[test]
     fn rejected_mcp_admission_preserves_saved_work() {
         let mut store = SqliteStore::open(":memory:").unwrap();
         let (task, agent) = store
@@ -879,9 +1065,11 @@ mod mcp_tests {
             })
             .unwrap();
         // Missing assignment must not create an attempt or source record.
-        assert!(store
-            .start_mcp_execution(task, "test", "model", 0, false, "codex")
-            .is_err());
+        assert!(
+            store
+                .start_mcp_execution(task, "test", "model", 0, false, "codex")
+                .is_err()
+        );
         store.transact(|c| c.assign(task, agent)).unwrap();
         for (provider, model, source, expected) in [
             ("", "model", "codex", 0),
@@ -890,9 +1078,11 @@ mod mcp_tests {
             ("test", "model", "codex\n", 0),
             ("test", "model", "codex", 1),
         ] {
-            assert!(store
-                .start_mcp_execution(task, provider, model, expected, false, source)
-                .is_err());
+            assert!(
+                store
+                    .start_mcp_execution(task, provider, model, expected, false, source)
+                    .is_err()
+            );
             let (core, executions) = store.execution_snapshot().unwrap();
             assert_eq!(core.task(task).unwrap().title(), "Saved input");
             assert_eq!(
@@ -903,9 +1093,11 @@ mod mcp_tests {
             assert!(executions.is_empty());
             assert!(store.execution_sources().unwrap().is_empty());
         }
-        assert!(store
-            .start_mcp_execution(task, "test", "model", 0, false, "codex")
-            .is_ok());
+        assert!(
+            store
+                .start_mcp_execution(task, "test", "model", 0, false, "codex")
+                .is_ok()
+        );
     }
 
     #[test]
@@ -922,9 +1114,11 @@ mod mcp_tests {
             })
             .unwrap();
         store.connection.execute_batch("CREATE TRIGGER fail_source BEFORE INSERT ON execution_sources BEGIN SELECT RAISE(ABORT,'injected'); END;").unwrap();
-        assert!(store
-            .start_mcp_execution(task, "test", "model", 0, false, "codex")
-            .is_err());
+        assert!(
+            store
+                .start_mcp_execution(task, "test", "model", 0, false, "codex")
+                .is_err()
+        );
         drop(store);
         let mut store = SqliteStore::open(&path).unwrap();
         assert_eq!(store.read().unwrap().runs().len(), 0);
@@ -938,21 +1132,29 @@ mod mcp_tests {
             .unwrap();
         assert_eq!(first.input, "Saved input");
         let mut other = SqliteStore::open(&path).unwrap();
-        assert!(other
-            .start_mcp_execution(task, "test", "model", 0, false, "codex")
-            .is_err());
-        assert!(other
-            .start_mcp_execution(task, "test", "model", 1, true, "codex")
-            .is_err());
+        assert!(
+            other
+                .start_mcp_execution(task, "test", "model", 0, false, "codex")
+                .is_err()
+        );
+        assert!(
+            other
+                .start_mcp_execution(task, "test", "model", 1, true, "codex")
+                .is_err()
+        );
         store
             .finish_execution(first.run, None, Some("provider_error"))
             .unwrap();
-        assert!(other
-            .start_mcp_execution(task, "test", "model", 0, true, "codex")
-            .is_err());
-        assert!(other
-            .start_mcp_execution(task, "test", "model", 1, false, "codex")
-            .is_err());
+        assert!(
+            other
+                .start_mcp_execution(task, "test", "model", 0, true, "codex")
+                .is_err()
+        );
+        assert!(
+            other
+                .start_mcp_execution(task, "test", "model", 1, false, "codex")
+                .is_err()
+        );
         let retry = other
             .start_mcp_execution(task, "test", "model", 1, true, "claude-code")
             .unwrap();

@@ -14,6 +14,8 @@ from .execution import configured_provider, finish_text, record
 from .providers import runtime_secrets
 from .loop_execution import LoopControlError, LoopService, control_availability
 
+from .application.preflight_text_work import TextWorkPreflight, preflight_text_work
+
 from . import _native
 
 
@@ -59,6 +61,17 @@ class Execution(Record):
     output: str | None
     error: str | None
     quality: Literal["unverified"] = "unverified"
+
+
+class TextPreflight(Record):
+    schema_version: Literal[1] = 1
+    task_id: UUID
+    input: str | None
+    employee_ids: list[UUID]
+    expected_runs: int
+    active_attempt: bool
+    eligibility: Literal["missing", "ineligible", "eligible"]
+    resubmission_consent_required: bool
 
 
 class Skill(Record):
@@ -490,6 +503,25 @@ def create_server(database: str, *, provider_factory=None, auth=None) -> FastMCP
         """Save text and assign one employee atomically; does not execute it."""
         safe_text(employee_id, text)
         return WorkSaved(task=task(query(_native.create_assigned_work, text, employee_id)))
+
+    @server.tool(annotations=annotations)
+    def preflight_text_work_v1(task_id: str) -> TextPreflight:
+        """Read saved ordinary text and advisory eligibility without execution authority.
+
+        Creates no Run or consent and does not recover expired leases or call a
+        provider. Missing work has null input. Active includes unrecovered expired
+        attempts. Show saved input and obtain explicit resubmission consent when
+        required. Execution always rechecks current state atomically.
+        """
+        safe_text(task_id)
+
+        def read(identity: str) -> TextWorkPreflight:
+            row = query(_native.preflight_text_work, identity)
+            safe_text(row["input"] or "")
+            return TextWorkPreflight(**row)
+
+        result = preflight_text_work(task_id, read)
+        return TextPreflight(**vars(result))
 
     @server.tool(annotations=execution_annotations)
     async def execute_text_work_v1(

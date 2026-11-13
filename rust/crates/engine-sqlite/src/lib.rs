@@ -16,7 +16,7 @@ pub use loop_execution::{LoopAttempt, LoopPreview, LoopSession};
 mod loop_owner;
 pub use loop_owner::LoopExecutionOwner;
 mod skill_execution;
-pub use execution::Execution;
+pub use execution::{Execution, TextWorkPreflight};
 pub use hook_execution::{HookPreview, HookProvenance};
 pub use skill_execution::{SkillPreview, SkillProvenance};
 

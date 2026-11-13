@@ -245,9 +245,11 @@ mod tests {
         store
             .finish_execution(e.run, None, Some("provider_error"))
             .unwrap();
-        assert!(store
-            .start_skill_execution(t, &p.preview_id, "fixture", "test", 1, &[])
-            .is_err());
+        assert!(
+            store
+                .start_skill_execution(t, &p.preview_id, "fixture", "test", 1, &[])
+                .is_err()
+        );
         store
             .transact(|c| c.update_skill(s, "Concise", "New instructions"))
             .unwrap();
@@ -287,14 +289,18 @@ mod tests {
         let p = store.preview_skill(t, s, &[]).unwrap();
         store.transact(|c| c.set_skill_enabled(s, false)).unwrap();
         store.transact(|c| c.set_skill_enabled(s, true)).unwrap();
-        assert!(store
-            .start_skill_execution(t, &p.preview_id, "fixture", "test", 0, &[])
-            .is_err());
+        assert!(
+            store
+                .start_skill_execution(t, &p.preview_id, "fixture", "test", 0, &[])
+                .is_err()
+        );
         let p = store.preview_skill(t, s, &[]).unwrap();
         store.connection.execute_batch("CREATE TRIGGER injected_failure BEFORE INSERT ON skill_provenance BEGIN SELECT RAISE(ABORT,'fixture'); END;").unwrap();
-        assert!(store
-            .start_skill_execution(t, &p.preview_id, "fixture", "test", 0, &[])
-            .is_err());
+        assert!(
+            store
+                .start_skill_execution(t, &p.preview_id, "fixture", "test", 0, &[])
+                .is_err()
+        );
         drop(store);
         let mut store = SqliteStore::open(&path).unwrap();
         assert_eq!(store.read().unwrap().runs_for_task(t).unwrap().count(), 0);
@@ -303,9 +309,11 @@ mod tests {
             .connection
             .execute_batch("DROP TRIGGER injected_failure")
             .unwrap();
-        assert!(store
-            .start_skill_execution(t, &p.preview_id, "fixture", "test", 0, &["sentence".into()])
-            .is_err());
+        assert!(
+            store
+                .start_skill_execution(t, &p.preview_id, "fixture", "test", 0, &["sentence".into()])
+                .is_err()
+        );
         store
             .start_skill_execution(t, &p.preview_id, "fixture", "test", 0, &[])
             .unwrap();
@@ -318,7 +326,23 @@ mod tests {
         let (task, skill) = seed(&mut store);
         let preview = store.preview_skill(task, skill, &[]).unwrap();
         for source in ["", " ", "bad\nsource", &"é".repeat(41)] {
-            assert!(store
+            assert!(
+                store
+                    .start_skill_execution_with_source(
+                        task,
+                        &preview.preview_id,
+                        "fixture",
+                        "test",
+                        0,
+                        &[],
+                        Some(source),
+                    )
+                    .is_err()
+            );
+        }
+        store.connection.execute_batch("CREATE TRIGGER fail_skill_source BEFORE INSERT ON execution_sources BEGIN SELECT RAISE(ABORT,'fixture'); END;").unwrap();
+        assert!(
+            store
                 .start_skill_execution_with_source(
                     task,
                     &preview.preview_id,
@@ -326,22 +350,10 @@ mod tests {
                     "test",
                     0,
                     &[],
-                    Some(source),
+                    Some("codex"),
                 )
-                .is_err());
-        }
-        store.connection.execute_batch("CREATE TRIGGER fail_skill_source BEFORE INSERT ON execution_sources BEGIN SELECT RAISE(ABORT,'fixture'); END;").unwrap();
-        assert!(store
-            .start_skill_execution_with_source(
-                task,
-                &preview.preview_id,
-                "fixture",
-                "test",
-                0,
-                &[],
-                Some("codex"),
-            )
-            .is_err());
+                .is_err()
+        );
         assert_eq!(
             store.read().unwrap().runs_for_task(task).unwrap().count(),
             0

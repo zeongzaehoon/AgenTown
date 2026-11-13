@@ -72,8 +72,8 @@ def test_authenticated_workflow_and_isolation(cli, tmp_path, signing):
         assert init.status_code == 200
         assert init.json()["result"]["serverInfo"]["name"] == "AgenTown"
         tools = rpc("tools/list", bearer=valid).json()["result"]["tools"]
-        assert len(tools) == 19
-        assert {'preview_loop_v1', 'start_loop_v1', 'stop_loop_v1'} <= {
+        assert len(tools) == 20
+        assert {'preflight_text_work_v1', 'preview_loop_v1', 'start_loop_v1', 'stop_loop_v1'} <= {
             tool['name'] for tool in tools}
         for tool in tools:
             assert "database" not in tool["inputSchema"].get("properties", {})

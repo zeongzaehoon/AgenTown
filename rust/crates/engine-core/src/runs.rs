@@ -78,6 +78,36 @@ impl Core {
         started_at: RunTimestamp,
         participants: &[AgentId],
     ) -> Result<RunId, DomainError> {
+        self.validate_run_start(task, stage, reporting_source, participants)?;
+        let selected = participants.iter().copied().collect();
+        let id = loop {
+            let id = RunId(Uuid::new_v4());
+            if !self.runs.contains_key(&id) {
+                break id;
+            }
+        };
+        self.runs.insert(
+            id,
+            Run {
+                id,
+                task,
+                stage: stage.trim().into(),
+                reporting_source: reporting_source.trim().into(),
+                started_at,
+                participants: selected,
+                state: RunState::Active,
+            },
+        );
+        Ok(id)
+    }
+    /// Check admission without creating an attempt or generating an identity.
+    pub fn validate_run_start(
+        &self,
+        task: TaskId,
+        stage: &str,
+        reporting_source: &str,
+        participants: &[AgentId],
+    ) -> Result<(), DomainError> {
         let current = self.task(task)?;
         if current.status() == TaskStatus::Cancelled {
             return Err(DomainError::TaskCancelled(task));
@@ -108,25 +138,7 @@ impl Core {
         {
             return Err(DomainError::ActiveRunExists(task));
         }
-        let id = loop {
-            let id = RunId(Uuid::new_v4());
-            if !self.runs.contains_key(&id) {
-                break id;
-            }
-        };
-        self.runs.insert(
-            id,
-            Run {
-                id,
-                task,
-                stage: stage.trim().into(),
-                reporting_source: reporting_source.trim().into(),
-                started_at,
-                participants: selected,
-                state: RunState::Active,
-            },
-        );
-        Ok(id)
+        Ok(())
     }
     pub fn run(&self, id: RunId) -> Result<&Run, DomainError> {
         self.runs.get(&id).ok_or(DomainError::UnknownRun(id))

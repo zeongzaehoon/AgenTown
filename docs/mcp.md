@@ -61,7 +61,7 @@ The new tools publish typed input and output schemas. Every new result carries
 1. `create_employee_v1({"name":"Writer"})` returns `employee.id`.
 2. `save_text_work_v1({"employee_id":"EMPLOYEE_UUID","text":"Draft a greeting"})`
    returns `task.id`. Saving assigns the employee atomically and makes no LLM call.
-3. `get_work_history_v1({"task_id":"TASK_UUID"})` returns `task` and `attempts`.
+3. `preflight_text_work_v1({"task_id":"TASK_UUID"})` returns saved input and advisory admission state (below). Use `get_work_history_v1` for attempts/results.
 4. After an explicit user execution request, call
    `execute_text_work_v1({"task_id":"TASK_UUID","provider":"anthropic","model":"YOUR_MODEL","expected_runs":0,"resubmission_consent":false,"declared_source":"codex"})`.
 5. Inspect history again. A Run includes its stable `id`, `task_id`, participant
@@ -94,6 +94,64 @@ History inspection is annotated **non-read-only**, idempotent and closed-world:
 its atomic native snapshot can finalize expired execution leases, without making
 provider requests. Generic Runs with no text execution have `execution: null`.
 The original four inspection tools retain their read-only behavior.
+
+## Read-only ordinary text preflight v1
+
+Launch the existing server against your initialized product database:
+
+```sh
+agentown-mcp --database /absolute/path/company.sqlite
+```
+
+After the MCP initialize handshake and `notifications/initialized`, discover the
+contract with `tools/list`, then send this exact `tools/call` request, substituting
+only the saved Task UUID:
+
+```json
+{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"preflight_text_work_v1","arguments":{"task_id":"TASK_UUID"}}}
+```
+
+The structured result for initial assigned work is:
+
+```json
+{"schema_version":1,"task_id":"TASK_UUID","input":"Draft a greeting","employee_ids":["EMPLOYEE_UUID"],"expected_runs":0,"active_attempt":false,"eligibility":"eligible","resubmission_consent_required":false}
+```
+
+`task_id` is the canonical saved Task identity; `input` is its exact saved text
+and `employee_ids` contains its current assigned employee identities.
+`expected_runs` counts **all** recorded Task attempts, including non-text Runs.
+`active_attempt` reflects stored Run state, including expired leases that have
+not been recovered. `eligibility` is `eligible` when ordinary text admission
+rules permit execution in that snapshot, `ineligible` for active work, cancelled
+work, invalid saved text, or an assignment other than exactly one employee.
+A missing valid UUID returns `eligibility: "missing"`, null input, empty employee
+IDs, zero attempts and false flags. Malformed IDs and unavailable storage return
+sanitized tool errors. Configured secrets in saved input are rejected before
+returning the text.
+
+This tool is read-only, idempotent and closed-world. It uses one Rust-backed
+atomic read snapshot. It creates no Run, recovers no lease, persists no consent,
+calls no provider, and grants no execution authority. It does not validate
+provider configuration. No preview token is issued or consumed.
+
+Before resubmission, show the saved input to the user and obtain explicit consent.
+Refresh preflight, then, only after the user's execution request, send:
+
+```json
+{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"execute_text_work_v1","arguments":{"task_id":"TASK_UUID","provider":"anthropic","model":"YOUR_MODEL","expected_runs":1,"resubmission_consent":true,"declared_source":"codex"}}}
+```
+
+Use the returned count rather than the example count of 1. A preflight result
+can become stale immediately: `execute_text_work_v1` still checks the current
+count, active execution, assignment and explicit resubmission consent atomically.
+Refresh after rejection; never blindly replay a costly execution call. For
+lease recovery or recorded results, explicitly use `get_work_history_v1`.
+
+Deterministic coverage is in `test_read_only_text_preflight`,
+`test_explicit_workflow_retry_failure_and_reopen`, and Rust
+`preflight_is_advisory_and_preserves_all_records`. These cover discovery,
+canonical identity, missing/ineligible work, prior/active/expired attempts,
+unchanged records and stale admission. Live provider calls remain skipped.
 
 ## Deterministic protocol reproduction
 

@@ -75,11 +75,12 @@ def server_processes(monkeypatch):
 
 
 @asynccontextmanager
-async def session(database):
+async def session(database, *, env=None):
     with anyio.fail_after(30):
         async with stdio.stdio_client(StdioServerParameters(
             command=executable(), args=["--database", str(database)],
             cwd=str(database.parent),
+            env=env,
         )) as streams:
             async with ClientSession(*streams) as client:
                 initialized = await client.initialize()
@@ -91,7 +92,7 @@ async def discover(client):
     tools = {tool.name: tool for tool in (await client.list_tools()).tools}
     assert set(tools) == {"list_agents", "get_agent", "list_tasks", "get_task",
                           "create_employee_v1", "save_text_work_v1",
-                          "execute_text_work_v1", "get_work_history_v1", "list_skills_v1",
+                          "execute_text_work_v1", "preflight_text_work_v1", "get_work_history_v1", "list_skills_v1",
                           "preview_skill_work_v1", "execute_skill_work_v1", "list_hooks_v1",
                           "preview_hook_work_v1", "execute_hook_work_v1",
                           "list_loops_v1", "inspect_loop_sessions_v1",
@@ -99,7 +100,7 @@ async def discover(client):
     for name, tool in tools.items():
         assert tool.annotations.readOnlyHint == (name in {
             "list_agents", "get_agent", "list_tasks", "get_task", "list_skills_v1", "list_hooks_v1",
-            "list_loops_v1", "inspect_loop_sessions_v1"})
+            "list_loops_v1", "inspect_loop_sessions_v1", "preflight_text_work_v1"})
         assert tool.outputSchema
         jsonschema.Draft202012Validator.check_schema(tool.outputSchema)
         if name.endswith("_v1"):
@@ -240,6 +241,49 @@ async def fixture_session(database, *, forbid_provider=False, inspect_only=False
 
 
 @pytest.mark.anyio
+async def test_read_only_text_preflight(cli, tmp_path, server_processes):
+    from llm_engine import _native
+
+    cli("agent", "list")
+    database = tmp_path / "product.sqlite"
+    employee = cli("agent", "create", "Writer")
+    work = cli("task", "create", "Saved ordinary input")
+    unassigned = cli("task", "create", "Unassigned work")
+    cli("task", "assign", work["id"], employee["id"])
+    secret = "fixture-preflight-secret"
+    private_work = _native.create_assigned_work(str(database), secret, employee["id"])
+    # The SDK forwards only a safe default environment, so explicitly configure
+    # this fake credential in the child server to exercise output protection.
+    # Real installed MCP server, with no provider credentials required.
+    async with session(database, env={"ANTHROPIC_API_KEY": secret}) as client:
+        tools = await discover(client)
+        tool = tools["preflight_text_work_v1"]
+        assert set(tool.inputSchema["properties"]) == {"task_id"}
+        before = database.read_bytes()
+        result = await call(client, tools, "preflight_text_work_v1", {"task_id": work["id"].upper()})
+        assert result == {
+            "schema_version": 1, "task_id": work["id"], "input": "Saved ordinary input",
+            "employee_ids": [employee["id"]], "expected_runs": 0, "active_attempt": False,
+            "eligibility": "eligible", "resubmission_consent_required": False,
+        }
+        missing = await call(client, tools, "preflight_text_work_v1", {"task_id": str(uuid.uuid4())})
+        assert missing["eligibility"] == "missing" and missing["input"] is None
+        rejected = await call(client, tools, "preflight_text_work_v1", {"task_id": unassigned["id"]})
+        assert rejected["eligibility"] == "ineligible" and rejected["employee_ids"] == []
+        assert (await client.call_tool("preflight_text_work_v1", {"task_id": "invalid"})).isError
+        protected = await client.call_tool("preflight_text_work_v1", {"task_id": private_work[0]})
+        assert protected.isError and secret not in str(protected)
+        assert database.read_bytes() == before
+        active = _native.start_mcp_execution(str(database), work["id"], "test", "fixture", 0, False, "fixture")
+        before = database.read_bytes()
+        result = await call(client, tools, "preflight_text_work_v1", {"task_id": work["id"]})
+        assert result["active_attempt"] and result["expected_runs"] == 1
+        assert result["eligibility"] == "ineligible" and result["resubmission_consent_required"]
+        assert database.read_bytes() == before
+        _native.finish_execution(str(database), active[0], "Fixture result", None)
+
+
+@pytest.mark.anyio
 async def test_explicit_workflow_retry_failure_and_reopen(cli, tmp_path, server_processes):
     cli("agent", "list")
     database = tmp_path / "product.sqlite"
@@ -276,9 +320,17 @@ async def test_explicit_workflow_retry_failure_and_reopen(cli, tmp_path, server_
         assert oversized_source.isError
         assert (await call(client, tools, "get_work_history_v1", {
             "task_id": work["id"]}))["attempts"] == []
+        preflight = await call(client, tools, "preflight_text_work_v1", {"task_id": work["id"]})
+        assert preflight["expected_runs"] == 0 and preflight["eligibility"] == "eligible"
         initial = await call(client, tools, "execute_text_work_v1", args)
         assert initial["output"] == "Fixture result: Draft a greeting"
         assert initial["quality"] == "unverified" and initial["error"] is None
+        prior = await call(client, tools, "preflight_text_work_v1", {"task_id": work["id"]})
+        assert prior["expected_runs"] == 1 and prior["resubmission_consent_required"]
+        assert not prior["active_attempt"] and prior["eligibility"] == "eligible"
+        # A stale preflight count cannot authorize admission, even with consent.
+        assert (await client.call_tool("execute_text_work_v1", {
+            **args, "expected_runs": preflight["expected_runs"], "resubmission_consent": True})).isError
         # Replay of the original admission cannot create another Run.
         assert (await client.call_tool("execute_text_work_v1", args)).isError
         stale = {**args, "expected_runs": 99, "resubmission_consent": True}

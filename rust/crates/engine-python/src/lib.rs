@@ -135,6 +135,37 @@ fn start_mcp_execution(
         .map(execution_record).map_err(|_| error("execution rejected; refresh work and check assignment, active attempts and retry consent"))
 }
 
+/// Read-only ordinary text preparation with sanitized errors.
+#[pyfunction]
+fn preflight_text_work(
+    py: Python<'_>,
+    database: &str,
+    task: &str,
+) -> PyResult<Py<pyo3::types::PyDict>> {
+    use pyo3::types::PyDict;
+    let task = task
+        .parse::<TaskId>()
+        .map_err(|_| error("invalid task ID"))?;
+    let p = ReadOnlyStore::open(database)
+        .and_then(|mut store| store.preflight_text_work(task))
+        .map_err(|_| error("preflight unavailable"))?;
+    let d = PyDict::new(py);
+    d.set_item("task_id", p.task.to_string())?;
+    d.set_item("input", p.input)?;
+    d.set_item(
+        "employee_ids",
+        p.assignees
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>(),
+    )?;
+    d.set_item("expected_runs", p.expected_runs)?;
+    d.set_item("active_attempt", p.active_attempt)?;
+    d.set_item("eligibility", p.eligibility)?;
+    d.set_item("resubmission_consent_required", p.expected_runs > 0)?;
+    Ok(d.unbind())
+}
+
 /// Untrusted declared integration metadata, keyed by Run ID; missing is unknown.
 #[pyfunction]
 fn execution_sources(database: &str) -> PyResult<Vec<(String, String)>> {
@@ -524,6 +555,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(history_snapshot, m)?)?;
     m.add_function(wrap_pyfunction!(history_snapshot_read_only, m)?)?;
     m.add_function(wrap_pyfunction!(start_mcp_execution, m)?)?;
+    m.add_function(wrap_pyfunction!(preflight_text_work, m)?)?;
     m.add_function(wrap_pyfunction!(execution_sources, m)?)?;
     m.add_function(wrap_pyfunction!(create_assigned_work, m)?)?;
     m.add_function(wrap_pyfunction!(start_web_execution, m)?)?;
