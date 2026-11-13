@@ -3326,3 +3326,35 @@ verification passed 1,057 frontend tests, the production build, and 505 Python
 tests, with 2 Python tests skipped. The selected frontend profile deferred
 installed-browser and process-recovery gates; those passed in the recent C88 full
 profile. Live provider validation is skipped, not passed.
+
+### Inspect ordinary Loop attempts in Company overview (C93-T1)
+
+Launch `agentown-web --database /absolute/path/product.sqlite3 --port 8765`
+and open <http://127.0.0.1:8765> → Company overview → **Bounded Loop activity**.
+Prerequisite: recorded ordinary Loop sessions and attempts in that product
+SQLite database and the existing GET `/api/loops/v1` inspection contract.
+No credentials or new backend endpoint are needed for inspection.
+
+Focus **Attempt details for Loop SESSION** and press Enter or Space. Each
+session shows only its matching attempts: ordinal, Run ID, execution state,
+recorded output/error and **Quality unverified**. Details remain available when
+linked work is unavailable. An empty attempt list or missing execution record
+explicitly leaves provider completion unknown. Disclosure sends no requests,
+grants no consent and starts no work.
+
+Keep a disclosure focused and expanded while polling or choosing **Inspect Loop
+sessions again**. Updated records, including changes to the same Run ID, appear
+without collapsing retained sessions or replacing their focused buttons. If
+inspection fails, or a pending poll leaves the last successful inspection older
+than 2.4 seconds, retained details visibly become stale. A successful refresh
+restores current details. Existing Stop controls still require fresh inspection,
+granted local authority and an active session; disclosure grants no Stop authority.
+
+Deterministic interaction coverage: `cd frontend && npx vitest run src/OverviewLoops.test.tsx`.
+It covers session separation, unavailable linked work, Enter/Space, request-free
+disclosure, same-Run-ID refresh, retained focus, empty/missing execution records
+and expired/failed/malformed inspection. The periodic full profile passed 1,061
+frontend tests, including 44 OverviewLoops tests, the production build, 508
+Python tests, Rust and desktop checks, and two Chromium browser checks; 2 Python
+tests were skipped. Live provider calls are skipped, not passed, under the user
+live-test policy.

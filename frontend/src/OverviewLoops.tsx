@@ -11,6 +11,7 @@ export type LoopNavigation = {taskId: string; sessionId: string; policyId?: neve
 /** Polling and navigation inspect only; stopping requires explicit session consent. */
 export function OverviewLoops({workspace, onOpenWork, onOpenSession}: {onOpenSession?: (request: LoopNavigation) => void; workspace: Workspace | null; onOpenWork: (id: string) => void}) {
   const [inspection, setInspection] = useState<LoopInspection | null>(null);
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const [control, setControl] = useState<LoopControl | null>(null);
   const [status, setStatus] = useState<'loading' | 'ready' | 'unavailable'>('loading');
   const [message, setMessage] = useState('');
@@ -74,7 +75,7 @@ export function OverviewLoops({workspace, onOpenWork, onOpenSession}: {onOpenSes
     <p role="status" aria-label="Overview Loop authority">{controlText(control)}</p>
     <p role="status" aria-label="Overview Loop stop outcome">{message}</p>
     <button type="button" aria-disabled={busy} onClick={() => { if (!lock.current) refresh.current(); }}>Inspect Loop sessions again</button>
-    <p>Loop admissions are separate from ordinary request counts. Expand local MCP session details here, or open saved work to inspect attempts. Stop requires fresh inspection and granted local authority; otherwise stop through the owning MCP or web server. Stop prevents new admissions and requests local cancellation. Remote completion may remain unknown. Nothing starts or resumes here.</p>
+    <p>Loop admissions are separate from ordinary request counts. Expand session details here to inspect recorded attempts, or open saved work. Stop requires fresh inspection and granted local authority; otherwise stop through the owning MCP or web server. Stop prevents new admissions and requests local cancellation. Remote completion may remain unknown. Nothing starts or resumes here.</p>
     {inspection && !inspection.sessions.length && <p>No recorded Loop sessions.</p>}
     {!!inspection?.sessions.length && <ul aria-label="Recorded Loop sessions">{inspection.sessions.map(session => {
       const work = workspace?.work.find(w => w.id === session.preview.task_id);
@@ -90,6 +91,22 @@ export function OverviewLoops({workspace, onOpenWork, onOpenSession}: {onOpenSes
           : busy ? 'A stop request is pending. Wait, then inspect again.'
           : !fresh ? 'Fresh inspection required. Inspect Loop sessions again or wait for a successful refresh.'
           : !canControl(control) ? controlText(control) : 'Available by explicit action only. The server checks ownership again.'}</p>
+        <button type="button" aria-expanded={expanded.has(session.session_id)} aria-controls={`overview-attempts-${session.session_id}`}
+          onClick={() => setExpanded(previous => {
+            const next = new Set(previous);
+            if (next.has(session.session_id)) next.delete(session.session_id); else next.add(session.session_id);
+            return next;
+          })}>Attempt details for Loop {session.session_id}</button>
+        {expanded.has(session.session_id) && <section id={`overview-attempts-${session.session_id}`} aria-label={`Attempts for Loop ${session.session_id}`}>
+          <p>{fresh ? 'Recorded attempts from the last successful inspection.' : 'Stale attempt details. Inspect Loop sessions again for current persisted execution state.'}</p>
+          <p>Quality unverified</p>
+          {!inspection.attempts.some(a => a.session_id === session.session_id) && <p>No recorded attempts for this session. Provider completion unknown.</p>}
+          {inspection.attempts.filter(a => a.session_id === session.session_id).map(a => <article key={a.run_id}>
+            <p>Attempt {a.ordinal} · Run ID: {a.run_id} · {executionLabel(a.execution)}</p>
+            {a.execution?.output != null && <><p>Output</p><pre>{a.execution.output}</pre></>}
+            {a.execution?.error && <><p>Error</p><p>{a.execution.error}</p></>}
+          </article>)}
+        </section>}
         <p>Work ID: {session.preview.task_id}</p>
         {work ? <button type="button" onClick={() => onOpenSession ? onOpenSession({taskId: work.id, sessionId: session.session_id}) : onOpenWork(work.id)}>Open work: {work.input.slice(0, 55)} · Loop {session.session_id}</button>
           : <p>{workspace ? 'Linked work is unavailable in the loaded workspace.' : 'Loading linked work…'}</p>}

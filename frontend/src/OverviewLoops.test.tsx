@@ -607,3 +607,112 @@ test.each(['expired', 'failed', 'unavailable'])('retained company attempt detail
   expect(screen.queryByText(/Stale attempt details/)).toBeNull();
   expect(toggle.getAttribute('aria-expanded')).toBe('true');
 });
+
+test('ordinary attempt details are session-scoped, keyboard accessible and read retained data without requests', async () => {
+  // Freeze background polling while leaving user-event and React's async
+  // wrapper free to settle their timeout-based keyboard interactions.
+  vi.useFakeTimers({toFake: ['setInterval', 'clearInterval']});
+  const user = userEvent.setup();
+  const sessions = [companySession(1), {...companySession(2), state: 'stopped', admitted: 2}, {...companySession(3), admitted: 0}];
+  let attempts: LoopInspection['attempts'] = [
+    {session_id: uid(1), run_id: uid(101), ordinal: 1, execution: {state: 'active', output: null, error: null}},
+    {session_id: uid(2), run_id: uid(102), ordinal: 1, execution: {state: 'finished', outcome: 'failure', output: 'Partial fixture output', error: 'Fixture failure'}},
+    {session_id: uid(2), run_id: uid(103), ordinal: 2, execution: null},
+  ];
+  const requests: string[] = [];
+  const open = vi.fn();
+  vi.stubGlobal('fetch', vi.fn(async (path: string, init?: RequestInit) => {
+    requests.push(path);
+    expect(path).toBe('/api/loops/v1');
+    expect(init?.method).toBe('GET');
+    expect(init?.body).toBeUndefined();
+    return new Response(JSON.stringify({...initial(), sessions, attempts}));
+  }));
+  render(<OverviewLoops workspace={{...workspace, work: []}} onOpenWork={open} onOpenSession={open} />);
+  await act(async () => {});
+  const inspect = screen.getByRole('button', {name: 'Inspect Loop sessions again'});
+  await act(async () => { fireEvent.click(inspect); });
+  const first = screen.getByRole('button', {name: `Attempt details for Loop ${uid(1)}`});
+  const second = screen.getByRole('button', {name: `Attempt details for Loop ${uid(2)}`});
+  expect(screen.getAllByText('Linked work is unavailable in the loaded workspace.')).toHaveLength(3);
+  const beforeExpand = [...requests];
+  const empty = screen.getByRole('button', {name: `Attempt details for Loop ${uid(3)}`});
+  empty.focus(); await user.keyboard('{Enter}');
+  expect(within(screen.getByRole('region', {name: `Attempts for Loop ${uid(3)}`})).getByText('No recorded attempts for this session. Provider completion unknown.')).toBeTruthy();
+  first.focus(); await user.keyboard('{Enter}');
+  expect(document.activeElement).toBe(first);
+  expect(first.getAttribute('aria-expanded')).toBe('true');
+  const firstDetails = screen.getByRole('region', {name: `Attempts for Loop ${uid(1)}`});
+  expect(first.getAttribute('aria-controls')).toBe(firstDetails.id);
+  expect(within(firstDetails).getByText(`Attempt 1 · Run ID: ${uid(101)} · Active · Waiting for provider response`)).toBeTruthy();
+  expect(within(firstDetails).queryByText(/Fixture failure/)).toBeNull();
+  second.focus(); await user.keyboard(' ');
+  expect(document.activeElement).toBe(second);
+  const secondDetails = screen.getByRole('region', {name: `Attempts for Loop ${uid(2)}`});
+  expect(within(secondDetails).getByText(`Attempt 1 · Run ID: ${uid(102)} · Finished · Provider execution failed`)).toBeTruthy();
+  expect(within(secondDetails).getByText('Partial fixture output')).toBeTruthy();
+  expect(within(secondDetails).getByText('Fixture failure')).toBeTruthy();
+  expect(within(secondDetails).getByText(`Attempt 2 · Run ID: ${uid(103)} · Execution record unavailable · Provider completion unknown`)).toBeTruthy();
+  expect(within(secondDetails).queryByText(/Waiting for provider response/)).toBeNull();
+  expect(within(firstDetails).getByText('Quality unverified')).toBeTruthy();
+  expect(within(secondDetails).getByText('Quality unverified')).toBeTruthy();
+  await user.keyboard(' ');
+  expect(document.activeElement).toBe(second);
+  expect(second.getAttribute('aria-expanded')).toBe('false');
+  expect(screen.queryByRole('region', {name: `Attempts for Loop ${uid(2)}`})).toBeNull();
+  expect(requests).toEqual(beforeExpand); // Fake clock isolates overview background polling.
+  expect(open).not.toHaveBeenCalled();
+  expect(screen.queryByRole('checkbox', {name: /consent/i})).toBeNull();
+
+  attempts = [{...attempts[0], execution: {state: 'finished', outcome: 'reported_success', output: 'Refreshed fixture result', error: null}}, ...attempts.slice(1)];
+  // Reinspection leaves an already-focused disclosure mounted and expanded.
+  first.focus();
+  await act(async () => {fireEvent.click(inspect);});
+  expect(document.activeElement).toBe(first);
+  expect(first.getAttribute('aria-expanded')).toBe('true');
+  expect(within(firstDetails).getByText(`Attempt 1 · Run ID: ${uid(101)} · Finished · Provider execution succeeded`)).toBeTruthy();
+  expect(within(firstDetails).getByText('Refreshed fixture result')).toBeTruthy();
+  expect(within(firstDetails).getByText('Quality unverified')).toBeTruthy();
+  expect(requests).toEqual([...beforeExpand, '/api/loops/v1']);
+});
+
+
+test.each(['expired', 'failed', 'malformed'])('ordinary retained attempt details become stale after %s inspection and recover in place', async reason => {
+  vi.useFakeTimers();
+  let mode = 'ready';
+  let output = 'Retained ordinary output';
+  let resolvePending!: (response: Response) => void;
+  const requests: string[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (path: string) => {
+    requests.push(path);
+    expect(path).toBe('/api/loops/v1');
+    if (mode === 'expired') return new Promise<Response>(resolve => {resolvePending = resolve;});
+    if (mode === 'failed') throw new Error('offline');
+    if (mode === 'malformed') return new Response('{}');
+    return new Response(JSON.stringify({...initial(), attempts: [{session_id: 's', run_id: 'r', ordinal: 1, execution: {output, error: null}}]}));
+  }));
+  render(<OverviewLoops workspace={workspace} onOpenWork={vi.fn()} />);
+  await act(async () => {});
+  const toggle = screen.getByRole('button', {name: 'Attempt details for Loop s'});
+  fireEvent.click(toggle); toggle.focus();
+  mode = reason;
+  await act(async () => {await vi.advanceTimersByTimeAsync(reason === 'expired' ? 2400 : 800);});
+  const details = screen.getByRole('region', {name: 'Attempts for Loop s'});
+  expect(within(details).getByText(/Stale attempt details/)).toBeTruthy();
+  expect(within(details).getByText('Retained ordinary output')).toBeTruthy();
+  expect(within(details).getByText(/Execution state: unavailable · Provider completion unknown/)).toBeTruthy();
+  expect(document.activeElement).toBe(toggle);
+  const beforeToggle = [...requests];
+  fireEvent.click(toggle); fireEvent.click(toggle);
+  expect(requests).toEqual(beforeToggle);
+  expect(screen.getByRole('button', {name: 'Stop Loop s from overview'}).getAttribute('aria-disabled')).toBe('true');
+  mode = 'ready'; output = 'Recovered ordinary output';
+  await act(async () => {
+    if (reason === 'expired') resolvePending(new Response(JSON.stringify({...initial(), attempts: [{session_id: 's', run_id: 'r', ordinal: 1, execution: {output, error: null}}]})));
+    else fireEvent.click(screen.getByRole('button', {name: 'Inspect Loop sessions again'}));
+  });
+  expect(document.activeElement).toBe(toggle);
+  expect(toggle.getAttribute('aria-expanded')).toBe('true');
+  expect(screen.queryByText(/Stale attempt details/)).toBeNull();
+  expect(within(screen.getByRole('region', {name: 'Attempts for Loop s'})).getByText('Recovered ordinary output')).toBeTruthy();
+});
