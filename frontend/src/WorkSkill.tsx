@@ -1,10 +1,11 @@
+import type { SkillNavigation } from './SkillBooks';
 import { useLayoutEffect, useRef, useState } from 'react';
 import type { SkillPreview } from './api';
 import { executeLocalSkill, listLocalSkills, previewLocalSkill, type LocalSkill } from './work-skill-api';
 import type { WorkExecutionResponse } from './work-execution-api';
 
 /** Lifetime is one explicit local inspection; no automatic discovery or replay. */
-export function WorkSkill({taskId, onInspect}: {taskId: string; onInspect: () => void}) {
+export function WorkSkill({taskId, onInspect, navigation}: {navigation?: SkillNavigation | null; taskId: string; onInspect: () => void}) {
   const [skills, setSkills] = useState<LocalSkill[]>([]);
   const [selected, setSelected] = useState('');
   const [preview, setPreview] = useState<SkillPreview | null>(null);
@@ -15,6 +16,9 @@ export function WorkSkill({taskId, onInspect}: {taskId: string; onInspect: () =>
   const [result, setResult] = useState<WorkExecutionResponse | null>(null);
   const request = useRef<AbortController | null>(null);
   const previewRegion = useRef<HTMLElement>(null);
+  const selection = useRef<HTMLSelectElement>(null);
+  const [focused, setFocused] = useState(false);
+  useLayoutEffect(() => {if (focused && !busy) selection.current?.focus();}, [focused, busy]);
   const recovery = useRef<HTMLButtonElement>(null);
   useLayoutEffect(() => () => {request.current?.abort(); request.current = null;}, []);
   useLayoutEffect(() => {if (preview) previewRegion.current?.focus();}, [preview]);
@@ -32,7 +36,14 @@ export function WorkSkill({taskId, onInspect}: {taskId: string; onInspect: () =>
     try {
       if (operation === 'list') {
         const records = await listLocalSkills(active.signal);
-        if (request.current === active) {setSkills(records); setSelected(''); setMessage(records.some(s => s.enabled) ? 'Choose an enabled Skill.' : 'No enabled Skills available. Enable a Skill in configuration, then inspect again.');}
+        if (request.current === active) {
+          setSkills(records); setSelected(''); setFocused(false);
+          if (navigation) {
+            const found = records.find(skill => skill.id === navigation.skillId);
+            if (!found || !found.enabled) setMessage(`Requested Skill is ${found ? 'disabled' : 'missing'}. Nothing was previewed or executed. No other Skill was selected.`);
+            else {setSelected(found.id); setFocused(true); setMessage('Requested Skill selected. Preview explicitly to validate current server state.');}
+          } else setMessage(records.some(s => s.enabled) ? 'Choose an enabled Skill.' : 'No enabled Skills available. Enable a Skill in configuration, then inspect again.');
+        }
       } else if (operation === 'preview') {
         const value = await previewLocalSkill(taskId, selected, active.signal);
         if (request.current === active) setPreview(value);
@@ -50,7 +61,7 @@ export function WorkSkill({taskId, onInspect}: {taskId: string; onInspect: () =>
     <h4>Apply a Skill through local MCP</h4>
     <p>Discovery and preview do not execute work. Enabled means configuration enabled. Execution uses the server’s provider and model and may incur cost.</p>
     <button type="button" disabled={busy || consumed} onClick={() => void perform('list')}>Find Skills through local MCP</button>
-    <label>Local enabled Skill <select value={selected} disabled={consumed} onChange={event => {invalidate(); setSelected(event.target.value);}}>
+    <label>Local enabled Skill <select ref={selection} value={selected} disabled={consumed} onChange={event => {invalidate(); setSelected(event.target.value);}}>
       <option value="">Choose a Skill</option>{skills.filter(s => s.enabled).map(s => <option key={s.id} value={s.id}>{s.name} · {s.id}</option>)}
     </select></label>
     <button type="button" disabled={!selected || consumed} onClick={() => {invalidate(); void perform('preview');}}>Preview local Skill</button>

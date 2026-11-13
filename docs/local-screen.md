@@ -2987,3 +2987,27 @@ WorkHook.test.tsx`. These fixtures cover duplicate identities, keyboard focus,
 empty/unsupported devices, exact selection, stale replies, draft retention and
 navigation without mutation. Supervisor browser verification remains pending for
 this change. Live provider calls are skipped under the current user policy.
+
+### Open saved work from a Skill book
+
+Launch `agentown-web --database PATH`, open the printed local URL, then use
+Company overview → Skill library. The existing book button opens Configuration.
+Each book also lists loaded saved work with exact Task and Skill IDs, including
+when names are duplicated. If history is empty, save work or refresh saved history.
+Unavailable, refreshing or stale book snapshots disable work navigation.
+
+Choose a work button with the keyboard or pointer. The request clears history
+filters, retains unsaved drafts and focuses Requested Skill inspection. Navigation
+makes no MCP request and grants no consent. Choose **Inspect through local MCP**,
+then **Find Skills through local MCP**. Only the requested enabled Skill ID is
+selected and focused; missing or disabled records explain why no selection was
+made. Names never substitute for identity. Choose **Preview local Skill**, review
+the exact input, authorize that preview, then separately choose **Execute local
+Skill once**. Reopening even the same Task, changing selection or disconnecting
+invalidates inspection, previews and consent; late replies cannot restore them.
+Inspect and discover again explicitly after recovery.
+
+Deterministic interaction coverage lives in `SkillBooks.test.tsx` and
+`WorkSkill.test.tsx`. The full supervisor profile also exercised 38 Chromium
+steps in two browser tests for this snapshot. Real provider calls are skipped
+under the live-test policy, never passed.

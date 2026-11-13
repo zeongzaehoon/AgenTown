@@ -3,7 +3,7 @@ import type { HookNavigation } from './HookDevices';
 import { HookDevices } from './HookDevices';
 import { workstationClients, type ConnectionClientId } from './Connections';
 import { TeamRooms } from './TeamRooms';
-import { SkillBooks } from './SkillBooks';
+import { type SkillNavigation, SkillBooks } from './SkillBooks';
 import { OverviewLoops, type LoopNavigation } from './OverviewLoops';
 import { classifyWork, type WorkOutcome, type Workspace } from './api';
 
@@ -13,7 +13,8 @@ const categories: {key: WorkOutcome; label: string}[] = [
   {key: 'other', label: 'Other recorded work'},
 ];
 
-export function CompanyOverview({workspace, connected, error, onOpenWork, selectedEmployee = '', onSelectEmployee, onOpenHook, onOpenLoop, onOpenSkill, onOpenClient, onOpenTeam, onSelectTeamMember, onOpenSession, onOpenHookWork}: {
+export function CompanyOverview({workspace, connected, error, onOpenWork, selectedEmployee = '', onSelectEmployee, onOpenHook, onOpenLoop, onOpenSkill, onOpenClient, onOpenTeam, onSelectTeamMember, onOpenSession, onOpenHookWork, onOpenSkillWork}: {
+  onOpenSkillWork?: (request: SkillNavigation) => void;
   onOpenHookWork?: (request: HookNavigation) => void;
   onOpenSession?: (request: LoopNavigation) => void;
   onSelectTeamMember?: (id: string) => void;
@@ -53,7 +54,7 @@ export function CompanyOverview({workspace, connected, error, onOpenWork, select
       </button>)}</div>
     </section>
     <TeamRooms onOpenWork={onOpenWork} workspace={workspace} connected={connected} selectedEmployee={selectedEmployee} onSelectEmployee={onSelectTeamMember ?? onSelectEmployee} onOpenTeam={onOpenTeam} />
-    <SkillBooks onOpenSkill={onOpenSkill} />
+    <SkillBooks onOpenSkill={onOpenSkill} onOpenWork={onOpenSkillWork} workspace={workspace} connected={connected} />
     <HookDevices onOpenHook={onOpenHook} onOpenWork={onOpenHookWork} workspace={workspace} connected={connected} />
     <LoopDevices onOpenLoop={onOpenLoop} onOpenPolicy={onOpenSession} workspace={workspace} connected={connected} />
     <OverviewLoops onOpenSession={onOpenSession} workspace={workspace} onOpenWork={onOpenWork} />

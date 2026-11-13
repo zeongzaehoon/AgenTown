@@ -1,3 +1,4 @@
+import type { SkillNavigation } from './SkillBooks';
 import type { HookNavigation } from './HookDevices';
 import type { LoopNavigation } from './OverviewLoops';
 import { useLayoutEffect, useRef, useState } from 'react';
@@ -9,7 +10,7 @@ import { WorkExecution } from './WorkExecution';
 import { RequestTimeoutError } from './api';
 import { inspectSelectedWork, type InspectionResponse } from './work-inspection-api';
 
-export function WorkInspection({taskId, connected = true, loopRequest, hookRequest}: {hookRequest?: HookNavigation | null; loopRequest?: LoopNavigation | null; taskId: string | null; connected?: boolean}) {
+export function WorkInspection({taskId, connected = true, loopRequest, hookRequest, skillRequest}: {skillRequest?: SkillNavigation | null;hookRequest?: HookNavigation | null; loopRequest?: LoopNavigation | null; taskId: string | null; connected?: boolean}) {
   const [response, setResponse] = useState<InspectionResponse | null>(null);
   const [error, setError] = useState('');
   const [pending, setPending] = useState(false);
@@ -18,9 +19,9 @@ export function WorkInspection({taskId, connected = true, loopRequest, hookReque
     request.current?.controller.abort(); request.current = null;
     setResponse(null); setError(''); setPending(false);
     return () => { request.current?.controller.abort(); request.current = null; };
-  }, [taskId, connected, loopRequest, hookRequest]);
+  }, [taskId, connected, loopRequest, hookRequest, skillRequest]);
   const navigationRegion = useRef<HTMLElement>(null);
-  useLayoutEffect(() => {if (hookRequest) navigationRegion.current?.focus();}, [hookRequest, taskId]);
+  useLayoutEffect(() => {if (hookRequest || skillRequest) navigationRegion.current?.focus();}, [hookRequest, skillRequest, taskId]);
   async function inspect() {
     if (!connected || !taskId || request.current) return;
     const active = {id: taskId, controller: new AbortController()};
@@ -38,6 +39,7 @@ export function WorkInspection({taskId, connected = true, loopRequest, hookReque
   }
   const inspection = response?.status === 'success' ? response.inspection : null;
   return <section id="selected-work-inspection" aria-label="Local MCP work inspection" aria-busy={pending}>
+    {skillRequest && <section ref={navigationRegion} tabIndex={-1} aria-label="Requested Skill inspection"><p>Requested Task: {skillRequest.taskId} · Skill: {skillRequest.skillId}. Choose Inspect through local MCP, then Find Skills through local MCP. Navigation grants no consent.</p></section>}
     {hookRequest && <section ref={navigationRegion} tabIndex={-1} aria-label="Requested Hook inspection"><p>Requested Task: {hookRequest.taskId} · Hook: {hookRequest.hookId} · Employee: {hookRequest.employeeId}. Choose Inspect through local MCP, then Find Hooks through local MCP. Navigation grants no consent.</p></section>}
     <h3>Inspect selected work through local MCP</h3>
     <p>This reads recorded work through the installed local MCP server. It does not execute work or contact a provider. External-client connection remains unverified.</p>
@@ -69,7 +71,7 @@ export function WorkInspection({taskId, connected = true, loopRequest, hookReque
         <p>Each tool is a separate observation. Input, assignments and counts may differ as work changes between reads. Inspect again explicitly for newer observations.</p>
       </section>
       <WorkHook navigation={hookRequest} assignees={inspection.task.assignees} taskId={inspection.task.id} onInspect={() => void inspect()} />
-      <WorkSkill taskId={inspection.task.id} onInspect={() => void inspect()} />
+      <WorkSkill navigation={skillRequest} taskId={inspection.task.id} onInspect={() => void inspect()} />
       <WorkExecution readiness={inspection.readiness} onInspect={() => void inspect()} />
       {!inspection.attempts.length && <p>No recorded attempts. No execution was requested by this inspection.</p>}
       {inspection.attempts.map((run, index) => <article key={run.id} aria-label={`Inspected attempt ${index + 1}`}>

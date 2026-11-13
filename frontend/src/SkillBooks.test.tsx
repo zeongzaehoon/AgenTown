@@ -75,3 +75,28 @@ test('App opens exact IDs repeatedly, retains configuration and work drafts and 
     if (path.startsWith('/api/config/')) expect(options.method).toBe('GET');
   }
 });
+
+test('Skill work navigation preserves drafts, clears filters and focuses inspection without MCP or mutations', async () => {
+  const fetcher = vi.fn(async (path: string) => {
+    if (path === '/api/state') return new Response(JSON.stringify({employees: [{id: 'a', name: 'Alex'}], work: [{id: 'w', input: 'Saved work', assignees: ['a'], status: 'pending', attempts: []}], configuration: null, provider: 'deterministic-test', model: 'test'}));
+    if (path === '/api/config/v1/skills') return new Response(JSON.stringify({skills}));
+    if (path === '/api/config/v1/hooks') return new Response('{"hooks":[]}');
+    if (path === '/api/config/v1/loops') return new Response('{"loops":[]}');
+    if (path === '/api/teams') return new Response('{"teams":[]}');
+    if (path === '/api/loops/v1') return new Response('{"schema_version":1,"control":{"state":"available","can_control":true,"message":""},"sessions":[],"attempts":[],"cancellation":""}');
+    throw new Error(`Unexpected request ${path}`);
+  });
+  vi.stubGlobal('fetch', fetcher); render(<App />);
+  const action = await screen.findByRole('button', {name: 'Open work for Skill: Manual · Skill ID: two · Task ID: w'});
+  fireEvent.change(screen.getByLabelText('What would you like help with?'), {target: {value: 'Keep draft'}});
+  fireEvent.change(screen.getByLabelText('Search saved work'), {target: {value: 'excluded'}});
+  action.focus(); await userEvent.keyboard('{Enter}');
+  expect((screen.getByLabelText('Search saved work') as HTMLInputElement).value).toBe('');
+  expect(document.activeElement).toBe(screen.getByRole('region', {name: 'Requested Skill inspection'}));
+  expect(screen.getByRole('region', {name: 'Requested Skill inspection'}).textContent).toContain('Skill: two');
+  expect((screen.getByLabelText('What would you like help with?') as HTMLTextAreaElement).value).toBe('Keep draft');
+  action.focus(); await userEvent.keyboard(' ');
+  expect(document.activeElement).toBe(screen.getByRole('region', {name: 'Requested Skill inspection'}));
+  expect(fetcher.mock.calls.every(([path]) => !path.includes('/connections/'))).toBe(true);
+  expect(screen.queryByRole('button', {name: 'Find Skills through local MCP'})).toBeNull();
+});

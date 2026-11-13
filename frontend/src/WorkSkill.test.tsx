@@ -76,7 +76,7 @@ test('rejects identity, count and provenance mismatches', () => {
   expect(() => parseSkillResponse(r, task, 'execute', skill, preview)).toThrow();
 });
 
-test.each(['selection', 'disconnect', 'inspection'])('%s invalidates Skill preview and consent in selected-work inspection', async reason => {
+test.each(['selection', 'disconnect', 'inspection', 'navigation'])('%s invalidates Skill preview and consent in selected-work inspection', async reason => {
   const inspected = {schema_version: 1, requested_task_id: task, status: 'success', code: 'inspected', message: 'Inspected', recovery: 'Inspect again', inspection: {
     task: {id: task, title: 'Saved work', status: 'pending', assignees: [skill]}, attempts: [],
     readiness: {schema_version: 1, task_id: task, input: 'Saved work', employee_ids: [skill], expected_runs: 0, active_attempt: false, eligibility: 'eligible', resubmission_consent_required: false},
@@ -90,7 +90,39 @@ test.each(['selection', 'disconnect', 'inspection'])('%s invalidates Skill previ
   const consent = await screen.findByLabelText(/I authorize one execution of this exact Skill preview/); await userEvent.click(consent);
   if (reason === 'selection') view.rerender(<WorkInspection taskId={skill} />);
   else if (reason === 'disconnect') view.rerender(<WorkInspection taskId={task} connected={false} />);
+  else if (reason === 'navigation') view.rerender(<WorkInspection taskId={task} skillRequest={{taskId: task, skillId: skill}} />);
   else await userEvent.click(screen.getByRole('button', {name: 'Inspect through local MCP'}));
   expect(screen.queryByLabelText(/I authorize one execution of this exact Skill preview/)).toBeNull();
   expect(fetcher.mock.calls.some(call => String(call[0]).endsWith('/skills/execute'))).toBe(false);
+});
+
+test.each(['enabled', 'disabled', 'missing'])('requested Skill discovery uses exact ID among duplicate names: %s', async state => {
+  const records = [{id: task, name: 'Summarize', enabled: true}, ...(state === 'missing' ? [] : [{id: skill, name: 'Summarize', enabled: state === 'enabled'}])];
+  const fetcher = vi.fn().mockResolvedValue(reply(envelope({schema_version: 1, skills: records}, 'skills_discovered', null)));
+  vi.stubGlobal('fetch', fetcher);
+  render(<WorkSkill taskId={task} navigation={{taskId: task, skillId: skill}} onInspect={vi.fn()} />);
+  expect(fetcher).not.toHaveBeenCalled();
+  await userEvent.click(screen.getByRole('button', {name: 'Find Skills through local MCP'}));
+  const select = screen.getByRole('combobox', {name: 'Local enabled Skill'}) as HTMLSelectElement;
+  await waitFor(() => expect(select.value).toBe(state === 'enabled' ? skill : ''));
+  if (state === 'enabled') await waitFor(() => expect(document.activeElement).toBe(select));
+  else expect(await screen.findByText(new RegExp(`Requested Skill is ${state}`))).toBeTruthy();
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  expect(screen.queryByRole('checkbox')).toBeNull();
+});
+
+test('same-Task Skill navigation discards pending inspection replies and focuses the fresh request', async () => {
+  let finish!: (value: Response) => void;
+  const fetcher = vi.fn(() => new Promise<Response>(resolve => {finish = resolve;}));
+  vi.stubGlobal('fetch', fetcher);
+  const view = render(<WorkInspection taskId={task} skillRequest={{taskId: task, skillId: skill}} />);
+  expect(document.activeElement).toBe(screen.getByRole('region', {name: 'Requested Skill inspection'}));
+  expect(fetcher).not.toHaveBeenCalled();
+  await userEvent.click(screen.getByRole('button', {name: 'Inspect through local MCP'}));
+  view.rerender(<WorkInspection taskId={task} skillRequest={{taskId: task, skillId: task}} />);
+  expect(document.activeElement).toBe(screen.getByRole('region', {name: 'Requested Skill inspection'}));
+  await act(async () => {finish(reply({}));});
+  expect(screen.queryByRole('button', {name: 'Find Skills through local MCP'})).toBeNull();
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(fetcher).toHaveBeenCalledTimes(1);
 });
