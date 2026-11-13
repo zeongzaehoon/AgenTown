@@ -337,3 +337,95 @@ test('keyboard navigation carries exact Task and session without mutation', asyn
   expect(open).not.toHaveBeenCalled();
   expect(fetcher).toHaveBeenCalledTimes(1);
 });
+
+const uid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+function companySession(n: number) {
+  return {...session, schema_version: 1, session_id: uid(n), started_at: 1, expires_at: 100,
+    preview: {...session.preview, task_id: uid(n + 10), agent_id: uid(20), policy_id: uid(n + 30), created_at: 1}};
+}
+function companyReply(sessions = [companySession(1), companySession(2)], state = 'competing_owner') {
+  return {schema_version: 1, scope: 'company', status: 'confirmed', code: 'company_loops_inspected', recovery: 'Inspect explicitly',
+    data: {schema_version: 1, sessions, attempts: [], control: {state, can_control: state === 'local_authority', message: 'Saved authority'}}};
+}
+test('explicit company read preserves multiple Tasks and keyboard navigation without mutations', async () => {
+  const requests: string[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (path: string, init?: RequestInit) => {
+    requests.push(path);
+    if (path === '/api/loops/v1') return new Response(JSON.stringify({...initial(), sessions: [], attempts: []}));
+    expect(path).toBe('/api/connections/v1/loops/inspect-company');
+    expect(JSON.parse(init!.body as string)).toEqual({});
+    return new Response(JSON.stringify(companyReply()));
+  }));
+  const open = vi.fn();
+  render(<OverviewLoops workspace={{...workspace, work: [{...workspace.work[0], id: uid(11)}]}} onOpenWork={vi.fn()} onOpenSession={open} />);
+  await act(async () => {});
+  expect(requests).toEqual(['/api/loops/v1']);
+  const inspect = screen.getByRole('button', {name: 'Inspect company Loops through local MCP'});
+  inspect.focus(); await userEvent.keyboard('{Enter}');
+  expect(await screen.findByText(`Task: ${uid(12)} · Session: ${uid(2)} · Persisted state: active`)).toBeTruthy();
+  expect(screen.getByLabelText('Retained MCP owner authority').textContent).toContain('another server owns execution');
+  expect(screen.getByText(/Session records remain inspectable here/)).toBeTruthy();
+  const navigation = screen.getByRole('button', {name: `Inspect local MCP session ${uid(1)} in work`});
+  navigation.focus(); await userEvent.keyboard('{Enter}');
+  expect(open).toHaveBeenCalledWith({taskId: uid(11), sessionId: uid(1)});
+  expect(requests).toEqual(['/api/loops/v1', '/api/connections/v1/loops/inspect-company']);
+});
+test('company inspection discards superseded responses and distinguishes empty, stale and unavailable', async () => {
+  vi.useFakeTimers();
+  let resolve!: (v: Response) => void;
+  let companyCalls = 0;
+  vi.stubGlobal('fetch', vi.fn(async (path: string) => {
+    if (path === '/api/loops/v1') return new Response(JSON.stringify({...initial(), sessions: [], attempts: []}));
+    companyCalls++;
+    if (companyCalls === 1) return new Promise<Response>(r => {resolve = r;});
+    if (companyCalls === 2) return new Response(JSON.stringify(companyReply([])));
+    throw new Error('unavailable');
+  }));
+  render(<OverviewLoops workspace={workspace} onOpenWork={vi.fn()} />);
+  const inspect = screen.getByRole('button', {name: 'Inspect company Loops through local MCP'});
+  await act(async () => {fireEvent.click(inspect);});
+  await act(async () => {fireEvent.click(inspect);});
+  expect(screen.getByText('No recorded local MCP sessions.')).toBeTruthy();
+  await act(async () => resolve(new Response(JSON.stringify(companyReply()))));
+  expect(screen.queryByText(/Persisted state:/)).toBeNull();
+  await act(async () => {await vi.advanceTimersByTimeAsync(2400);});
+  expect(screen.getByText(/Local MCP inspection stale/)).toBeTruthy();
+  await act(async () => {fireEvent.click(inspect);});
+  expect(screen.getByText(/Retained local MCP inspection unavailable/)).toBeTruthy();
+});
+
+test('company navigation keeps draft and focuses existing selected-work inspection without preview or consent', async () => {
+  const {App} = await import('./App');
+  const requests: string[] = [];
+  const saved = {...workspace, employees: [{id: uid(20), name: 'Alex'}], work: [{...workspace.work[0], id: uid(11), assignees: [uid(20)]}]};
+  vi.stubGlobal('fetch', vi.fn(async (path: string, init?: RequestInit) => {
+    requests.push(path);
+    if (path === '/api/state') return new Response(JSON.stringify(saved));
+    if (path === '/api/loops/v1') return new Response(JSON.stringify({...initial(), sessions: [], attempts: []}));
+    if (path === '/api/connections/v1/loops/inspect-company') {
+      expect(JSON.parse(init!.body as string)).toEqual({});
+      return new Response(JSON.stringify(companyReply([companySession(1)], 'local_authority')));
+    }
+    if (path === '/api/connections/v1/loops/inspect') {
+      expect(JSON.parse(init!.body as string)).toEqual({task_id: uid(11)});
+      return new Response(JSON.stringify({schema_version: 1, requested_task_id: uid(11), status: 'confirmed', code: 'loops_inspected', recovery: 'Read only', data: companyReply([companySession(1)], 'local_authority').data}));
+    }
+    if (path.startsWith('/api/config/v1/')) return new Response(JSON.stringify({[path.split('/').at(-1)!]: []}));
+    throw new Error(`Unexpected request ${path}`);
+  }));
+  render(<App />); await screen.findByRole('button', {name: 'Inspect company Loops through local MCP'});
+  await act(async () => {});
+  fireEvent.change(screen.getByLabelText('What would you like help with?'), {target: {value: 'Keep company draft'}});
+  await userEvent.click(screen.getByRole('button', {name: 'Inspect company Loops through local MCP'}));
+  const navigation = await screen.findByRole('button', {name: `Inspect local MCP session ${uid(1)} in work`});
+  navigation.focus(); await userEvent.keyboard('{Enter}');
+  expect(document.activeElement).toBe(screen.getByRole('region', {name: 'Requested Loop inspection'}));
+  expect((screen.getByLabelText('Saved work') as HTMLSelectElement).value).toBe(uid(11));
+  expect((screen.getByLabelText('What would you like help with?') as HTMLTextAreaElement).value).toBe('Keep company draft');
+  expect(requests.filter(p => p.startsWith('/api/connections/v1/loops/'))).toEqual(['/api/connections/v1/loops/inspect-company']);
+  await userEvent.click(screen.getByRole('button', {name: 'Inspect local Loop sessions'}));
+  expect(document.activeElement).toBe(await screen.findByRole('region', {name: `Local Loop session ${uid(1)}`}));
+  expect(screen.getByRole('button', {name: `Stop local Loop ${uid(1)}`})).toBeTruthy();
+  expect(requests.filter(p => p.startsWith('/api/connections/v1/loops/'))).toEqual(['/api/connections/v1/loops/inspect-company', '/api/connections/v1/loops/inspect']);
+  expect(screen.queryByRole('checkbox', {name: /consent/i})).toBeNull();
+});

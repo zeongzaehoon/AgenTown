@@ -1,3 +1,4 @@
+import { inspectCompanyLoops } from './work-loop-api';
 import { canControl, controlText, sourceText, type LoopControl } from './loop-control';
 import { useEffect, useRef, useState } from 'react';
 import { ApiError, api, type Workspace } from './api';
@@ -65,6 +66,7 @@ export function OverviewLoops({workspace, onOpenWork, onOpenSession}: {onOpenSes
   }, []);
   return <section aria-labelledby="overview-loops-title">
     <h3 id="overview-loops-title">Bounded Loop activity</h3>
+    <CompanyMcpLoops workspace={workspace} onOpenSession={onOpenSession} />
     <p role="status">{status === 'loading' ? 'Loading Loop inspection…' : status === 'unavailable'
       ? inspection ? 'Loop inspection unavailable — showing stale sessions from the last successful inspection.' : 'Loop inspection unavailable. No session data loaded.'
       : !fresh ? 'Loop inspection stale. Inspect again before stopping.' : 'Showing recorded Loop sessions.'}</p>
@@ -92,5 +94,53 @@ export function OverviewLoops({workspace, onOpenWork, onOpenSession}: {onOpenSes
           : <p>{workspace ? 'Linked work is unavailable in the loaded workspace.' : 'Loading linked work…'}</p>}
       </li>;
     })}</ul>}
+  </section>;
+}
+
+
+function CompanyMcpLoops({workspace, onOpenSession}: {workspace: Workspace | null; onOpenSession?: (request: LoopNavigation) => void}) {
+  const [inspection, setInspection] = useState<LoopInspection | null>(null);
+  const [status, setStatus] = useState('Not inspected. Explicitly inspect recorded sessions through the retained local MCP owner.');
+  const [busy, setBusy] = useState(false);
+  const [fresh, setFresh] = useState(false);
+  const active = useRef<AbortController | null>(null);
+  const revision = useRef(0);
+  const expiry = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { ++revision.current; active.current?.abort(); if (expiry.current) clearTimeout(expiry.current); }, []);
+  async function inspect() {
+    const generation = ++revision.current;
+    active.current?.abort();
+    if (expiry.current) clearTimeout(expiry.current);
+    const controller = new AbortController(); active.current = controller;
+    setBusy(true); setFresh(false); setStatus('Inspecting retained local MCP owner…');
+    try {
+      const result = await inspectCompanyLoops(controller.signal);
+      if (generation !== revision.current) return;
+      if (!result.inspection) {setStatus('Retained local MCP inspection unavailable. Previous records, if any, are stale. Inspect again.'); return;}
+      setInspection(result.inspection); setFresh(true);
+      setStatus(result.inspection.sessions.length ? 'Recorded local MCP sessions loaded.' : 'No recorded local MCP sessions.');
+      expiry.current = setTimeout(() => { if (generation === revision.current) {setFresh(false); setStatus('Local MCP inspection stale. Inspect again for current persisted state and authority.');} }, 2400);
+    } catch {
+      if (generation === revision.current) setStatus('Retained local MCP inspection unavailable. Previous records, if any, are stale. Inspect again.');
+    } finally {if (generation === revision.current) setBusy(false);}
+  }
+  return <section aria-label="Company local MCP Loop inspection">
+    <h4>Retained local MCP Loop activity</h4>
+    <p role="status">{status}</p>
+    <button type="button" onClick={() => void inspect()}>Inspect company Loops through local MCP</button>
+    <p>Read recorded sessions across all work. Inspection and opening work grant no consent and never preview, start or stop work. Inspect the selected session again before an explicit Stop.</p>
+    {inspection && <>
+      <p aria-label="Retained MCP owner authority">{fresh ? '' : 'Stale authority: '}{controlText(inspection.control)}</p>
+      <ul aria-label="Company local MCP sessions">{inspection.sessions.map(s => {
+        const work = workspace?.work.find(w => w.id === s.preview.task_id);
+        return <li key={s.session_id}>
+          <p>Task: {s.preview.task_id} · Session: {s.session_id} · Persisted state: {s.state}</p>
+          <p>{sourceText(s.declared_source)}</p>
+          <p>{loopLabel(s, inspection.attempts)} · Admitted: {s.admitted} / {s.preview.max_iterations}</p>
+          {work && onOpenSession ? <button type="button" disabled={busy} onClick={() => onOpenSession({taskId: s.preview.task_id, sessionId: s.session_id})}>Inspect local MCP session {s.session_id} in work</button>
+            : <p>{workspace ? 'Linked work is unavailable in the loaded workspace. Session records remain inspectable here; reload the workspace before opening work.' : 'Linked work is not loaded yet.'}</p>}
+        </li>;
+      })}</ul>
+    </>}
   </section>;
 }

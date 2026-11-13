@@ -54,3 +54,13 @@ test.each([null, {...inspection, sessions: []}, {...inspection, sessions: [{...r
 test('stop receipt does not establish persisted stop while saved session remains active', () => {
   expect(() => confirmedLoop({...inspection, sessions: [receipt]}, {...receipt, state: 'stopped'} as LoopSession, 'stop')).toThrow(/not confirmed/);
 });
+
+test('company retained-owner parser rejects selected-work envelopes, malformed authority and cross-session attempts', async () => {
+  const {parseCompanyLoops} = await import('./work-loop-api');
+  const empty = {schema_version: 1, scope: 'company', status: 'confirmed', code: 'company_loops_inspected', recovery: 'Inspect explicitly', data: {schema_version: 1, sessions: [], attempts: [], control: {state: 'competing_owner', can_control: false, message: 'Other owner'}}};
+  expect(parseCompanyLoops(empty).inspection?.control?.state).toBe('competing_owner');
+  expect(() => parseCompanyLoops({...empty, requested_task_id: 'caller'})).toThrow();
+  expect(() => parseCompanyLoops({...empty, data: {...empty.data, control: {state: 'unknown', can_control: true, message: ''}}})).toThrow();
+  expect(() => parseCompanyLoops({...empty, data: {...empty.data, attempts: [{session_id: 'missing', run_id: '00000000-0000-4000-8000-000000000001', ordinal: 1, execution: null}]}})).toThrow();
+  expect(parseCompanyLoops({...empty, status: 'unavailable', code: 'owner_unavailable', data: null}).status).toBe('unavailable');
+});

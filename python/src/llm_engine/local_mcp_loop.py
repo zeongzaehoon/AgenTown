@@ -152,6 +152,27 @@ class LocalMcpLoop:
                 return Result('uncertain' if dispatched else 'unavailable',
                               'delivery_uncertain' if dispatched else 'transport_unavailable')
 
+    async def inspect_company(self):
+        # Same retained process and serialization as selected-work actions. No
+        # preview cache, admission, cancellation or caller-supplied identity.
+        async with self.lock:
+            if self.closed or self.broken:
+                return Result('unavailable', 'owner_unavailable')
+            try:
+                async with asyncio.timeout(self.timeout):
+                    await self._connect()
+                    from .mcp_server import LoopInspection
+                    data = LoopInspection.model_validate(
+                        await self._tool('inspect_loop_sessions_v1', {})).model_dump(mode='json')
+                    return Result('confirmed', 'company_loops_inspected', data)
+            except asyncio.CancelledError:
+                self.broken = True
+                raise
+            except Exception as exc:
+                if not isinstance(exc, ToolUnconfirmed):
+                    self.broken = True
+                return Result('unavailable', 'transport_unavailable')
+
     async def close(self):
         async with self.lock:
             self.closed = True

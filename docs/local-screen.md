@@ -3011,3 +3011,30 @@ Deterministic interaction coverage lives in `SkillBooks.test.tsx` and
 `WorkSkill.test.tsx`. The full supervisor profile also exercised 38 Chromium
 steps in two browser tests for this snapshot. Real provider calls are skipped
 under the live-test policy, never passed.
+
+### Inspect retained local MCP Loops from Company overview
+
+Launch `agentown-web --database PATH` with the same product database used for
+saved work and Loop sessions, then open the printed local URL. Without selecting
+work, choose **Inspect company Loops through local MCP** in Company overview.
+This explicit read calls `inspect_loop_sessions_v1({})` through the web process's
+retained local MCP owner. It lists all recorded Task/session IDs, persisted state,
+attempt status and the owner's authority. Empty, unavailable, stale (after 2.4
+seconds) and competing-owner results have separate messages. Caller-declared
+source is unverified and never grants control. Refresh is explicit; this panel
+does not poll or mutate work.
+
+For a loaded Task, choose **Inspect local MCP session … in work** (keyboard Enter
+or Space works). The existing selected-work inspection receives exact IDs and
+focuses its requested-inspection region; drafts remain intact. Choose **Inspect
+local Loop sessions** there to read and focus the exact session and reach its
+existing explicit Stop flow. Navigation does not preview, start, stop, or check
+consent. If linked work is unavailable, the overview explains why it cannot open
+it. Cached rows remain labeled stale after failed inspection; inspect again for
+current state and authority. Another owner must be stopped through its own server.
+
+Deterministic checks: `cd frontend && npm test -- OverviewLoops.test.tsx WorkLoop.test.tsx loop-response.test.tsx`;
+from `python/`, run `python -m pytest tests/test_selected_loop.py` with the native
+binding installed. These fixtures do not establish real provider operation; live
+provider calls remain skipped. Browser verification is performed by the supervisor
+under the change-based verification profile.

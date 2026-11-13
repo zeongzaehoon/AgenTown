@@ -59,3 +59,24 @@ export async function localLoop(operation: LoopOperation, task: string, signal: 
   const body = {task_id: task, ...(operation === 'preview' ? {policy_id: expected} : operation === 'start' ? {consent: expected, execution_consent: true} : operation === 'stop' ? {session_id: (expected as LoopSession).session_id} : {})};
   return parseLocalLoop(await api<unknown>(`/api/connections/v1/loops/${operation}`, body, signal), task, operation, expected);
 }
+
+
+/** Company inspection has its own envelope; selected-work parsing stays Task-bound. */
+export function parseCompanyLoops(value: unknown): LocalLoopResult {
+  if (!record(value) || value.schema_version !== 1 || value.scope !== 'company' ||
+      'requested_task_id' in value || typeof value.recovery !== 'string' || !value.recovery.trim()) throw new Error('Invalid company Loop response');
+  if (value.status === 'unavailable' && value.data === null && typeof value.code === 'string')
+    return {status: 'unavailable', code: value.code, recovery: value.recovery};
+  if (value.status !== 'confirmed' || value.code !== 'company_loops_inspected' || !record(value.data)) throw new Error('Invalid company Loop inspection');
+  const data = loopInspection({...value.data, cancellation: ''});
+  // Validate authority, exact identity and attempt linkage using the same strict
+  // retained-owner contract, without imposing one selected Task on all rows.
+  if (!record(value.data.control)) throw new Error('Missing owner authority');
+  for (const s of data.sessions) session(s, s.preview.task_id);
+  if (!['available', 'local_authority', 'competing_owner', 'storage_failure', 'closed'].includes(data.control!.state) ||
+      typeof data.control!.message !== 'string' || data.attempts.some(a => !uuid(a.run_id) || !data.sessions.some(s => s.session_id === a.session_id && a.ordinal <= s.admitted))) throw new Error('Invalid company owner or linkage');
+  return {status: 'confirmed', code: value.code, recovery: value.recovery, inspection: data};
+}
+export async function inspectCompanyLoops(signal: AbortSignal) {
+  return parseCompanyLoops(await api<unknown>('/api/connections/v1/loops/inspect-company', {}, signal));
+}

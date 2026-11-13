@@ -1378,3 +1378,16 @@ retains one installed local MCP owner; it does not reconnect and replay uncertai
 mutations. See [local screen steps](local-screen.md#selected-work-loop-through-the-retained-local-mcp-owner).
 Enabled policies are configuration only. Stop is local cancellation with potentially
 unknown remote completion. External-client and live-provider validation are not claimed.
+
+The web adapter's explicit company-wide read is
+`POST /api/connections/v1/loops/inspect-company` with exactly `{}` and the normal
+same-origin protection. It calls the existing `inspect_loop_sessions_v1({})`
+through the same retained local MCP process used by selected-work actions,
+serialized with those actions. Its version-1 envelope uses `scope: "company"`
+and `code: "company_loops_inspected"`, with sessions, attempts and owner control
+in `data`; unavailable transport returns no data. It accepts no Task, source,
+provider, consent or mutation fields. Selected-work `inspect` remains Task-bound.
+Inspection never caches a preview or dispatches activation/Stop. Owner authority
+comes from the returned control record, never the caller-declared source.
+See [local-screen.md](local-screen.md#inspect-retained-local-mcp-loops-from-company-overview)
+for runnable navigation and deterministic checks. Real provider validation is skipped.

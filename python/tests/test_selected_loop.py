@@ -99,3 +99,46 @@ def test_api_activation_poll_and_owner_directed_stop(tmp_path, monkeypatch):
         assert call('stop', dict(task_id=task, session_id=sid))['data']['state'] == 'stopped'
         assert port.process.pid == pid
     assert all(s['state'] != 'active' for s in _native.loop_sessions(db))
+
+
+def test_company_inspection_reuses_owner_and_preserves_multiple_task_identity(tmp_path, monkeypatch):
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'selected-loop-fixture-only')
+    db = str(tmp_path / 'company.sqlite')
+    employee = _native.create_agent(db, 'Writer')[0]
+    port = LocalMcpLoop(db, 'anthropic', 'fixture')
+    port.command = [sys.executable, FIXTURE, db]
+    with TestClient(create_app(db, loop_port=port), base_url=ORIGIN) as client:
+        def call(operation, payload):
+            return client.post('/api/connections/v1/loops/' + operation,
+                               headers={'Origin': ORIGIN}, json=payload)
+        empty = call('inspect-company', {}).json()
+        assert empty['scope'] == 'company'
+        assert 'requested_task_id' not in empty
+        assert empty['data']['sessions'] == []
+        pid = port.process.pid
+        expected = {}
+        for number in range(2):
+            task = _native.create_assigned_work(db, f'Work {number}', employee)[0]
+            policy = _native.create_loop(db, f'Loop {number}', task, 2, 60)['id']
+            _native.set_loop_enabled(db, policy, True)
+            preview = call('preview', dict(task_id=task, policy_id=policy)).json()['data']
+            started = call('start', dict(task_id=task, consent=preview, execution_consent=True)).json()
+            sid = started['data']['session_id']
+            expected[sid] = task
+            call('stop', dict(task_id=task, session_id=sid))
+        before = _native.loop_sessions(db)
+        previews = port.previews.copy()
+        result = call('inspect-company', {}).json()
+        assert result['code'] == 'company_loops_inspected'
+        assert {s['session_id']: s['preview']['task_id'] for s in result['data']['sessions']} == expected
+        assert all(s['state'] == 'stopped' for s in result['data']['sessions'])
+        assert result['data']['control']['state'] == 'local_authority'
+        assert port.process.pid == pid
+        assert port.previews == previews
+        assert _native.loop_sessions(db) == before
+        for task in expected.values():
+            selected = call('inspect', dict(task_id=task)).json()['data']['sessions']
+            assert all(s['preview']['task_id'] == task for s in selected)
+        for payload in ({'task_id': employee}, {'execution_consent': True}, {'declared_source': 'owner'}):
+            assert call('inspect-company', payload).status_code == 400
+        assert client.post('/api/connections/v1/loops/inspect-company', json={}).status_code == 403

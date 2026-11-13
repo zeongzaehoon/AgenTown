@@ -94,7 +94,7 @@ def create_app(database, model=None, *, port=8765, provider=None, provider_name=
         database, provider_name, model, configured=configuration is None)
     apply_selected_hook = ApplySelectedHook(local_hook)
 
-    from .application.apply_selected_loop import ApplySelectedLoop, SelectedLoopRequest
+    from .application.apply_selected_loop import ApplySelectedLoop, SelectedLoopRequest, InspectCompanyLoops
     from .local_mcp_loop import LocalMcpLoop
     local_loop = loop_port if loop_port is not None else LocalMcpLoop(
         database, provider_name, model, configured=configuration is None)
@@ -229,6 +229,7 @@ def create_app(database, model=None, *, port=8765, provider=None, provider_name=
     async def connection_loop(request):
         operation = request.path_params["operation"]
         fields = {
+            "inspect-company": set(),
             "list": {"task_id"}, "preview": {"task_id", "policy_id"},
             "start": {"task_id", "consent", "execution_consent"},
             "inspect": {"task_id"}, "stop": {"task_id", "session_id"},
@@ -237,6 +238,10 @@ def create_app(database, model=None, *, port=8765, provider=None, provider_name=
             data = await body(request)
             if operation not in fields or set(data) != fields[operation]:
                 raise ValueError("Unexpected Loop fields")
+            if operation == 'inspect-company':
+                if data:
+                    raise ValueError('Company inspection takes no fields')
+                return response(await InspectCompanyLoops(local_loop).execute())
             selected = SelectedLoopRequest(operation=operation, **data)
         except RequestTooLarge:
             return response({"error": "Loop request exceeds 120,000 bytes."}, 413)

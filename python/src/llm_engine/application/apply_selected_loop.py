@@ -40,3 +40,13 @@ class ApplySelectedLoop:
     async def execute(self, request):
         return dict(schema_version=1, requested_task_id=request.task_id,
                     **asdict(await self.port.execute_work(request)))
+
+
+class InspectCompanyLoops:
+    """Read all recorded sessions through the retained execution owner."""
+    def __init__(self, port: SelectedLoopPort):
+        self.port = port
+
+    async def execute(self):
+        return dict(schema_version=1, scope='company',
+                    **asdict(await self.port.inspect_company()))
