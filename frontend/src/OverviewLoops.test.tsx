@@ -116,7 +116,8 @@ test('App linked-work navigation clears filters explicitly, preserves drafts and
   fireEvent.click(button);
   expect((screen.getByLabelText('Search saved work') as HTMLInputElement).value).toBe('');
   expect((screen.getByLabelText('Saved work') as HTMLSelectElement).value).toBe('t');
-  expect(document.activeElement).toBe(screen.getByLabelText('Saved work'));
+  expect(document.activeElement).toBe(screen.getByRole('region', {name: 'Requested Loop inspection'}));
+  expect(screen.getByText(/Requested Task: t · Loop: s/)).toBeTruthy();
   expect((screen.getByLabelText('What would you like help with?') as HTMLTextAreaElement).value).toBe('Keep my draft');
   expect(screen.getByRole('button', {name: 'Stop Loop s'})).toBeTruthy();
 });
@@ -322,4 +323,17 @@ test.each(['confirmed', 'failed', 'malformed', 'stale'])('overview separates hel
   screen.getByRole('button', {name: 'Inspect Loop sessions again'}).focus();
   await user.keyboard('{Enter}');
   expect(fetcher.mock.calls.filter(([path]) => path.endsWith('/stop'))).toHaveLength(1);
+});
+
+test('keyboard navigation carries exact Task and session without mutation', async () => {
+  const fetcher = vi.fn(async () => new Response(JSON.stringify(initial())));
+  vi.stubGlobal('fetch', fetcher);
+  const navigate = vi.fn();
+  const open = vi.fn();
+  render(<OverviewLoops workspace={workspace} onOpenWork={open} onOpenSession={navigate} />);
+  const button = await screen.findByRole('button', {name: /Open work: Saved request/});
+  button.focus(); await userEvent.keyboard('{Enter}');
+  expect(navigate).toHaveBeenCalledWith({taskId: 't', sessionId: 's'});
+  expect(open).not.toHaveBeenCalled();
+  expect(fetcher).toHaveBeenCalledTimes(1);
 });

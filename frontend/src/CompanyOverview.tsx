@@ -3,7 +3,7 @@ import { HookDevices } from './HookDevices';
 import { workstationClients, type ConnectionClientId } from './Connections';
 import { TeamRooms } from './TeamRooms';
 import { SkillBooks } from './SkillBooks';
-import { OverviewLoops } from './OverviewLoops';
+import { OverviewLoops, type LoopNavigation } from './OverviewLoops';
 import { classifyWork, type WorkOutcome, type Workspace } from './api';
 
 const categories: {key: WorkOutcome; label: string}[] = [
@@ -12,7 +12,8 @@ const categories: {key: WorkOutcome; label: string}[] = [
   {key: 'other', label: 'Other recorded work'},
 ];
 
-export function CompanyOverview({workspace, connected, error, onOpenWork, selectedEmployee = '', onSelectEmployee, onOpenHook, onOpenLoop, onOpenSkill, onOpenClient, onOpenTeam, onSelectTeamMember}: {
+export function CompanyOverview({workspace, connected, error, onOpenWork, selectedEmployee = '', onSelectEmployee, onOpenHook, onOpenLoop, onOpenSkill, onOpenClient, onOpenTeam, onSelectTeamMember, onOpenSession}: {
+  onOpenSession?: (request: LoopNavigation) => void;
   onSelectTeamMember?: (id: string) => void;
   onOpenTeam?: (id: string) => void;
   onOpenClient?: (id: ConnectionClientId) => void;
@@ -53,7 +54,7 @@ export function CompanyOverview({workspace, connected, error, onOpenWork, select
     <SkillBooks onOpenSkill={onOpenSkill} />
     <HookDevices onOpenHook={onOpenHook} />
     <LoopDevices onOpenLoop={onOpenLoop} />
-    <OverviewLoops workspace={workspace} onOpenWork={onOpenWork} />
+    <OverviewLoops onOpenSession={onOpenSession} workspace={workspace} onOpenWork={onOpenWork} />
     {workspace && <>
       {workspace.configuration && <p>Execution setup needed: {workspace.configuration} Employees and saved assignments are still shown.</p>}
       <p>Each request counts once per assigned employee. Shared work appears for each employee, so employee counts may exceed the number of requests.</p>

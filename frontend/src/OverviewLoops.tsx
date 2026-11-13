@@ -4,8 +4,10 @@ import { ApiError, api, type Workspace } from './api';
 import { loopLabel } from './LoopExecution';
 import { confirmedLoop, loopInspection, loopReceipt, type LoopInspection } from './loop-response';
 
+export interface LoopNavigation {taskId: string; sessionId: string}
+
 /** Polling and navigation inspect only; stopping requires explicit session consent. */
-export function OverviewLoops({workspace, onOpenWork}: {workspace: Workspace | null; onOpenWork: (id: string) => void}) {
+export function OverviewLoops({workspace, onOpenWork, onOpenSession}: {onOpenSession?: (request: LoopNavigation) => void; workspace: Workspace | null; onOpenWork: (id: string) => void}) {
   const [inspection, setInspection] = useState<LoopInspection | null>(null);
   const [control, setControl] = useState<LoopControl | null>(null);
   const [status, setStatus] = useState<'loading' | 'ready' | 'unavailable'>('loading');
@@ -86,7 +88,7 @@ export function OverviewLoops({workspace, onOpenWork}: {workspace: Workspace | n
           : !fresh ? 'Fresh inspection required. Inspect Loop sessions again or wait for a successful refresh.'
           : !canControl(control) ? controlText(control) : 'Available by explicit action only. The server checks ownership again.'}</p>
         <p>Work ID: {session.preview.task_id}</p>
-        {work ? <button type="button" onClick={() => onOpenWork(work.id)}>Open work: {work.input.slice(0, 55)} · Loop {session.session_id}</button>
+        {work ? <button type="button" onClick={() => onOpenSession ? onOpenSession({taskId: work.id, sessionId: session.session_id}) : onOpenWork(work.id)}>Open work: {work.input.slice(0, 55)} · Loop {session.session_id}</button>
           : <p>{workspace ? 'Linked work is unavailable in the loaded workspace.' : 'Loading linked work…'}</p>}
       </li>;
     })}</ul>}

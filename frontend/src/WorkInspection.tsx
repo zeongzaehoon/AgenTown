@@ -1,3 +1,4 @@
+import type { LoopNavigation } from './OverviewLoops';
 import { useLayoutEffect, useRef, useState } from 'react';
 import { WorkRecovery } from './WorkRecovery';
 import { WorkLoop } from './WorkLoop';
@@ -7,7 +8,7 @@ import { WorkExecution } from './WorkExecution';
 import { RequestTimeoutError } from './api';
 import { inspectSelectedWork, type InspectionResponse } from './work-inspection-api';
 
-export function WorkInspection({taskId, connected = true}: {taskId: string | null; connected?: boolean}) {
+export function WorkInspection({taskId, connected = true, loopRequest}: {loopRequest?: LoopNavigation | null; taskId: string | null; connected?: boolean}) {
   const [response, setResponse] = useState<InspectionResponse | null>(null);
   const [error, setError] = useState('');
   const [pending, setPending] = useState(false);
@@ -43,7 +44,7 @@ export function WorkInspection({taskId, connected = true}: {taskId: string | nul
     {error && <p role="alert">{error}</p>}
     {response?.status === 'failure' && <div role="alert"><p>{response.message}</p><p>{response.recovery}</p><p>Inspection unavailable ({response.code}). Nothing is automatically retried.</p></div>}
     {taskId && <WorkRecovery key={`${taskId}/${connected}`} taskId={taskId} connected={connected} onRequest={() => {request.current?.controller.abort(); request.current = null; setPending(false); setResponse(null); setError('');}} onInspect={() => void inspect()} />}
-    <WorkLoop taskId={taskId} connected={connected} inspected={!!inspection} />
+    <WorkLoop navigation={loopRequest} taskId={taskId} connected={connected} inspected={!!inspection} />
     {inspection && <div>
       <p role="status">Confirmed local MCP inspection. External-client connection remains unverified.</p>
       <p>Evidence: installed local MCP · get_task · get_work_history_v1 (read_only=true) · inspect_loop_sessions_v1 · preflight_text_work_v1.</p>

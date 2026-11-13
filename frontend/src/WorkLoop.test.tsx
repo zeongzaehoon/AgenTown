@@ -23,7 +23,7 @@ async function prepare() {
 afterEach(() => {cleanup(); vi.unstubAllGlobals();});
 test('keyboard preview, explicit complete consent, duplicate prevention and retained Stop after selection change', async () => {
   const fetcher = setup(); let finish!: (v: Response) => void;
-  fetcher.mockImplementationOnce(() => new Promise<Response>(resolve => {finish = resolve;})).mockResolvedValueOnce(reply({...session, state: 'stopped'}, 'loop_stopped'));
+  fetcher.mockImplementationOnce(() => new Promise<Response>(resolve => {finish = resolve;})).mockResolvedValueOnce(reply({...session, state: 'stopped'}, 'loop_stopped')).mockResolvedValueOnce(reply(inspection([{...session, state: 'stopped'}]), 'loops_inspected'));
   const view = render(<WorkLoop taskId={task} connected inspected />);
   expect(fetcher).not.toHaveBeenCalled(); await prepare();
   expect(document.activeElement).toBe(screen.getByRole('region', {name: 'Local Loop preview'}));
@@ -65,4 +65,53 @@ test('typed boundaries reject wrong selection, bounds, authority and immutable p
   for (const patch of [{task_id: policy}, {max_iterations: 101}, {expected_runs: -1}, {created_at: null}, {model: null}, {policy_enabled: false}]) expect(() => parseLocalLoop(envelope({...preview, ...patch}, 'loop_previewed'), task, 'preview', policy)).toThrow();
   expect(() => parseLocalLoop(envelope({...session, preview: {...savedPreview, input: 'changed'}}, 'loop_started'), task, 'start', preview)).toThrow();
   expect(() => parseLocalLoop(envelope({schema_version: 1, sessions: [session], attempts: [], control: {state: 'unknown', can_control: true, message: ''}}, 'loops_inspected'), task, 'inspect')).toThrow();
+});
+
+function inspection(sessions: unknown[] = [session], state = 'local_authority') {
+  return {schema_version: 1, sessions, attempts: [], control: {state, can_control: state === 'local_authority', message: 'Recorded authority'}};
+}
+test('requested session requires explicit read, focuses exact session and confirms Stop with persisted inspection', async () => {
+  const fetcher = vi.fn().mockResolvedValueOnce(reply(inspection(), 'loops_inspected'))
+    .mockResolvedValueOnce(reply({...session, state: 'stopped'}, 'loop_stopped'))
+    .mockResolvedValueOnce(reply(inspection([{...session, state: 'stopped'}]), 'loops_inspected'));
+  vi.stubGlobal('fetch', fetcher);
+  render(<WorkLoop taskId={task} connected inspected={false} navigation={{taskId: task, sessionId: policy}} />);
+  expect(fetcher).not.toHaveBeenCalled();
+  await userEvent.click(screen.getByRole('button', {name: 'Inspect local Loop sessions'}));
+  expect(document.activeElement).toBe(await screen.findByRole('region', {name: `Local Loop session ${policy}`}));
+  await userEvent.click(screen.getByRole('button', {name: `Stop local Loop ${policy}`}));
+  expect(await screen.findByText(/Saved stopped state confirmed/)).toBeTruthy();
+  expect(fetcher.mock.calls.map(c => c[0])).toEqual(['/api/connections/v1/loops/inspect', '/api/connections/v1/loops/stop', '/api/connections/v1/loops/inspect']);
+  expect(JSON.parse(fetcher.mock.calls[1][1].body)).toEqual({task_id: task, session_id: policy});
+});
+test('missing requested session and competing owner never grant Stop from declared source', async () => {
+  const fetcher = vi.fn().mockResolvedValueOnce(reply(inspection([]), 'loops_inspected'))
+    .mockResolvedValueOnce(new Response(JSON.stringify(envelope(inspection([session], 'competing_owner'), 'competing_owner', 'rejected'))));
+  vi.stubGlobal('fetch', fetcher);
+  render(<WorkLoop taskId={task} connected inspected={false} navigation={{taskId: task, sessionId: policy}} />);
+  await userEvent.click(screen.getByRole('button', {name: 'Inspect local Loop sessions'}));
+  expect(await screen.findByText(/Requested Loop session is missing/)).toBeTruthy();
+  await userEvent.click(screen.getByRole('button', {name: 'Inspect local Loop sessions'}));
+  expect((await screen.findByRole('button', {name: `Stop local Loop ${policy}`} ) as HTMLButtonElement).disabled).toBe(true);
+  expect(fetcher).toHaveBeenCalledTimes(2);
+});
+test('late navigation read cannot steal focus or populate obsolete records', async () => {
+  let finish!: (v: Response) => void;
+  vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(resolve => {finish = resolve;})));
+  const view = render(<WorkLoop taskId={task} connected inspected={false} navigation={{taskId: task, sessionId: policy}} />);
+  await userEvent.click(screen.getByRole('button', {name: 'Inspect local Loop sessions'}));
+  view.rerender(<WorkLoop taskId={policy} connected inspected={false} navigation={{taskId: policy, sessionId: task}} />);
+  await act(async () => finish(reply(inspection(), 'loops_inspected')));
+  expect(screen.queryByRole('region', {name: `Local Loop session ${policy}`})).toBeNull();
+  expect(document.activeElement).toBe(screen.getByRole('region', {name: 'Requested Loop inspection'}));
+});
+test('uncertain Stop is unconfirmed and is not replayed automatically', async () => {
+  const fetcher = vi.fn().mockResolvedValueOnce(reply(inspection(), 'loops_inspected')).mockRejectedValueOnce(new Error('lost receipt'));
+  vi.stubGlobal('fetch', fetcher);
+  render(<WorkLoop taskId={task} connected inspected />);
+  await userEvent.click(screen.getByRole('button', {name: 'Inspect local Loop sessions'}));
+  await userEvent.click(await screen.findByRole('button', {name: `Stop local Loop ${policy}`}));
+  expect(await screen.findByText(/Delivery uncertain/)).toBeTruthy();
+  expect((screen.getByRole('button', {name: `Stop local Loop ${policy}`} ) as HTMLButtonElement).disabled).toBe(true);
+  expect(fetcher).toHaveBeenCalledTimes(2);
 });

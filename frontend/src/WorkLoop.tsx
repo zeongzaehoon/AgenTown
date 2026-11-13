@@ -1,3 +1,4 @@
+import type { LoopNavigation } from './OverviewLoops';
 import { useLayoutEffect, useRef, useState } from 'react';
 import { canControl, controlText } from './loop-control';
 import { loopLabel } from './LoopExecution';
@@ -6,13 +7,16 @@ import type { LoopRecord } from './configuration-api';
 import { localLoop, type LocalLoopPreview, type LoopOperation } from './work-loop-api';
 
 /** Kept mounted across inspection/selection changes so owner Stop remains reachable. */
-export function WorkLoop({taskId, connected, inspected}: {taskId: string | null; connected: boolean; inspected: boolean}) {
+export function WorkLoop({taskId, connected, inspected, navigation}: {navigation?: LoopNavigation | null; taskId: string | null; connected: boolean; inspected: boolean}) {
   const [policies, setPolicies] = useState<LoopRecord[]>([]);
   const [selected, setSelected] = useState('');
   const [preview, setPreview] = useState<LocalLoopPreview | null>(null);
   const [consent, setConsent] = useState(false);
   const [records, setRecords] = useState<Record<string, LoopInspection>>({});
   const [receipts, setReceipts] = useState<Record<string, LoopSession>>({});
+  const [focusedSession, setFocusedSession] = useState('');
+  const [uncertainStops, setUncertainStops] = useState<string[]>([]);
+  const navigationRegion = useRef<HTMLElement>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [recoveryRead, setRecoveryRead] = useState<string[]>([]);
@@ -22,18 +26,29 @@ export function WorkLoop({taskId, connected, inspected}: {taskId: string | null;
   const previewRegion = useRef<HTMLElement>(null);
   const revision = useRef(0);
   function invalidate() {++revision.current; setPreview(null); setConsent(false);}
-  useLayoutEffect(() => {invalidate(); setPolicies([]); setSelected('');}, [taskId, connected, inspected]);
+  useLayoutEffect(() => {invalidate(); setPolicies([]); setSelected('');}, [taskId, connected, inspected, navigation]);
+  useLayoutEffect(() => {setFocusedSession(''); if (navigation) navigationRegion.current?.focus();}, [navigation, taskId]);
+  useLayoutEffect(() => {if (focusedSession) document.getElementById(`local-session-${focusedSession}`)?.focus();}, [focusedSession]);
   useLayoutEffect(() => () => {pending.current?.abort(); pending.current = null;}, []);
   useLayoutEffect(() => {if (preview) previewRegion.current?.focus();}, [preview]);
   async function perform(op: LoopOperation, task = taskId, saved?: LoopSession) {
     if (!task || !connected || pending.current || (op === 'start' && (!preview || !consent || recovery.includes(task)))) return;
     const expected = op === 'preview' ? selected : op === 'start' ? preview! : saved;
-    invalidate(); const generation = revision.current;
+    invalidate(); if (op === 'inspect') setFocusedSession(''); const generation = revision.current;
     const active = new AbortController(); pending.current = active; setBusy(true);
     if (op === 'start') {setRecovery(rows => [...new Set([...rows, task])]); setRecoveryRead(rows => rows.filter(t => t !== task));}
     try {
-      const result = await localLoop(op, task, active.signal, expected);
+      let result = await localLoop(op, task, active.signal, expected);
+      if (op === 'stop' && result.receipt) {
+        const receipt = result.receipt;
+        const confirmed = await localLoop('inspect', task, active.signal);
+        const persisted = confirmed.inspection?.sessions.find(s => s.session_id === receipt.session_id);
+        if (confirmed.status !== 'confirmed' || !persisted || persisted.state !== 'stopped' || JSON.stringify(persisted.preview) !== JSON.stringify(receipt.preview) || persisted.provider !== receipt.provider || persisted.model !== receipt.model) throw new Error('Stopped state unconfirmed');
+        result = {...confirmed, recovery: 'Saved stopped state confirmed. Remote completion may remain unknown.'};
+      }
       if (pending.current !== active) return;
+      if (op === 'stop' && saved && result.status === 'uncertain') setUncertainStops(rows => [...new Set([...rows, saved.session_id])]);
+      if (op !== 'start' && op !== 'stop' && generation !== revision.current) return;
       // Mutation provenance is retained even if selection changes during delivery.
       if (result.receipt) {setReceipts(rows => ({...rows, [result.receipt!.session_id]: result.receipt!})); setRecoveryRead(rows => rows.filter(t => t !== task));}
       if (result.inspection) {
@@ -44,6 +59,14 @@ export function WorkLoop({taskId, connected, inspected}: {taskId: string | null;
             return old && (JSON.stringify(old.preview) !== JSON.stringify(s.preview) || old.provider !== s.provider || old.model !== s.model);
           })) throw new Error('Saved provenance changed');
           setRecords(rows => ({...rows, [task]: result.inspection!}));
+          if (op === 'inspect') {
+            setUncertainStops(rows => rows.filter(id => !result.inspection!.sessions.some(s => s.session_id === id)));
+            if (navigation?.taskId === task && generation === revision.current) {
+              const found = result.inspection.sessions.find(s => s.session_id === navigation.sessionId);
+              setFocusedSession(found?.session_id || '');
+              if (!found) {setMessage('Requested Loop session is missing from this Task inspection. Nothing was started or stopped.'); return;}
+            }
+          }
           if (op === 'inspect') setRecoveryRead(rows => [...new Set([...rows, task])]);
           setReceipts(rows => {const next = {...rows}; result.inspection!.sessions.forEach(s => {delete next[s.session_id];}); return next;});
         }
@@ -54,15 +77,17 @@ export function WorkLoop({taskId, connected, inspected}: {taskId: string | null;
       }
       setMessage(`${result.status} (${result.code}). ${result.recovery}${result.receipt ? ' Receipt received; inspect persisted sessions to confirm progress.' : ''}`);
     } catch {
-      if (pending.current === active) setMessage(op === 'start' || op === 'stop'
+      if (op === 'stop' && saved) setUncertainStops(rows => [...new Set([...rows, saved.session_id])]);
+      if (pending.current === active && (generation === revision.current || op === 'start' || op === 'stop')) setMessage(op === 'start' || op === 'stop'
         ? 'Delivery uncertain. Activation or Stop may have reached the owner. Inspect persisted sessions before any new activation. Nothing is resent automatically.'
         : 'Local MCP response could not be confirmed. Inspect explicitly before trying again.');
-    } finally {if (pending.current === active) {pending.current = null; setBusy(false); if (op === 'start' || op === 'stop') region.current?.focus();}}
+    } finally {if (pending.current === active) {pending.current = null; setBusy(false); if (generation === revision.current && (op === 'start' || op === 'stop')) region.current?.focus();}}
   }
   const sessions = new Map<string, LoopSession>();
   Object.values(records).forEach(r => r.sessions.forEach(s => sessions.set(s.session_id, s)));
   Object.values(receipts).forEach(s => sessions.set(s.session_id, s));
   return <section ref={region} tabIndex={-1} aria-label="Bounded Loop through local MCP" aria-busy={busy}>
+    {navigation && <section ref={navigationRegion} tabIndex={-1} aria-label="Requested Loop inspection"><p>Requested Task: {navigation.taskId} · Loop: {navigation.sessionId}. Choose Inspect local Loop sessions to read and focus this exact session. Cached records may be stale; navigation grants no ownership.</p></section>}
     <h4>Bounded Loop through local MCP</h4>
     <p>Enabled means configured only. Discovery and preview never activate work. Explicit activation may incur provider costs. External-client connection and live-provider operation remain unverified.</p>
     {!connected && <p>Disconnected. Session records may be stale. Reconnect to request Stop through the retained owner.</p>}
@@ -84,12 +109,12 @@ export function WorkLoop({taskId, connected, inspected}: {taskId: string | null;
       <button type="button" onClick={() => {invalidate(); region.current?.focus();}}>Cancel local Loop preview</button>
     </section>}
     <p>Stop prevents new admissions and attempts local cancellation. Remote completion may remain unknown. Disconnecting or changing selection does not stop a session.</p>
-    {[...sessions.values()].map(s => <section key={s.session_id} aria-label={`Local Loop session ${s.session_id}`}>
+    {[...sessions.values()].map(s => <section tabIndex={-1} id={`local-session-${s.session_id}`} key={s.session_id} aria-label={`Local Loop session ${s.session_id}`}>
       <h5>{s.preview.policy_name} · {s.session_id}</h5><p>Task: {s.preview.task_id}</p>
       <p>{loopLabel(s, records[s.preview.task_id]?.attempts || [])} · Admitted: {s.admitted} / {s.preview.max_iterations}</p>
       <p>{controlText(records[s.preview.task_id]?.control)}</p>
       <button type="button" disabled={busy || !connected} onClick={() => void perform('inspect', s.preview.task_id)}>Inspect retained session {s.session_id}</button>
-      {s.state === 'active' && <button type="button" disabled={busy || !connected || (!!records[s.preview.task_id] && !canControl(records[s.preview.task_id].control))} onClick={() => void perform('stop', s.preview.task_id, s)}>Stop local Loop {s.session_id}</button>}
+      {s.state === 'active' && <button type="button" disabled={busy || !connected || uncertainStops.includes(s.session_id) || (!!records[s.preview.task_id] && !canControl(records[s.preview.task_id].control))} onClick={() => void perform('stop', s.preview.task_id, s)}>Stop local Loop {s.session_id}</button>}
       <p>Saved input</p><pre>{s.preview.input}</pre><p>Quality unverified</p>
       {records[s.preview.task_id]?.attempts.filter(a => a.session_id === s.session_id).map(a => <article key={a.run_id}><p>Attempt {a.ordinal} · {a.run_id} · {a.execution?.outcome || 'No terminal outcome recorded'}</p>{a.execution?.output != null && <pre>{a.execution.output}</pre>}{a.execution?.error && <p>{a.execution.error}</p>}</article>)}
     </section>)}

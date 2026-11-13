@@ -2902,3 +2902,35 @@ This UI uses the installed local MCP process (`list_loops_v1`, `preview_loop_v1`
 retained owner. It is not evidence of an external-client connection or live-provider
 validation. Deterministic interaction coverage is in `frontend/src/WorkLoop.test.tsx`;
 supervisor browser validation is pending for this implementation snapshot.
+
+### Open a recorded Loop from the company overview
+
+Run `agentown-web --database PATH` against the database containing your saved
+work and Loop sessions, and open the printed local URL. In Company overview →
+Bounded Loop activity, Tab to **Open work: … · Loop …** and press Enter.
+This carries the recorded Task ID and session ID into local MCP inspection,
+clears history filters, and preserves unsaved employee, configuration and work
+drafts. Navigation performs no execution action.
+
+The requested-inspection region receives focus. Choose **Inspect local Loop
+sessions** explicitly: this reads through the retained local MCP endpoint and
+focuses the matching saved session. Check both IDs and saved input. If the
+session is missing, the screen says so; if linked work is absent, the overview
+has no Open action. Disconnected records and cached records may be stale.
+Competing-owner inspection does not authorize Stop, regardless of the
+caller-declared source. Rapid navigation discards obsolete read results.
+
+For an active session with granted authority, choose **Stop local Loop …**.
+The request uses `/api/connections/v1/loops/stop` with the exact Task and session
+IDs, followed by read-only inspection. Only persisted `stopped` state with
+matching saved provenance confirms Stop. A lost or uncertain receipt stays
+unconfirmed and is never replayed automatically; explicitly inspect before
+considering another action. Stop requests local cancellation; remote completion
+may remain unknown. Merely opening, inspecting, disconnecting or changing the
+selection never starts, resumes or stops work.
+
+Deterministic coverage is in `OverviewLoops.test.tsx` and `WorkLoop.test.tsx`.
+Run `cd frontend && npm test -- src/OverviewLoops.test.tsx src/WorkLoop.test.tsx`
+with frontend dependencies available. Supervisor change-based verification and
+browser validation are pending for this implementation snapshot. Live provider
+calls are skipped under the current user policy, not passed.
