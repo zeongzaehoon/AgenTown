@@ -32,6 +32,7 @@ function ConfigurationPanel({workspace, openSkill, openRecord, hidden, onClose}:
   const baselines = useRef<Record<string, Draft>>({});
   const [busy, setBusy] = useState(false);
   const [stale, setStale] = useState(false);
+  const [recovery, setRecovery] = useState<'refresh' | 'inspect' | null>(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const lock = useRef(false);
@@ -42,7 +43,7 @@ function ConfigurationPanel({workspace, openSkill, openRecord, hidden, onClose}:
   const record = records?.[kind].find(item => item.id === selected);
   const key = `${kind}/${selected}`;
   const draft = drafts[key] ?? (record ? draftOf(record) : defaults[kind]);
-  const blocked = busy || stale || !records || (!!selected && !record);
+  const blocked = busy || stale || !!recovery || !records || (!!selected && !record);
   function changeFields(fields: Draft) {
     baselines.current[key] ??= record ? draftOf(record) : defaults[kind];
     setDrafts(previous => ({...previous, [key]: {...draft, ...fields}}));
@@ -66,10 +67,11 @@ function ConfigurationPanel({workspace, openSkill, openRecord, hidden, onClose}:
         ]);
         if (request.signal.aborted) return;
         setRecords({skills: savedSkills(skills), hooks: savedHooks(hooks), loops: savedLoopPolicies(loops)}); setTeams(teamList.teams); setStale(false);
+        setRecovery(previous => previous ? 'inspect' : null);
         setNotice('Saved values refreshed. Inspect them before explicitly retrying any uncertain save; refresh never resends changes.');
       }
     } catch (failure) {
-      if (!request.signal.aborted) { setStale(true); setError(`${failure instanceof Error ? failure.message : 'Invalid configuration response.'} Disconnected or unavailable. Drafts retained. ${action ? 'A mutation may have been saved. Refresh configuration and inspect saved values before explicitly retrying.' : 'Refresh configuration to load valid saved values before saving or enabling.'} Nothing is automatically resent.`); }
+      if (!request.signal.aborted) { setStale(true); setRecovery(previous => action || previous ? 'refresh' : null); setError(`${failure instanceof Error ? failure.message : 'Invalid configuration response.'} Disconnected or unavailable. Drafts retained. ${action ? 'Delivery is uncertain. A mutation may have been saved. Refresh configuration and inspect saved values before explicitly retrying.' : 'Refresh configuration to load valid saved values before saving or enabling.'} Nothing is automatically resent.`); }
     } finally { if (controller.current === request) { lock.current = false; if (!request.signal.aborted) setBusy(false); } }
   }
   useEffect(() => { void perform(); return () => { controller.current?.abort(); lock.current = false; }; }, []);
@@ -88,8 +90,17 @@ function ConfigurationPanel({workspace, openSkill, openRecord, hidden, onClose}:
     setSelection(previous => ({...previous, [destination.kind]: destination.id}));
     focusSelection.current = true;
   }, [openSkill, openRecord]);
-  function remember(saved: ConfigurationRecord) {
-    setRecords(previous => previous && ({...previous, [kind]: [...previous[kind].filter(item => item.id !== saved.id), saved]}));
+  async function confirm(saved: ConfigurationRecord, signal: AbortSignal) {
+    const response = await configurationRequest<unknown>(kind, '', undefined, signal);
+    const refreshed = kind === 'skills' ? savedSkills(response) : kind === 'hooks' ? savedHooks(response) : savedLoopPolicies(response);
+    const persisted = refreshed.find(item => item.id === saved.id);
+    // Validate the persisted record independently of the mutation receipt. No
+    // state is published until both responses confirm the submitted command.
+    confirmedConfigurationReceipt(kind, persisted, saved, saved.enabled, saved);
+    return refreshed;
+  }
+  function remember(saved: ConfigurationRecord, refreshed: ConfigurationRecord[]) {
+    setRecords(previous => previous && ({...previous, [kind]: refreshed}));
     setNotice(`${labels[kind]} saved · ID: ${saved.id}`);
   }
   const targets = draft.target_kind === 'team' ? teams : workspace?.employees ?? [];
@@ -114,6 +125,12 @@ function ConfigurationPanel({workspace, openSkill, openRecord, hidden, onClose}:
     <p role="status">{busy ? 'Loading or saving configuration…' : stale ? 'Configuration disconnected: loaded values are stale.' : records ? 'Showing saved configuration.' : 'Configuration unavailable.'}</p>
     {error && <p role="alert">{error}</p>}<p role="status">{notice}</p>
     <button type="button" disabled={busy} onClick={() => void perform()}>Refresh configuration</button>
+    {recovery && <>
+      <p role="status">Delivery is uncertain. Refresh configuration, then inspect saved IDs, fields and enabled state before retrying. Drafts are retained; nothing is automatically resent.</p>
+      <button type="button" disabled={busy || stale || recovery !== 'inspect'} onClick={() => {
+        setRecovery(null); setNotice('Inspection confirmed. Review retained drafts before explicitly submitting again.');
+      }}>I inspected saved configuration</button>
+    </>}
     <label>Record type<select disabled={busy} value={kind} onChange={event => setKind(event.target.value as ConfigurationKind)}>{Object.entries(labels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
     <label>Saved record<select ref={selector} disabled={busy} value={selected} onChange={event => setSelection(previous => ({...previous, [kind]: event.target.value}))}>
       <option value="">Create new {labels[kind]}</option>{selected && !record && <option value={selected}>Unavailable · ID: {selected}</option>}{records?.[kind].map(item => <option key={item.id} value={item.id}>{item.name} · ID: {item.id}</option>)}
@@ -124,7 +141,10 @@ function ConfigurationPanel({workspace, openSkill, openRecord, hidden, onClose}:
       <p>Configuration {record.enabled ? 'enabled' : 'disabled'}. No automatic execution. Apply enabled Skills through a saved-work preview; Hooks and Loops remain inactive.</p>
       <button type="button" disabled={blocked} onClick={() => void perform(async signal => {
         const saved = await configurationRequest<ConfigurationRecord>(kind, `/${encodeURIComponent(record.id)}/enabled`, {enabled: !record.enabled}, signal);
-        if (!signal.aborted) remember(confirmedConfigurationReceipt(kind, saved, record, !record.enabled, record));
+        if (signal.aborted) return;
+        const receipt = confirmedConfigurationReceipt(kind, saved, record, !record.enabled, record);
+        const refreshed = await confirm(receipt, signal);
+        if (!signal.aborted) remember(receipt, refreshed);
       })}>{record.enabled ? 'Disable configuration' : 'Enable configuration'}</button></>}
     <form onSubmit={event => {
       event.preventDefault(); if (blocked || validation) return;
@@ -133,9 +153,11 @@ function ConfigurationPanel({workspace, openSkill, openRecord, hidden, onClose}:
         const response = await configurationRequest<unknown>(kind, selected ? `/${encodeURIComponent(selected)}` : '', fields as unknown as ConfigurationFields, signal);
         if (signal.aborted) return;
         const saved = confirmedConfigurationReceipt(kind, response, fields as unknown as ConfigurationFields, record?.enabled ?? false, record, records?.[kind]);
-        delete baselines.current[key]; delete baselines.current[`${kind}/${saved.id}`];
-        remember(saved); setSelection(previous => ({...previous, [kind]: saved.id}));
-        setDrafts(previous => { const next = {...previous}; delete next[key]; delete next[`${kind}/${saved.id}`]; return next; });
+        const refreshed = await confirm(saved, signal);
+        if (signal.aborted) return;
+        delete baselines.current[key];
+        remember(saved, refreshed); setSelection(previous => ({...previous, [kind]: saved.id}));
+        setDrafts(previous => { const next = {...previous}; delete next[key]; return next; });
         focusSelection.current = true;
       });
     }}>

@@ -2403,3 +2403,31 @@ drafts, duplicate submissions while confirming, and keyboard refresh/inspection.
 With dependencies available: `cd frontend && npx vitest run src/Teams.test.tsx`
 and `npx tsc --noEmit`. Supervisor-selected consolidated and browser checks
 remain pending; live LLM calls are skipped under the current user policy.
+
+Configuration persisted confirmation (C62-T1): launch `agentown-web --database
+PATH` from the prepared checkout and open Configuration. Create a Skill, then a
+Hook referencing that Skill and an employee/team, then a Loop referencing saved
+work. Edit each record and enable/disable it. Each mutation must be followed by a
+GET of its corresponding `/api/config/v1/skills`, `/hooks` or `/loops` list.
+Success, selected ID and submitted draft removal occur only when that list
+confirms the receipt ID, requested fields and enabled state. Other drafts remain.
+
+To exercise recovery without provider calls, use browser Network response
+replacement (or the existing configuration transport interception) to leave the
+mutation receipt intact but replace the subsequent GET body with an empty list,
+a record with a contradictory field/enabled value, or malformed data; also try a
+failed GET. Hold that GET to verify pending controls block duplicate submissions
+and retain leave protection. On failure, prior confirmed values, selection and
+all drafts remain, with an uncertain-delivery alert and no success announcement.
+Restore genuine GET responses, focus **Refresh configuration** with Tab and press
+Enter. A failed refresh keeps inspection disabled. After a successful refresh,
+select persisted records and inspect IDs, fields and enabled state, then activate
+**I inspected saved configuration** with Tab/Enter. Only then explicitly retry if
+needed. Neither refresh nor inspection sends a mutation. Toggle confirmation
+never clears an existing field draft. No credentials or live LLM calls are needed.
+
+Deterministic coverage is in `frontend/src/Configuration.test.tsx` (all three
+record types, creation/editing, both toggle directions, delayed confirmation,
+invalid/failed confirmation, unrelated drafts and keyboard recovery). Run from
+`frontend`: `npm test -- --run src/Configuration.test.tsx src/unsaved-drafts.test.tsx`.
+Supervisor verification and browser validation remain pending for this snapshot.

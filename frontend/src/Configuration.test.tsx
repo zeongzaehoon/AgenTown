@@ -87,6 +87,7 @@ test('failure preserves drafts and saved snapshot; refresh unlocks only explicit
   expect((screen.getByRole('button', {name: 'Create Skill'}) as HTMLButtonElement).disabled).toBe(true);
   f.offline(false); fireEvent.click(screen.getByRole('button', {name: 'Refresh configuration'})); await screen.findByText('Showing saved configuration.');
   expect(f.rows.skills).toEqual([]);
+  fireEvent.click(screen.getByRole('button', {name: 'I inspected saved configuration'}));
   change('Record type', 'loops'); change('Record type', 'skills');
   expect((screen.getByLabelText('Instructions') as HTMLTextAreaElement).value).toBe('Keep instructions');
   fireEvent.click(screen.getByRole('button', {name: 'Create Skill'})); await saved('Skill');
@@ -205,6 +206,7 @@ for (const kind of kinds) {
         change('Record type', kind === 'skills' ? 'loops' : 'skills'); change('Record type', kind);
         expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('Retained draft');
         expect(mutationCount(f)).toBe(1);
+        screen.getByRole('button', {name: 'I inspected saved configuration'}).focus(); await user.keyboard('{Enter}');
         button().focus(); await user.keyboard('{Enter}');
         await screen.findByText(new RegExp(`${kind === 'skills' ? 'Skill' : kind === 'hooks' ? 'Hook' : 'Loop'} saved · ID:`));
         expect(mutationCount(f)).toBe(2);
@@ -258,6 +260,7 @@ for (const kind of kinds) {
         expect(JSON.parse(screen.getByLabelText('Saved values').textContent!)).toEqual(original);
         if (action === 'create') change('Saved record', '');
         expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('Retained draft');
+        screen.getByRole('button', {name: 'I inspected saved configuration'}).focus(); await user.keyboard('{Enter}');
         screen.getByRole('button', {name: buttonName}).focus(); await user.keyboard('{Enter}');
         await screen.findByText(new RegExp(`${label} saved · ID:`));
         expect(mutationCount(f)).toBe(2);
@@ -280,4 +283,84 @@ for (const kind of kinds) {
     await waitFor(() => expect(JSON.parse(screen.getByLabelText('Saved values').textContent!)).toMatchObject({name: 'Enabled edit', enabled: true}));
     expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('Enabled edit');
   });
+}
+
+for (const kind of kinds) {
+  const label = kind === 'skills' ? 'Skill' : kind === 'hooks' ? 'Hook' : 'Loop';
+  for (const action of ['create', 'update', 'enable', 'disable'] as const) {
+    for (const failure of ['missing', 'contradictory', 'malformed', 'failed'] as const) {
+      test(`${kind} ${action} retains drafts and confirmed state on ${failure} persisted confirmation`, async () => {
+        const f = fixture();
+        for (const type of kinds) f.rows[type] = [{...savedRows[type], enabled: action === 'disable'}];
+        const original = {...f.rows[kind][0]};
+        const user = userEvent.setup(); render(<Configuration workspace={workspace} />); await open();
+        // Keep an unrelated record draft throughout confirmation and recovery.
+        const other = kind === 'skills' ? 'hooks' : 'skills';
+        change('Record type', other); fillDraft(other);
+        change('Record type', kind);
+        if (action !== 'create') change('Saved record', original.id);
+        fillDraft(kind);
+        const buttonName = action === 'create' ? `Create ${label}` : action === 'update' ? 'Save changes'
+          : action === 'enable' ? 'Enable configuration' : 'Disable configuration';
+        f.transform((value, mutation, requested) => {
+          if (mutation || requested !== kind) return value;
+          if (failure === 'failed') throw new Error('confirmation unavailable');
+          const rows = (value as Record<string, ConfigurationRecord[]>)[kind];
+          return {[kind]: failure === 'missing' ? [] : failure === 'malformed' ? [{}]
+            : rows.map(row => ({...row, enabled: !row.enabled}))};
+        });
+        fireEvent.click(screen.getByRole('button', {name: buttonName}));
+        await screen.findByRole('alert');
+        expect(screen.getByRole('alert').textContent).toContain('Delivery is uncertain');
+        expect(screen.queryByText(new RegExp(`${label} saved · ID:`))).toBeNull();
+        expect(leaveProtected()).toBe(true);
+        expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('Retained draft');
+        if (action !== 'create') expect(JSON.parse(screen.getByLabelText('Saved values').textContent!)).toEqual(original);
+        expect(mutationCount(f)).toBe(1);
+        const inspect = () => screen.getByRole('button', {name: 'I inspected saved configuration'}) as HTMLButtonElement;
+        expect(inspect().disabled).toBe(true);
+        // Failed explicit refresh cannot enable inspection.
+        f.offline(true); screen.getByRole('button', {name: 'Refresh configuration'}).focus(); await user.keyboard('{Enter}');
+        await screen.findByText(/offline.*Drafts retained/); expect(inspect().disabled).toBe(true);
+        f.offline(false); f.transform(value => value); f.rows[kind] = [original];
+        screen.getByRole('button', {name: 'Refresh configuration'}).focus(); await user.keyboard('{Enter}');
+        await screen.findByText('Showing saved configuration.');
+        expect((screen.getByRole('button', {name: buttonName}) as HTMLButtonElement).disabled).toBe(true);
+        change('Saved record', original.id);
+        expect(JSON.parse(screen.getByLabelText('Saved values').textContent!)).toEqual(original);
+        if (action === 'create') change('Saved record', '');
+        inspect().focus(); await user.keyboard('{Enter}');
+        expect(mutationCount(f)).toBe(1);
+        screen.getByRole('button', {name: buttonName}).focus(); await user.keyboard('{Enter}');
+        await screen.findByText(new RegExp(`${label} saved · ID:`)); expect(mutationCount(f)).toBe(2);
+        change('Record type', other);
+        expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('Retained draft');
+        expect(leaveProtected()).toBe(true);
+      });
+    }
+    test(`${kind} ${action} waits for persisted confirmation and blocks duplicate submission`, async () => {
+      const f = fixture(); for (const type of kinds) f.rows[type] = [{...savedRows[type], enabled: action === 'disable'}];
+      render(<Configuration workspace={workspace} />); await open(); change('Record type', kind);
+      if (action !== 'create') change('Saved record', savedRows[kind].id);
+      fillDraft(kind);
+      let release!: () => void;
+      const originalFetch = globalThis.fetch;
+      vi.stubGlobal('fetch', vi.fn(async (path: string, init: RequestInit) => {
+        if (path === `/api/config/v1/${kind}` && init.method === 'GET') await new Promise<void>(resolve => { release = resolve; });
+        return originalFetch(path, init);
+      }));
+      const buttonName = action === 'create' ? `Create ${label}` : action === 'update' ? 'Save changes'
+        : action === 'enable' ? 'Enable configuration' : 'Disable configuration';
+      const button = screen.getByRole('button', {name: buttonName});
+      fireEvent.click(button); await waitFor(() => expect(release).toBeTypeOf('function'));
+      expect(screen.queryByText(new RegExp(`${label} saved · ID:`))).toBeNull();
+      expect(leaveProtected()).toBe(true);
+      expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('Retained draft');
+      if (action !== 'create') expect(JSON.parse(screen.getByLabelText('Saved values').textContent!)).toEqual({...savedRows[kind], enabled: action === 'disable'});
+      fireEvent.click(button); expect(mutationCount(f)).toBe(1);
+      await act(async () => release()); await screen.findByText(new RegExp(`${label} saved · ID:`));
+      expect(mutationCount(f)).toBe(1);
+      expect(leaveProtected()).toBe(action === 'enable' || action === 'disable');
+    });
+  }
 }
