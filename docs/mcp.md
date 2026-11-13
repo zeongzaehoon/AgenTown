@@ -1051,7 +1051,7 @@ product database. No provider credentials or external client are required.
 Launch the web product with an **absolute** database path:
 
 ```sh
-agentown-web --database /absolute/path/to/product.sqlite
+agentown-web --database /absolute/path/to/product.sqlite --port 8765
 ```
 
 Alternatively open the packaged desktop app using its selected product database.
@@ -1069,17 +1069,34 @@ The UI calls `POST /api/connections/v1/inspect-work` with only
 and `inspection`. Only `status: "success"` includes inspection data; all unavailable outcomes use
 `status: "failure"` with a specific recovery code. Inspection
 contains `task` (the existing MCP Task fields), `attempts` (MCP Run fields with
-saved Skill/Hook/Loop context and nullable existing Execution records), and `evidence`:
-`source: "installed_local_mcp"`, `tools: ["get_task", "get_work_history_v1", "inspect_loop_sessions_v1"]`,
+saved Skill/Hook/Loop context and nullable existing Execution records), `readiness`, and `evidence`:
+`source: "installed_local_mcp"`, `tools: ["get_task", "get_work_history_v1", "inspect_loop_sessions_v1", "preflight_text_work_v1"]`,
 `read_only: true`, `external_client_verified: false`.
 
 The installed local stdio session initializes MCP, then calls exactly
 `get_task(task_id)`, `get_work_history_v1(task_id, read_only=true)`, then
-`inspect_loop_sessions_v1({})`.
+`inspect_loop_sessions_v1({})`, then `preflight_text_work_v1(task_id)`.
 Task identities must agree with the request and with each other; every attempt
 must belong to that Task and every execution must belong to its attempt.
 Malformed envelopes, tool errors, conflicting identities and malformed records
 return no inspection. No execute/retry tool or provider is called.
+
+The readiness panel shows the exact saved ordinary-text preflight observation:
+`schema_version: 1`, `task_id`, nullable `input`, assigned `employee_ids`, observed
+attempt count `expected_runs`, `active_attempt`, advisory `eligibility`
+(`eligible`, `ineligible`, or `missing`), and `resubmission_consent_required`.
+Readiness does **not** validate provider configuration, grant consent, or authorize
+execution. An active attempt may have an expired lease; inspection never recovers it.
+
+Each tool is a separate read, not a transaction. Preflight input, employee IDs and
+attempt count are preserved as returned, without requiring equality with Task,
+history or Loop observations. Earlier Task and history metadata can also differ
+while retaining the selected identity. If work is deleted between history and
+preflight, the panel can show earlier history alongside `eligibility: "missing"`
+and null input; missing never implies eligibility. If deletion makes an earlier
+tool fail, the entire inspection is unavailable. Refresh saved work and explicitly
+inspect again. Wrong response identities, missing fields, invalid types or malformed
+preflight envelopes clear inspection through the existing failure envelope.
 
 `get_work_history_v1` now accepts `read_only` (default **false**). The default
 retains expired-lease recovery and the same WorkHistory response envelope.

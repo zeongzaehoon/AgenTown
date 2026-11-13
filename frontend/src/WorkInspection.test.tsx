@@ -8,13 +8,16 @@ const success = (id = 'task-a') => ({
   schema_version: 1, requested_task_id: id, status: 'success', code: 'inspected',
   message: 'Inspected saved work.', recovery: 'Choose inspection again to refresh.',
   inspection: {
+    readiness: {schema_version: 1, task_id: id, input: 'Exact preflight input',
+      employee_ids: ['11111111-1111-4111-8111-111111111111'], expected_runs: 0,
+      active_attempt: false, eligibility: 'eligible', resubmission_consent_required: false},
     task: {id, title: 'Recorded request', status: 'pending', assignees: ['employee-a']},
     attempts: [{id: 'run-a', task_id: id, stage: 'execution', reporting_source: 'product',
       loop: {linkage: 'absent', session: null, ordinal: null, admitted_at: null},
       started_at: 1, ended_at: 2, state: 'finished', outcome: 'success', participants: ['employee-a'],
       execution: {schema_version: 1, run_id: 'run-a', input: 'Recorded request', provider: 'fixture',
         model: 'deterministic', deadline_unix_ms: 3, output: 'Saved result', error: null, quality: 'unverified'}}],
-    evidence: {source: 'installed_local_mcp', tools: ['get_task', 'get_work_history_v1', 'inspect_loop_sessions_v1'],
+    evidence: {source: 'installed_local_mcp', tools: ['get_task', 'get_work_history_v1', 'inspect_loop_sessions_v1', 'preflight_text_work_v1'],
       read_only: true, external_client_verified: false},
   },
 });
@@ -349,4 +352,117 @@ test('two-tool or reordered evidence cannot confirm Loop inspection', () => {
   expect(() => parseWorkInspection(response, 'task-a')).toThrow();
   response.inspection.evidence.tools = ['get_task', 'inspect_loop_sessions_v1', 'get_work_history_v1'];
   expect(() => parseWorkInspection(response, 'task-a')).toThrow();
+});
+
+test.each(['eligible', 'ineligible', 'missing'] as const)('readiness displays the separate %s preflight observation', async eligibility => {
+  const response: any = success();
+  response.inspection.readiness = eligibility === 'missing'
+    ? {schema_version: 1, task_id: 'task-a', input: null, employee_ids: [], expected_runs: 0,
+      active_attempt: false, eligibility, resubmission_consent_required: false}
+    : {...response.inspection.readiness, eligibility, expected_runs: 7,
+      active_attempt: eligibility === 'ineligible', resubmission_consent_required: true};
+  // History contains one finished attempt and different text/assignment; none is overwritten.
+  expect(() => parseWorkInspection(response, 'task-a')).not.toThrow();
+  const fetcher = vi.fn(async () => new Response(JSON.stringify(response)));
+  vi.stubGlobal('fetch', fetcher);
+  const user = userEvent.setup(); render(<WorkInspection taskId="task-a" />);
+  await user.click(screen.getByRole('button'));
+  const panel = await screen.findByRole('region', {name: 'Ordinary-text execution readiness'});
+  expect(within(panel).getByText(`Advisory eligibility: ${eligibility}`)).toBeTruthy();
+  expect(within(panel).getByText(/does not validate provider configuration, grant consent or authorize execution/)).toBeTruthy();
+  expect(within(panel).getByText(/Each tool is a separate observation/)).toBeTruthy();
+  if (eligibility === 'missing') {
+    expect(within(panel).getByText(/Saved work was missing at preflight/)).toBeTruthy();
+  } else {
+    expect(within(panel).getByText('Exact preflight input')).toBeTruthy();
+    expect(within(panel).getByText('Observed attempt count: 7')).toBeTruthy();
+    expect(within(panel).getByText('Preflight assigned employee IDs: 11111111-1111-4111-8111-111111111111')).toBeTruthy();
+    expect(within(panel).getByText(`Active attempt observed: ${eligibility === 'ineligible' ? 'Yes' : 'No'}`)).toBeTruthy();
+    expect(within(panel).getByText('Resubmission consent required: Yes')).toBeTruthy();
+  }
+  expect(screen.getByText('Saved result')).toBeTruthy();
+  expect(fetcher.mock.calls).toEqual([['/api/connections/v1/inspect-work', expect.anything()]]);
+});
+
+test.each([
+  (r: any) => {delete r.inspection.readiness;},
+  (r: any) => {r.inspection.readiness = null;},
+  (r: any) => {r.inspection.readiness.task_id = 'other';},
+  (r: any) => {r.inspection.readiness.schema_version = 2;},
+  (r: any) => {r.inspection.readiness.input = 5;},
+  (r: any) => {r.inspection.readiness.employee_ids = ['invalid'];},
+  (r: any) => {r.inspection.readiness.employee_ids = ['11111111-1111-4111-8111-111111111111', '11111111-1111-4111-8111-111111111111'];},
+  (r: any) => {r.inspection.readiness.expected_runs = -1;},
+  (r: any) => {r.inspection.readiness.expected_runs = 0.5;},
+  (r: any) => {r.inspection.readiness.expected_runs = true;},
+  (r: any) => {r.inspection.readiness.active_attempt = 'false';},
+  (r: any) => {r.inspection.readiness.eligibility = 'ready';},
+  ...[['eligible'], ['ineligible'], ['missing'], null, true, 1, {}].map(eligibility =>
+    (r: any) => {r.inspection.readiness.eligibility = eligibility;}),
+  (r: any) => {r.inspection.readiness.resubmission_consent_required = null;},
+  (r: any) => {r.inspection.readiness.resubmission_consent_required = true;},
+  (r: any) => {r.inspection.readiness.eligibility = 'missing';},
+])('malformed readiness clears prior observation and permits explicit recovery (%#)', async mutate => {
+  let response: any = success();
+  const fetcher = vi.fn(async () => new Response(JSON.stringify(response)));
+  vi.stubGlobal('fetch', fetcher);
+  const user = userEvent.setup(); render(<WorkInspection taskId="task-a" />);
+  await user.click(screen.getByRole('button'));
+  await screen.findByRole('region', {name: 'Ordinary-text execution readiness'});
+  response = success(); mutate(response);
+  await user.click(screen.getByRole('button')); await screen.findByRole('alert');
+  expect(screen.queryByRole('region', {name: 'Ordinary-text execution readiness'})).toBeNull();
+  expect(fetcher).toHaveBeenCalledTimes(2);
+  response = success(); await user.click(screen.getByRole('button'));
+  await screen.findByRole('region', {name: 'Ordinary-text execution readiness'});
+  expect(fetcher).toHaveBeenCalledTimes(3);
+});
+
+test('disconnect clears readiness, aborts pending reads and requires explicit recovery after reconnect', async () => {
+  let finish!: (response: Response) => void;
+  const fetcher = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify(success())))
+    .mockImplementationOnce(() => new Promise<Response>(resolve => {finish = resolve;}))
+    .mockResolvedValue(new Response(JSON.stringify(success())));
+  vi.stubGlobal('fetch', fetcher);
+  const user = userEvent.setup(); const view = render(<WorkInspection taskId="task-a" connected />);
+  await user.click(screen.getByRole('button'));
+  await screen.findByRole('region', {name: 'Ordinary-text execution readiness'});
+  view.rerender(<WorkInspection taskId="task-a" connected={false} />);
+  expect(screen.queryByRole('region', {name: 'Ordinary-text execution readiness'})).toBeNull();
+  expect((screen.getByRole('button') as HTMLButtonElement).disabled).toBe(true);
+  view.rerender(<WorkInspection taskId="task-a" connected />);
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  await user.click(screen.getByRole('button'));
+  const signal = (fetcher.mock.calls[1][1] as RequestInit).signal!;
+  view.rerender(<WorkInspection taskId="task-a" connected={false} />);
+  expect(signal.aborted).toBe(true);
+  view.rerender(<WorkInspection taskId="task-a" connected />);
+  await act(async () => {finish(new Response(JSON.stringify(success())));});
+  expect(screen.queryByRole('region', {name: 'Ordinary-text execution readiness'})).toBeNull();
+  await user.click(screen.getByRole('button'));
+  await screen.findByRole('region', {name: 'Ordinary-text execution readiness'});
+  expect(fetcher).toHaveBeenCalledTimes(3);
+});
+
+test('timeout clears prior readiness and ignores late completion before explicit retry', async () => {
+  let finish!: (response: Response) => void;
+  const fetcher = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify(success())))
+    .mockImplementationOnce(() => new Promise<Response>(resolve => {finish = resolve;}))
+    .mockResolvedValue(new Response(JSON.stringify(success())));
+  vi.stubGlobal('fetch', fetcher);
+  render(<WorkInspection taskId="task-a" />);
+  await act(async () => {screen.getByRole('button').click();});
+  expect(screen.getByRole('region', {name: 'Ordinary-text execution readiness'})).toBeTruthy();
+  vi.useFakeTimers();
+  await act(async () => {screen.getByRole('button').click();});
+  expect(screen.queryByRole('region', {name: 'Ordinary-text execution readiness'})).toBeNull();
+  await act(async () => {await vi.advanceTimersByTimeAsync(15_001);});
+  expect(screen.getByRole('alert').textContent).toContain('Local inspection timed out');
+  await act(async () => {finish(new Response(JSON.stringify(success())));});
+  expect(screen.queryByRole('region', {name: 'Ordinary-text execution readiness'})).toBeNull();
+  expect(fetcher).toHaveBeenCalledTimes(2);
+  vi.useRealTimers();
+  await act(async () => {screen.getByRole('button').click();});
+  expect(screen.getByRole('region', {name: 'Ordinary-text execution readiness'})).toBeTruthy();
+  expect(fetcher).toHaveBeenCalledTimes(3);
 });

@@ -2715,3 +2715,49 @@ cd frontend
 
 Supervisor-selected consolidated checks and browser validation remain pending.
 Live provider validation is skipped, not passed; external connectivity is unverified.
+
+### Ordinary-text readiness in selected-work inspection (C72-T1)
+
+Prerequisites: delivered text preflight and local MCP inspection, an installed
+product, and an existing product database with saved work. Run:
+
+```sh
+agentown-web --database /absolute/path/product.sqlite --port 8765
+```
+
+Open <http://127.0.0.1:8765>, or launch the packaged desktop app against that
+database. Select saved work and keyboard-activate **Inspect through local MCP**.
+The **Ordinary-text execution readiness** region shows the preflight Task ID,
+exact saved ordinary-text input, assigned employee IDs, observed attempt count,
+active-attempt state, advisory eligibility and resubmission-consent requirement.
+Evidence includes `preflight_text_work_v1` alongside the three existing reads.
+No credentials or external client are required.
+
+Readiness does not validate provider configuration, grant consent or authorize
+execution. Each tool is a separate observation: counts, saved text and assignments
+can differ during concurrent changes. Missing work at preflight has no saved
+input and must not imply eligibility, even if an earlier Task read succeeded.
+If deletion prevents an earlier read, the entire inspection can be unavailable.
+
+Switch selection (including A → B → A), disconnect, or hold a response while
+switching/disconnecting: readiness clears and late completions cannot restore it.
+Reconnect explicitly, then inspect again. Timeout, malformed data or transport
+failure also clears readiness and leaves explicit retry available. No automatic
+execution, mutation, lease recovery or provider call is requested by inspection.
+
+Deterministic interaction/parser coverage is in
+`frontend/src/WorkInspection.test.tsx`, including eligible, ineligible, missing,
+concurrent differing observations, malformed readiness, disconnection and explicit
+recovery, plus existing selection, timeout and late-completion cases. With
+frontend dependencies prepared:
+
+```sh
+cd frontend
+./node_modules/.bin/vitest run src/WorkInspection.test.tsx
+./node_modules/.bin/tsc --noEmit
+```
+
+This implementation invocation did not run these checks because frontend
+dependencies are absent in its isolated workspace. Supervisor-selected checks
+and browser validation are pending. Live provider validation remains skipped,
+not passed.

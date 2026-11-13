@@ -88,9 +88,22 @@ class InspectedRun:
 
 
 @dataclass(frozen=True)
+class InspectedReadiness:
+    schema_version: int
+    task_id: str
+    input: str | None
+    employee_ids: list[str]
+    expected_runs: int
+    active_attempt: bool
+    eligibility: Literal['missing', 'ineligible', 'eligible']
+    resubmission_consent_required: bool
+
+
+@dataclass(frozen=True)
 class LocalInspection:
     task: InspectedTask
     attempts: list[InspectedRun]
+    readiness: InspectedReadiness | None = None
 
 
 @dataclass(frozen=True)
@@ -119,7 +132,7 @@ class InspectSelectedWork:
         if confirmed:
             payload['inspection']['evidence'] = {
                 'source': 'installed_local_mcp',
-                'tools': ['get_task', 'get_work_history_v1', 'inspect_loop_sessions_v1'],
+                'tools': ['get_task', 'get_work_history_v1', 'inspect_loop_sessions_v1', 'preflight_text_work_v1'],
                 'read_only': True,
                 'external_client_verified': False,
             }

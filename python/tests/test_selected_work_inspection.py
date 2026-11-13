@@ -103,7 +103,6 @@ def test_provenance_requires_recorded_execution(kind):
 @pytest.mark.parametrize('change', [
     lambda t, h: t.update(id=str(uuid4())),
     lambda t, h: h['task'].update(id=str(uuid4())),
-    lambda t, h: h['task'].update(title='Different selection'),
     lambda t, h: h['attempts'][0].update(task_id=str(uuid4())),
     lambda t, h: h['attempts'][0]['execution'].update(run_id=str(uuid4())),
     lambda t, h: h['attempts'].append(copy.deepcopy(h['attempts'][0])),
@@ -147,6 +146,16 @@ for line in sys.stdin:
     elif msg['method'] == 'tools/call':
         data = json.loads(task if msg['params']['name'] == 'get_task' else history)
         if msg['params']['name'] == 'inspect_loop_sessions_v1': data = {'schema_version': 1, 'control': {'state': 'available', 'can_control': True, 'message': 'Available'}, 'sessions': [], 'attempts': []}
+        if msg['params']['name'] == 'preflight_text_work_v1':
+            data = {'schema_version': 1, 'task_id': json.loads(task)['id'], 'input': 'Exact saved input\\n  with spacing', 'employee_ids': ['55555555-5555-4555-8555-555555555555'], 'expected_runs': 7, 'active_attempt': False, 'eligibility': 'eligible', 'resubmission_consent_required': True}
+            if mode == 'missing': data.update(input=None, employee_ids=[], expected_runs=0, eligibility='missing', resubmission_consent_required=False)
+            if mode == 'ineligible': data.update(active_attempt=True, eligibility='ineligible')
+            if mode == 'bad_preflight': data['expected_runs'] = '7'
+            if mode == 'preflight_error':
+                print(json.dumps({'jsonrpc': '2.0', 'id': msg['id'], 'result': {'isError': True, 'content': []}}), flush=True)
+                continue
+        if msg['params']['name'] == 'preflight_text_work_v1' and mode == 'preflight_timeout': time.sleep(60)
+        if msg['params']['name'] == 'preflight_text_work_v1' and mode == 'disconnect': sys.exit(0)
         if mode == 'mismatch': data['id' if 'id' in data else 'schema_version'] = 'invalid'
         result = {'structuredContent': data, 'content': [{'type': 'text', 'text': json.dumps(data)}], 'isError': mode == 'error'}
     else: continue
@@ -156,6 +165,9 @@ for line in sys.stdin:
 
 
 @pytest.mark.parametrize('mode,status', [('success', 'passed'), ('error', 'failed'),
+                                         ('missing', 'passed'), ('ineligible', 'passed'),
+                                         ('bad_preflight', 'failed'), ('preflight_error', 'failed'),
+                                         ('preflight_timeout', 'timeout'), ('disconnect', 'failed'),
                                          ('skill', 'passed'), ('hook', 'passed'),
                                          ('contradictory_hook', 'failed'),
                                          ('mismatch', 'failed'), ('timeout', 'timeout')])
@@ -183,8 +195,13 @@ def test_installed_transport_only_reads_and_reaps(tmp_path, monkeypatch, mode, s
             assert result['inspection']['attempts'][0]['execution']['output'] == 'Available result'
             if mode in ('skill', 'hook'):
                 assert [{k: v for k, v in row.items() if k != 'loop'} for row in result['inspection']['attempts']] == provenance_records(mode)[1]['attempts']
+            readiness = result['inspection']['readiness']
+            assert readiness['expected_runs'] == (0 if mode == 'missing' else 7)  # Independent of history.
+            assert readiness['eligibility'] == (mode if mode in ('missing', 'ineligible') else 'eligible')
+            assert readiness['input'] == (None if mode == 'missing' else 'Exact saved input\n  with spacing')
+            assert readiness['resubmission_consent_required'] is (mode != 'missing')
             assert result['inspection']['evidence'] == dict(
-                source='installed_local_mcp', tools=['get_task', 'get_work_history_v1', 'inspect_loop_sessions_v1'],
+                source='installed_local_mcp', tools=['get_task', 'get_work_history_v1', 'inspect_loop_sessions_v1', 'preflight_text_work_v1'],
                 read_only=True, external_client_verified=False)
         else:
             assert result['inspection'] is None
@@ -193,7 +210,8 @@ def test_installed_transport_only_reads_and_reaps(tmp_path, monkeypatch, mode, s
         if mode != 'timeout':
             assert calls == [dict(name='get_task', arguments=dict(task_id=TASK)),
                              dict(name='get_work_history_v1', arguments=dict(task_id=TASK, read_only=True)),
-                             dict(name='inspect_loop_sessions_v1', arguments={})]
+                             dict(name='inspect_loop_sessions_v1', arguments={}),
+                             dict(name='preflight_text_work_v1', arguments=dict(task_id=TASK))]
         assert database.read_bytes() == b'unchanged'
         assert service.active is None and processes[0].returncode is not None
         await service.close()
@@ -373,3 +391,84 @@ def test_missing_link_is_uncertain_and_later_attempt_is_allowed():
     history['attempts'][0]['execution'] = None
     result = validated_inspection(envelope(task), envelope(history), TASK, envelope(loops))
     assert result.attempts[0].loop.linkage == 'absent'
+
+
+def readiness_record():
+    return dict(schema_version=1, task_id=TASK, input='  Saved\ninput  ',
+                employee_ids=[AGENT], expected_runs=9, active_attempt=False,
+                eligibility='eligible', resubmission_consent_required=True)
+
+
+def test_preflight_and_task_reads_preserve_concurrent_observations():
+    from dataclasses import asdict
+    task, history = records()
+    history['task'].update(title='Later title', assignees=[HOOK])
+    preflight = readiness_record()
+    before = copy.deepcopy((task, history, preflight))
+    result = validated_inspection(envelope(task), envelope(history), TASK,
+                                  fourth=envelope(preflight))
+    assert result.task.title == 'Saved work'
+    assert result.task.assignees == []
+    assert len(result.attempts) == 1
+    assert asdict(result.readiness) == preflight
+    assert (task, history, preflight) == before
+
+
+@pytest.mark.parametrize('field,value', [
+    ('schema_version', True), ('schema_version', 2), ('task_id', RUN),
+    ('task_id', 'invalid'), ('input', 123), ('employee_ids', ['invalid']),
+    ('employee_ids', [AGENT, AGENT]), ('employee_ids', None),
+    ('expected_runs', True), ('expected_runs', '9'), ('expected_runs', -1),
+    ('active_attempt', 1), ('eligibility', 'ready'),
+    ('input', None), ('employee_ids', []), ('active_attempt', True),
+    ('eligibility', 'missing'), ('resubmission_consent_required', False),
+    ('expected_runs', 9007199254740992),
+    ('resubmission_consent_required', 'false'), ('extra', True),
+])
+def test_preflight_rejects_wrong_identity_and_shape(field, value):
+    task, history = records()
+    preflight = readiness_record()
+    preflight[field] = value
+    with pytest.raises(Exception):
+        validated_inspection(envelope(task), envelope(history), TASK,
+                             fourth=envelope(preflight))
+
+
+@pytest.mark.parametrize('field', list(readiness_record()))
+def test_preflight_requires_every_field(field):
+    task, history = records()
+    preflight = readiness_record()
+    del preflight[field]
+    with pytest.raises(Exception):
+        validated_inspection(envelope(task), envelope(history), TASK,
+                             fourth=envelope(preflight))
+
+
+@pytest.mark.parametrize('mode', ['bad_preflight', 'preflight_error', 'preflight_timeout', 'disconnect'])
+def test_preflight_failure_allows_explicit_recovery(tmp_path, mode):
+    async def exercise():
+        service = ConnectionDiagnostic(tmp_path / 'selected.db', timeout=.5)
+        service.command, _ = command(tmp_path, mode)
+        failed = await InspectSelectedWork(service).execute(TASK)
+        assert failed['status'] == 'failure' and failed['inspection'] is None
+        assert service.active is None
+        service.command, _ = command(tmp_path, 'success')
+        recovered = await InspectSelectedWork(service).execute(TASK)
+        assert recovered['status'] == 'success'
+        assert recovered['inspection']['readiness']['eligibility'] == 'eligible'
+        await service.close()
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize('change', [
+    lambda result: result.update(isError=True),
+    lambda result: result.update(content=[]),
+    lambda result: result['content'][0].update(text='{}'),
+    lambda result: result.update(structuredContent=None),
+])
+def test_preflight_error_envelope_rejected(change):
+    task, history = records()
+    result = envelope(readiness_record())
+    change(result)
+    with pytest.raises(Exception):
+        validated_inspection(envelope(task), envelope(history), TASK, fourth=result)

@@ -28,10 +28,15 @@ export interface InspectedRun {
   participants: string[]; execution: InspectedExecution | null;
   skill?: InspectedSkill | null; hook?: InspectedHook | null; loop: InspectedLoop;
 }
+export interface WorkReadiness {
+  schema_version: 1; task_id: string; input: string | null; employee_ids: string[];
+  expected_runs: number; active_attempt: boolean; eligibility: 'missing' | 'ineligible' | 'eligible';
+  resubmission_consent_required: boolean;
+}
 export interface WorkInspection {
-  task: InspectedTask; attempts: InspectedRun[];
+  task: InspectedTask; attempts: InspectedRun[]; readiness: WorkReadiness;
   evidence: {
-    source: 'installed_local_mcp'; tools: ['get_task', 'get_work_history_v1', 'inspect_loop_sessions_v1'];
+    source: 'installed_local_mcp'; tools: ['get_task', 'get_work_history_v1', 'inspect_loop_sessions_v1', 'preflight_text_work_v1'];
     read_only: true; external_client_verified: false;
   };
 }
@@ -55,13 +60,27 @@ export function parseWorkInspection(value: unknown, requested: string): Inspecti
     return value as unknown as InspectionResponse;
   }
   if (value.status !== 'success' || !object(value.inspection)) throw invalid();
-  const {task, attempts, evidence} = value.inspection;
+  const {task, attempts, evidence, readiness} = value.inspection;
   if (!object(task) || task.id !== requested || !text(task.title) ||
       typeof task.status !== 'string' || !['pending', 'in_progress', 'blocked', 'cancelled'].includes(task.status) || !ids(task.assignees) ||
       !Array.isArray(attempts) || !object(evidence) || evidence.source !== 'installed_local_mcp' ||
       evidence.read_only !== true || evidence.external_client_verified !== false ||
-      !Array.isArray(evidence.tools) || evidence.tools.length !== 3 ||
-      evidence.tools[0] !== 'get_task' || evidence.tools[1] !== 'get_work_history_v1' || evidence.tools[2] !== 'inspect_loop_sessions_v1') throw invalid();
+      !Array.isArray(evidence.tools) || evidence.tools.length !== 4 ||
+      evidence.tools[0] !== 'get_task' || evidence.tools[1] !== 'get_work_history_v1' || evidence.tools[2] !== 'inspect_loop_sessions_v1' || evidence.tools[3] !== 'preflight_text_work_v1') throw invalid();
+  // Validate this observation independently: other tools may have read earlier state.
+  if (!object(readiness) || readiness.schema_version !== 1 || readiness.task_id !== requested ||
+      !nullableText(readiness.input) || !ids(readiness.employee_ids) || !readiness.employee_ids.every(stableId) ||
+      !Number.isSafeInteger(readiness.expected_runs) || (readiness.expected_runs as number) < 0 ||
+      typeof readiness.active_attempt !== 'boolean' || typeof readiness.resubmission_consent_required !== 'boolean' ||
+      typeof readiness.eligibility !== 'string' ||
+      !['missing', 'ineligible', 'eligible'].includes(readiness.eligibility)) throw invalid();
+  const count = readiness.expected_runs as number;
+  if (readiness.resubmission_consent_required !== (count > 0) ||
+      (readiness.active_attempt && count === 0) ||
+      (readiness.eligibility === 'missing'
+        ? readiness.input !== null || readiness.employee_ids.length !== 0 || count !== 0 || readiness.active_attempt
+        : typeof readiness.input !== 'string') ||
+      (readiness.eligibility === 'eligible' && (readiness.active_attempt || readiness.employee_ids.length !== 1))) throw invalid();
   const seen = new Set<string>();
   for (const run of attempts) {
     if (!object(run) || !text(run.id) || seen.has(run.id) || run.task_id !== requested ||

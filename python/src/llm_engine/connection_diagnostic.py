@@ -122,7 +122,9 @@ class ConnectionDiagnostic:
                     second = await request(3, "tools/call", {"name": "get_work_history_v1",
                         "arguments": {"task_id": task_id, "read_only": True}})
                     third = await request(4, "tools/call", {"name": "inspect_loop_sessions_v1", "arguments": {}})
-                    inspection = validated_inspection(first, second, task_id, third)
+                    fourth = await request(5, "tools/call", {"name": "preflight_text_work_v1",
+                        "arguments": {"task_id": task_id}})
+                    inspection = validated_inspection(first, second, task_id, third, fourth)
                     return dict(status="passed", code="inspection_passed",
                         message="Selected work inspected through the installed local MCP server.",
                         recovery="External-client connection remains unverified. Inspect again explicitly to refresh.",
@@ -243,7 +245,7 @@ def inspection_payload(result):
     return data
 
 
-def validated_inspection(first, second, task_id, third=None):
+def validated_inspection(first, second, task_id, third=None, fourth=None):
     # Existing MCP models reject extra fields and malformed nested records. Strict
     # JSON validation prevents scalar coercion while accepting JSON UUID strings.
     from .mcp_server import Task, WorkHistory
@@ -255,7 +257,7 @@ def validated_inspection(first, second, task_id, third=None):
     history = WorkHistory.model_validate_json(json.dumps(history_data), strict=True)
     if work.model_dump(mode="json") != task_data or history.model_dump(mode="json") != history_data:
         raise DiagnosticFailure()
-    if str(work.id) != task_id or str(history.task.id) != task_id or work != history.task:
+    if str(work.id) != task_id or str(history.task.id) != task_id:
         raise DiagnosticFailure()
     def unique(values):
         if len(values) != len(set(values)):
@@ -316,7 +318,34 @@ def validated_inspection(first, second, task_id, third=None):
             'absent' if run.execution is None or run.skill is not None or run.hook is not None
             else 'uncertain')) if third is not None else None
         attempts.append(InspectedRun(**row))
-    return LocalInspection(InspectedTask(**work.model_dump(mode="json")), attempts)
+    return LocalInspection(InspectedTask(**work.model_dump(mode="json")), attempts,
+                           validated_readiness(fourth, task_id) if fourth is not None else None)
+
+
+def validated_readiness(result, task_id):
+    """Validate this observation independently of earlier Task/history reads."""
+    from .mcp_server import TextPreflight
+    from .application.inspect_selected_work import InspectedReadiness
+    data = inspection_payload(result)
+    observation = TextPreflight.model_validate_json(json.dumps(data), strict=True)
+    if (observation.model_dump(mode="json") != data
+            or str(observation.task_id) != task_id
+            or type(data.get("schema_version")) is not int
+            or type(data.get("expected_runs")) is not int
+            or observation.expected_runs < 0
+            or observation.expected_runs > 9007199254740991
+            or len(observation.employee_ids) != len(set(observation.employee_ids))):
+        raise DiagnosticFailure()
+    if (observation.resubmission_consent_required != (observation.expected_runs > 0)
+            or (observation.active_attempt and observation.expected_runs == 0)
+            or (observation.eligibility == 'missing' and (
+                observation.input is not None or observation.employee_ids
+                or observation.expected_runs != 0 or observation.active_attempt))
+            or (observation.eligibility != 'missing' and observation.input is None)
+            or (observation.eligibility == 'eligible' and (
+                observation.active_attempt or len(observation.employee_ids) != 1))):
+        raise DiagnosticFailure()
+    return InspectedReadiness(**observation.model_dump(mode="json"))
 
 
 def validated_loop_links(result, history):

@@ -2,7 +2,7 @@ import { useLayoutEffect, useRef, useState } from 'react';
 import { RequestTimeoutError } from './api';
 import { inspectSelectedWork, type InspectionResponse } from './work-inspection-api';
 
-export function WorkInspection({taskId}: {taskId: string | null}) {
+export function WorkInspection({taskId, connected = true}: {taskId: string | null; connected?: boolean}) {
   const [response, setResponse] = useState<InspectionResponse | null>(null);
   const [error, setError] = useState('');
   const [pending, setPending] = useState(false);
@@ -11,9 +11,9 @@ export function WorkInspection({taskId}: {taskId: string | null}) {
     request.current?.controller.abort(); request.current = null;
     setResponse(null); setError(''); setPending(false);
     return () => { request.current?.controller.abort(); request.current = null; };
-  }, [taskId]);
+  }, [taskId, connected]);
   async function inspect() {
-    if (!taskId || request.current) return;
+    if (!connected || !taskId || request.current) return;
     const active = {id: taskId, controller: new AbortController()};
     request.current = active; setPending(true); setResponse(null); setError('');
     try {
@@ -31,17 +31,31 @@ export function WorkInspection({taskId}: {taskId: string | null}) {
   return <section aria-label="Local MCP work inspection" aria-busy={pending}>
     <h3>Inspect selected work through local MCP</h3>
     <p>This reads recorded work through the installed local MCP server. It does not execute work or contact a provider. External-client connection remains unverified.</p>
+    {!connected && <p role="status">Disconnected. Refresh the connection, then inspect explicitly for current readiness.</p>}
     {!taskId && <p role="status">Select saved work before inspecting. If it is missing, refresh saved history and select available work.</p>}
-    <button type="button" disabled={!taskId || pending} onClick={() => void inspect()}>Inspect through local MCP</button>
+    <button type="button" disabled={!connected || !taskId || pending} onClick={() => void inspect()}>Inspect through local MCP</button>
     <p role="status" aria-live="polite">{pending ? 'Inspecting selected work through local MCP…' : ''}</p>
     {error && <p role="alert">{error}</p>}
     {response?.status === 'failure' && <div role="alert"><p>{response.message}</p><p>{response.recovery}</p><p>Inspection unavailable ({response.code}). Nothing is automatically retried.</p></div>}
     {inspection && <div>
       <p role="status">Confirmed local MCP inspection. External-client connection remains unverified.</p>
-      <p>Evidence: installed local MCP · get_task · get_work_history_v1 (read_only=true) · inspect_loop_sessions_v1.</p>
+      <p>Evidence: installed local MCP · get_task · get_work_history_v1 (read_only=true) · inspect_loop_sessions_v1 · preflight_text_work_v1.</p>
       <p>Confirmed Task ID: {inspection.task.id}</p>
       <p>Recorded status: {inspection.task.status}</p><pre>{inspection.task.title}</pre>
       <p>Recorded assignment: {inspection.task.assignees.join(', ') || 'No employee assigned'}</p>
+      <section aria-label="Ordinary-text execution readiness">
+        <h4>Ordinary-text execution readiness</h4>
+        <p>Advisory eligibility: {inspection.readiness.eligibility}</p>
+        <p>Preflight Task ID: {inspection.readiness.task_id}</p>
+        <p>Exact saved ordinary-text input</p>
+        {inspection.readiness.input === null ? <p>Saved work was missing at preflight; no input or readiness is confirmed. Inspect again explicitly.</p> : <pre>{inspection.readiness.input}</pre>}
+        <p>Preflight assigned employee IDs: {inspection.readiness.employee_ids.join(', ') || 'None'}</p>
+        <p>Observed attempt count: {inspection.readiness.expected_runs}</p>
+        <p>Active attempt observed: {inspection.readiness.active_attempt ? 'Yes' : 'No'}</p>
+        <p>Resubmission consent required: {inspection.readiness.resubmission_consent_required ? 'Yes' : 'No'}</p>
+        <p>Readiness does not validate provider configuration, grant consent or authorize execution. Execution must recheck current state.</p>
+        <p>Each tool is a separate observation. Input, assignments and counts may differ as work changes between reads. Inspect again explicitly for newer observations.</p>
+      </section>
       {!inspection.attempts.length && <p>No recorded attempts. No execution was requested by this inspection.</p>}
       {inspection.attempts.map((run, index) => <article key={run.id} aria-label={`Inspected attempt ${index + 1}`}>
         <h4>Attempt {index + 1}</h4><p>Run ID: {run.id}</p>
