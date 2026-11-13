@@ -2837,3 +2837,28 @@ Interaction coverage: `frontend/src/WorkRecovery.test.tsx` (keyboard/focus,
 consent, pending duplicate lock, stale selection, uncertain delivery and receipt
 validation). Supervisor browser and consolidated checks are pending for this
 snapshot; live provider calls are skipped under user policy.
+
+### Apply a saved employee Hook through local inspection
+
+Launch `agentown-web --database PATH` with the database containing saved work,
+an assigned employee, an enabled Skill and enabled employee Hook. The work needs
+an eligible latest ordinary Run: `run_completed` / `reported_success`, or
+`run_failed` / `failure`, matching the Hook event. Team and task-created Hooks
+are not eligible for this follow-up flow.
+
+Select saved work, choose **Inspect through local MCP**, then **Find Hooks through
+local MCP**. Select a Hook and choose **Preview local Hook**. Discovery and preview
+never execute. Review the exact effective input, target employee, Skill, source
+Run/event/outcome, preview ID and prior attempt count. Check the separate consent
+box and choose **Execute local Hook once** to authorize one attempt. Enabled
+configuration never implies automatic dispatch. Provider/model settings are those
+of the running server; live provider validation is currently skipped.
+
+The panel displays persisted output or recorded provider error and **Quality
+unverified**. Every dispatch consumes consent, including rejected, malformed or
+uncertain receipts. Use **Inspect before another Hook execution**, discover again
+and obtain a fresh preview before another authorization. Selection changes,
+disconnection, reinspection and replacement previews discard consent and ignore
+late replies. Unsaved drafts and ordinary execution/Skill/recovery remain in
+their existing controls. Deterministic coverage lives in `WorkHook.test.tsx`;
+supervisor browser validation is pending for this change.

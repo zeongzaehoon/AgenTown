@@ -1287,3 +1287,17 @@ A completed response includes persisted execution and Hook/Skill provenance,
 validated against history and caller identity. `uncertain` means dispatch may have
 persisted even if delivery or receipt verification failed. Inspect history before any
 new explicit action; never replay automatically. No automatic Hook activation is added.
+
+### Selected-work Hook application in the local screen
+
+With `agentown-web --database PATH`, the selected-work inspection panel explicitly
+calls `/api/connections/v1/hooks/list`, then `/preview`, then (only after separate
+consent) `/execute`. These reuse the installed local MCP Hook tools. Preview
+requires saved eligible employee Hook/source records; enabled alone grants no
+automatic dispatch. The execution request binds `task_id`, `hook_id`, `agent_id`,
+`skill_id`, `source_run_id`, `event`, `source_outcome`, `preview_id`, `expected_runs`,
+exact `input`, and `execution_consent: true`. The screen validates persisted
+execution and Hook provenance before showing a result; provider success remains
+quality-unverified. Uncertain delivery is never automatically retried: explicitly
+inspect and preview afresh. This does not establish external-client or live
+provider validation. See the local-screen walkthrough for prerequisites and steps.

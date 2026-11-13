@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 import { WorkRecovery } from './WorkRecovery';
+import { WorkHook } from './WorkHook';
 import { WorkSkill } from './WorkSkill';
 import { WorkExecution } from './WorkExecution';
 import { RequestTimeoutError } from './api';
@@ -60,6 +61,7 @@ export function WorkInspection({taskId, connected = true}: {taskId: string | nul
         <p>Readiness does not validate provider configuration, grant consent or authorize execution. Execution must recheck current state.</p>
         <p>Each tool is a separate observation. Input, assignments and counts may differ as work changes between reads. Inspect again explicitly for newer observations.</p>
       </section>
+      <WorkHook taskId={inspection.task.id} onInspect={() => void inspect()} />
       <WorkSkill taskId={inspection.task.id} onInspect={() => void inspect()} />
       <WorkExecution readiness={inspection.readiness} onInspect={() => void inspect()} />
       {!inspection.attempts.length && <p>No recorded attempts. No execution was requested by this inspection.</p>}

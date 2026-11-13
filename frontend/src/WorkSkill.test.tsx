@@ -15,7 +15,7 @@ const previewButton = () => screen.getByRole('button', {name: 'Preview local Ski
 async function discover() {
   await userEvent.click(screen.getByRole('button', {name: 'Find Skills through local MCP'}));
   await screen.findByRole('option', {name: /Summarize/});
-  await userEvent.selectOptions(screen.getByRole('combobox'), skill);
+  await userEvent.selectOptions(screen.getByRole('combobox', {name: 'Local enabled Skill'}), skill);
 }
 async function prepare() {
   await discover(); await userEvent.click(previewButton()); await screen.findByRole('checkbox');
@@ -48,7 +48,7 @@ test('selection and new previews discard consent and stale preview responses', a
   expect((screen.getByRole('checkbox') as HTMLInputElement).checked).toBe(false);
   await act(async () => {finish(reply(envelope(preview, 'skill_previewed')));});
   expect(screen.getByText(/Preview ID: fresh/)).toBeTruthy();
-  await userEvent.selectOptions(screen.getByRole('combobox'), ''); expect(screen.queryByRole('checkbox')).toBeNull();
+  await userEvent.selectOptions(screen.getByRole('combobox', {name: 'Local enabled Skill'}), ''); expect(screen.queryByRole('checkbox')).toBeNull();
 });
 test.each(['uncertain', 'rejected', 'lost', 'malformed', 'provider-error'])('%s requires explicit inspection, consumes consent and never retries', async kind => {
   const fetcher = vi.fn().mockResolvedValueOnce(reply(discovery())).mockResolvedValueOnce(reply(envelope(preview, 'skill_previewed')));
