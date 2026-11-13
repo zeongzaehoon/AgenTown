@@ -1133,3 +1133,68 @@ test('selected local inspection remains reachable when refreshed history omits t
   await waitFor(() => expect(f.calls.some(call => call.path === '/api/connections/v1/inspect-work' && call.body.task_id === 'work-1')).toBe(true));
   expect(screen.queryByRole('checkbox', {name: /I authorize one/})).toBeNull();
 });
+
+test.each(['Skill', 'Hook'] as const)('Company %s preview dismissal preserves saved work and unrelated drafts without requests', async kind => {
+  // Isolate dismissal from background reads while retaining real interaction timers.
+  // Keep the exact request-count assertion: dismissal must send no request at all.
+  const interval = globalThis.setInterval;
+  vi.stubGlobal('setInterval', ((callback: TimerHandler, delay?: number, ...args: unknown[]) => delay === 800 ? 0 : interval(callback, delay, ...args)));
+  const task = '11111111-1111-4111-8111-111111111111';
+  const employee = '22222222-2222-4222-8222-222222222222';
+  const record = '33333333-3333-4333-8333-333333333333';
+  const skill = {id: record, name: 'Manual', instructions: 'Instructions', enabled: true};
+  const hook = {id: record, name: 'Follow up', skill_id: record, target_kind: 'agent', target_id: employee, event: 'run_completed', enabled: true};
+  const f = fixture({...initial(), employees: [{id: employee, name: 'Writer'}], work: [{id: task, input: 'Saved text', status: 'pending', assignees: [employee], attempts: []}]});
+  const fallback = globalThis.fetch;
+  const reply = (value: unknown) => new Response(JSON.stringify(value));
+  let previews = 0;
+  const envelope = (data: unknown, code: string, requested_task_id: string | null = task) => ({schema_version: 1, requested_task_id, status: 'confirmed', code, data, recovery: 'Inspect explicitly'});
+  const fetcher = vi.fn(async (path: string, options: RequestInit) => {
+    if (path === '/api/config/v1/skills') return reply({skills: [skill]});
+    if (path === '/api/config/v1/hooks') return reply({hooks: [hook]});
+    if (path === '/api/connections/v1/inspect-work') return reply({schema_version: 1, requested_task_id: task, status: 'success', code: 'inspected', message: 'Inspected', recovery: 'Inspect again', inspection: {
+      task: {id: task, title: 'Saved text', status: 'pending', assignees: [employee]}, attempts: [],
+      readiness: {schema_version: 1, task_id: task, input: 'Saved text', employee_ids: [employee], expected_runs: 0, active_attempt: false, eligibility: 'eligible', resubmission_consent_required: false},
+      evidence: {source: 'installed_local_mcp', tools: ['get_task', 'get_work_history_v1', 'inspect_loop_sessions_v1', 'preflight_text_work_v1'], read_only: true, external_client_verified: false},
+    }});
+    const plural = kind === 'Skill' ? 'skills' : 'hooks';
+    if (path === `/api/connections/v1/${plural}/list`) return reply(envelope({schema_version: 1, [plural]: [kind === 'Skill' ? skill : hook]}, `${plural}_discovered`, null));
+    if (path === `/api/connections/v1/${plural}/preview`) return reply(envelope({schema_version: 1, task_id: task, skill_id: record, preview_id: `fresh-${++previews}`, input: 'Instructions\n\nSaved text', expected_runs: 0,
+      ...(kind === 'Hook' ? {hook_id: record, agent_id: employee, source_run_id: task, event: 'run_completed', source_outcome: 'reported_success', hook_enabled: true, skill_enabled: true, target_kind: 'agent', hook_name: 'Follow up', skill_name: 'Manual', instructions: 'Instructions'} : {}),
+    }, `${kind.toLowerCase()}_previewed`));
+    return fallback(path, options);
+  });
+  vi.stubGlobal('fetch', fetcher); render(<App />); await connected();
+  fireEvent.change(draftInput(), {target: {value: 'Keep work draft'}});
+  fireEvent.change(screen.getByLabelText('Employee name'), {target: {value: 'Keep employee draft'}});
+  const chooser = await screen.findByRole('combobox', {name: new RegExp(kind === 'Skill' ? '^Saved work for Skill:' : '^Assigned work for Hook:')});
+  await waitFor(() => expect((chooser as HTMLSelectElement).disabled).toBe(false));
+  await userEvent.selectOptions(chooser, task);
+  await userEvent.click(screen.getByRole('button', {name: new RegExp(kind === 'Skill' ? '^Open saved work for Skill:' : '^Open assigned work for Hook:')}));
+  await userEvent.click(screen.getByRole('button', {name: 'Inspect through local MCP'}));
+  await userEvent.click(await screen.findByRole('button', {name: `Find ${kind}s through local MCP`}));
+  const local = screen.getByRole('combobox', {name: `Local enabled ${kind}`});
+  await waitFor(() => expect((local as HTMLSelectElement).value).toBe(record));
+  const control = screen.getByRole('button', {name: `Preview local ${kind}`});
+  for (const method of ['Escape', 'Cancel']) {
+    await userEvent.click(control);
+    const consent = await screen.findByLabelText(new RegExp(`I authorize one execution of this exact ${kind} preview`));
+    expect((consent as HTMLInputElement).checked).toBe(false);
+    await userEvent.click(consent);
+    const before = fetcher.mock.calls.length;
+    if (method === 'Escape') await userEvent.keyboard('{Escape}');
+    else await userEvent.click(screen.getByRole('button', {name: `Cancel local ${kind} preview`}));
+    expect(fetcher.mock.calls).toHaveLength(before);
+    expect(document.activeElement).toBe(control);
+    expect(screen.queryByRole('region', {name: `Local ${kind} preview`})).toBeNull();
+    expect(screen.getByText(`Local ${kind} preview dismissed. Consent cleared. No execution requested.`)).toBeTruthy();
+    expect((local as HTMLSelectElement).value).toBe(record);
+    expect(draftInput().value).toBe('Keep work draft');
+    expect((screen.getByLabelText('Employee name') as HTMLInputElement).value).toBe('Keep employee draft');
+    expect(history().value).toBe(task);
+  }
+  expect(previews).toBe(2);
+  expect(f.state.work[0].attempts).toHaveLength(0);
+  expect(fetcher.mock.calls.some(([path]) => path.endsWith('/execute'))).toBe(false);
+  expect(fetcher.mock.calls.filter(([path, options]) => path.startsWith('/api/config/') && options?.method !== 'GET')).toHaveLength(0);
+});

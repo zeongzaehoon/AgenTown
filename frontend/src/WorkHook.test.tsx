@@ -151,3 +151,41 @@ test('same-Task navigation invalidates pending inspection and discards its late 
   expect(screen.queryByRole('button', {name: 'Find Hooks through local MCP'})).toBeNull();
   expect(fetcher).toHaveBeenCalledTimes(1);
 });
+
+test.each(['Escape', 'Cancel'])('%s dismisses checked Hook preview locally and requires fresh consent', async method => {
+  const fetcher = vi.fn().mockResolvedValueOnce(reply(discovery()))
+    .mockResolvedValueOnce(reply(envelope(preview, 'hook_previewed')))
+    .mockResolvedValueOnce(reply(envelope({...preview, preview_id: 'fresh'}, 'hook_previewed')));
+  vi.stubGlobal('fetch', fetcher); const inspect = vi.fn();
+  render(<WorkHook taskId={task} onInspect={inspect} />); await prepare();
+  await userEvent.click(screen.getByRole('checkbox'));
+  expect((screen.getByRole('checkbox') as HTMLInputElement).checked).toBe(true);
+  if (method === 'Escape') await userEvent.keyboard('{Escape}');
+  else {screen.getByRole('button', {name: 'Cancel local Hook preview'}).focus(); await userEvent.keyboard('{Enter}');}
+  expect(screen.queryByRole('region', {name: 'Local Hook preview'})).toBeNull();
+  expect(screen.getByRole('status').textContent).toBe('Local Hook preview dismissed. Consent cleared. No execution requested.');
+  expect(document.activeElement).toBe(previewButton());
+  expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe(hook);
+  expect(fetcher).toHaveBeenCalledTimes(2); expect(inspect).not.toHaveBeenCalled();
+  await userEvent.keyboard('{Enter}'); await screen.findByText(/Preview ID: fresh/);
+  expect((screen.getByRole('checkbox') as HTMLInputElement).checked).toBe(false);
+  expect((screen.getByRole('button', {name: 'Execute local Hook once'}) as HTMLButtonElement).disabled).toBe(true);
+  expect(fetcher).toHaveBeenCalledTimes(3);
+});
+
+test('Escape after dispatch preserves pending execution and uncertain recovery', async () => {
+  let finish!: () => void;
+  const fetcher = vi.fn().mockResolvedValueOnce(reply(discovery())).mockResolvedValueOnce(reply(envelope(preview, 'hook_previewed')))
+    .mockImplementationOnce(() => new Promise<Response>((_resolve, reject) => {finish = () => reject(new Error('offline'));}));
+  vi.stubGlobal('fetch', fetcher); render(<WorkHook taskId={task} onInspect={vi.fn()} />); await prepare();
+  await userEvent.click(screen.getByRole('checkbox'));
+  await userEvent.click(screen.getByRole('button', {name: 'Execute local Hook once'}));
+  await userEvent.keyboard('{Escape}');
+  expect(screen.queryByRole('button', {name: 'Cancel local Hook preview'})).toBeNull();
+  expect((fetcher.mock.calls[2][1].signal as AbortSignal).aborted).toBe(false);
+  await act(async () => finish());
+  await screen.findByText(/Delivery is uncertain/); await userEvent.keyboard('{Escape}');
+  expect(screen.getByText(/Consent consumed/)).toBeTruthy();
+  expect((previewButton() as HTMLButtonElement).disabled).toBe(true);
+  expect(fetcher).toHaveBeenCalledTimes(3);
+});

@@ -3137,3 +3137,35 @@ read-only endpoint allowlist. Supervisor verification passed 1,021 frontend test
 the production build and 505 Python tests, with 2 Python tests skipped. A fresh
 installed-browser gate was deferred by the verification profile. Live provider
 tests are skipped, never passed.
+
+### Dismiss local Skill and Hook previews (C88-T1)
+
+Launch `agentown-web` and open `http://127.0.0.1:8765`. Use representative saved
+work, an enabled Skill, and an enabled employee `run_completed` or `run_failed`
+Hook referencing that Skill. No credentials are needed to inspect or preview.
+
+1. In Company overview, choose saved work in a Skill book's **Saved work for
+   Skill** chooser, then **Open**. For a Hook device, use **Assigned work for
+   Hook** and **Open** with work assigned to its employee.
+2. Choose **Inspect through local MCP**, then **Find Skills through local MCP**
+   or **Find Hooks through local MCP**. Review the selected exact record and
+   explicitly choose **Preview local Skill** or **Preview local Hook**.
+3. Check the execution consent checkbox. Press Escape while focus is inside
+   the preview, or activate **Cancel local Skill preview** / **Cancel local Hook
+   preview**. The preview closes, consent clears, a polite status announces
+   dismissal, and focus returns to the corresponding Preview button. Cancellation
+   sends no request and preserves selected work, configuration and unrelated drafts.
+4. Activate Preview again. This requests a fresh preview; its consent checkbox
+   starts unchecked and Execute remains disabled until fresh consent is given.
+5. Once Execute has dispatched, the preview and Cancel action are gone. Escape
+   does not cancel execution or clear its outcome. For uncertain delivery, use
+   the explicit inspection recovery; consent stays consumed and nothing resends.
+
+Deterministic coverage: from `frontend`, run
+`npx vitest run src/WorkSkill.test.tsx src/WorkHook.test.tsx src/App.test.tsx`,
+then `npm run build`. Tests include Company navigation, both dismissal actions,
+focus, checked-consent reset, fresh previews, no dismissal requests, draft
+preservation and pending/uncertain dispatch recovery. Supervisor full verification
+passed 1,029 frontend tests, the production build, 508 Python tests with 2 skipped,
+Rust and desktop checks, and 2 Chromium browser checks. Live LLM calls are skipped,
+not passed.

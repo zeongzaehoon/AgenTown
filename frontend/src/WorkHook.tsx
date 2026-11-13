@@ -15,6 +15,7 @@ export function WorkHook({taskId, onInspect, navigation, assignees}: {taskId: st
   const [message, setMessage] = useState('');
   const [result, setResult] = useState<WorkExecutionResponse | null>(null);
   const request = useRef<AbortController | null>(null);
+  const previewControl = useRef<HTMLButtonElement>(null);
   const previewRegion = useRef<HTMLElement>(null);
   const selection = useRef<HTMLSelectElement>(null);
   const [focused, setFocused] = useState(false);
@@ -26,6 +27,12 @@ export function WorkHook({taskId, onInspect, navigation, assignees}: {taskId: st
   function invalidate() {
     request.current?.abort(); request.current = null;
     setPreview(null); setConsent(false); setMessage(''); setBusy(false);
+  }
+  function dismissPreview() {
+    if (!preview || busy || consumed) return;
+    setPreview(null); setConsent(false);
+    setMessage('Local Hook preview dismissed. Consent cleared. No execution requested.');
+    previewControl.current?.focus();
   }
   async function perform(operation: 'list' | 'preview' | 'execute') {
     if (request.current || consumed || (operation === 'execute' && (!preview || !consent))) return;
@@ -66,14 +73,17 @@ export function WorkHook({taskId, onInspect, navigation, assignees}: {taskId: st
     <label>Local enabled Hook <select ref={selection} value={selected} disabled={consumed} onChange={event => {invalidate(); setSelected(event.target.value);}}>
       <option value="">Choose a Hook</option>{hooks.filter(s => (!navigation || s.id === selected) && s.enabled && s.target_kind === 'agent' && s.event !== 'task_created').map(s => <option key={s.id} value={s.id}>{s.name} · {s.id}</option>)}
     </select></label>
-    <button type="button" disabled={!selected || consumed} onClick={() => {invalidate(); void perform('preview');}}>Preview local Hook</button>
+    <button ref={previewControl} type="button" disabled={!selected || consumed} onClick={() => {invalidate(); void perform('preview');}}>Preview local Hook</button>
     <p role="status" aria-live="polite">{busy ? 'Waiting for local MCP…' : message}</p>
-    {preview && <section ref={previewRegion} tabIndex={-1} aria-label="Local Hook preview">
+    {preview && <section ref={previewRegion} tabIndex={-1} aria-label="Local Hook preview" onKeyDown={event => {
+      if (event.key === 'Escape') {event.preventDefault(); event.stopPropagation(); dismissPreview();}
+    }}>
       <h5>Employee follow-up preview</h5><p>Hook: {preview.hook_name} · {preview.hook_id}</p><p>Employee: {preview.agent_id} · Skill: {preview.skill_name} · {preview.skill_id}</p><p>Source Run: {preview.source_run_id} · Event: {preview.event} · Outcome: {preview.source_outcome}</p><h5>Exact effective input</h5><pre>{preview.input}</pre>
       <p>Preview ID: {preview.preview_id} · Prior attempts: {preview.expected_runs}</p>
       <p>This creates one new attempt and preserves prior results. Quality remains unverified.</p>
       <label><input type="checkbox" checked={consent} onChange={event => setConsent(event.target.checked)} />I authorize one execution of this exact Hook preview{preview.expected_runs > 0 ? ', after reviewing prior attempts' : ''}.</label>
       <button type="button" disabled={!consent || busy || consumed} onClick={() => void perform('execute')}>Execute local Hook once</button>
+      <button type="button" onClick={dismissPreview}>Cancel local Hook preview</button>
     </section>}
     {result && <div role={result.status === 'completed' ? 'status' : 'alert'}>
       <p>Hook execution: {result.status} ({result.code}).</p><p>{result.recovery}</p>
