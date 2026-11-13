@@ -1,6 +1,6 @@
 import type { Workspace } from './api';
 export interface HookNavigation {taskId: string; hookId: string; employeeId: string}
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { configurationRequest, type HookRecord } from './configuration-api';
 
 /** Office inspection is read-only and independent of provider availability. */
@@ -41,13 +41,42 @@ export function HookDevices({onOpenHook, onOpenWork, workspace, connected = true
     </button>
       {device.target_kind !== 'agent' || !['run_completed', 'run_failed'].includes(device.event)
         ? <p>Local follow-up preview supports employee run-completed and run-failed Hooks only. Team and task-created Hooks remain configuration only.</p>
-        : <><p>Choose saved work assigned to employee ID: {device.target_id}. Opening does not inspect, discover, preview or execute.</p>
-          {!workspace?.work.some(w => w.assignees.includes(device.target_id)) && <p>No saved work assigned to this employee in the loaded history. Refresh saved history or assign work first.</p>}
-          {workspace?.work.filter(w => w.assignees.includes(device.target_id)).map(w => <button type="button" key={w.id}
-            disabled={!connected || busy || !!error || !onOpenWork} aria-controls="selected-work-inspection"
-            aria-label={`Open work for Hook: ${device.name} · Hook ID: ${device.id} · Task ID: ${w.id}`}
-            onClick={() => onOpenWork?.({taskId: w.id, hookId: device.id, employeeId: device.target_id})}>Open work: {w.input.slice(0, 55)} · Task ID: {w.id} · local MCP</button>)}
-        </>}
+        : <AssignedWorkChooser device={device} workspace={workspace} connected={connected} busy={busy} stale={!!error} onOpenWork={onOpenWork} />}
     </article>)}</div>
   </section>;
+}
+
+
+/** A choice is local intent; only Open requests inspection navigation. */
+function AssignedWorkChooser({device, workspace, connected, busy, stale, onOpenWork}: {
+  device: HookRecord; workspace?: Workspace | null; connected: boolean;
+  busy: boolean; stale: boolean; onOpenWork?: (request: HookNavigation) => void;
+}) {
+  const id = useId();
+  const [choice, setChoice] = useState({taskId: '', employeeId: device.target_id});
+  const [removed, setRemoved] = useState(false);
+  const work = workspace?.work.filter(item => item.assignees.includes(device.target_id)) ?? [];
+  const valid = choice.employeeId === device.target_id && !!choice.taskId && work.some(item => item.id === choice.taskId);
+  useEffect(() => {
+    if (choice.employeeId !== device.target_id || (choice.taskId && !work.some(item => item.id === choice.taskId))) {
+      setChoice({taskId: '', employeeId: device.target_id}); setRemoved(true);
+    }
+  }, [workspace, device.target_id, choice]);
+  const unavailable = !connected ? 'Disconnected. Refresh connection before opening assigned work.'
+    : busy ? 'Refreshing Hook devices. Wait before opening assigned work.'
+    : stale ? 'Hook devices are stale. Refresh Hook devices before opening assigned work.'
+    : !work.length ? 'No saved work assigned to this employee in the loaded history. Refresh saved history or assign work first.'
+    : !onOpenWork ? 'Assigned-work navigation is unavailable here.' : '';
+  return <div className="skill-work-chooser">
+    <label htmlFor={id}>Assigned work for Hook: {device.name} · Hook ID: {device.id} · Employee ID: {device.target_id}</label>
+    <select id={id} value={valid ? choice.taskId : ''} aria-describedby={`${id}-help`}
+      disabled={!!unavailable} onChange={event => { setChoice({taskId: event.target.value, employeeId: device.target_id}); setRemoved(false); }}>
+      <option value="">Choose assigned saved work…</option>
+      {work.map(item => <option key={item.id} value={item.id}>{item.input.slice(0, 55)} · Task ID: {item.id}</option>)}
+    </select>
+    <p id={`${id}-help`}>{unavailable || (removed ? 'Previously chosen work or employee target changed. Choose assigned saved work again.' : 'Choose assigned saved work, then Open. Choosing and opening grant no consent and make no local MCP request.')}</p>
+    <button type="button" disabled={!!unavailable || !valid} aria-controls="selected-work-inspection"
+      aria-label={`Open assigned work for Hook: ${device.name} · Hook ID: ${device.id}`}
+      onClick={() => { if (valid && !unavailable) onOpenWork?.({taskId: choice.taskId, hookId: device.id, employeeId: device.target_id}); }}>Open</button>
+  </div>;
 }

@@ -3075,3 +3075,31 @@ prevention, stale inspection responses, missing linked work, uncertain delivery,
 authority/expiry/terminal guards and persisted provenance confirmation. Browser
 and consolidated profile checks are performed by the supervisor after handoff.
 Live provider calls remain skipped, not passed.
+
+### Choose assigned work compactly from Hook devices (C86-T1)
+
+Launch `agentown-web --database PATH --port 8765`, open
+`http://127.0.0.1:8765`, and go to Company overview → Hook trigger devices.
+Use existing saved employee-assigned work and employee `run_completed` or
+`run_failed` Hooks. No credentials are needed for this navigation.
+
+Each supported Hook has a labeled native **Assigned work for Hook** chooser
+containing only its employee’s loaded assignments. Repeated names are distinguished
+by exact Hook, employee and Task IDs. Choose work with the native keyboard controls,
+then Tab to **Open** and press Enter or Space. Selection alone makes no request.
+Open preserves work and configuration drafts, clears history filters and focuses
+**Requested Hook inspection** with the exact Task, Hook and employee IDs. It grants
+no execution consent and makes no MCP discovery, preview or execution request.
+
+Valid choices survive saved-history polling and reordering. Removing a Task,
+removing its employee assignment or changing the Hook’s target clears the choice;
+restoring the old data requires explicit reselection. Team and task-created Hooks
+remain configuration only. Empty assignments, disconnected history, refreshing
+and stale Hook snapshots explain why opening is unavailable. Refresh Hook devices
+after a failed refresh; valid choices remain selected and become available again.
+
+Scoped deterministic checks: `cd frontend && npx tsc --noEmit` and
+`npx vitest run src/HookDevices.test.tsx src/WorkHook.test.tsx`.
+The supervisor frontend profile passed consolidated frontend and Python checks;
+it intentionally deferred a fresh installed-browser gate. Live provider
+validation is skipped under the user policy, not passed.
