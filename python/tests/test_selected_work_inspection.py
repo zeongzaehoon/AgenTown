@@ -326,6 +326,24 @@ def test_unconfirmed_port_result_never_exposes_inspection(status):
 SESSION = '77777777-7777-4777-8777-777777777777'
 
 
+def test_use_case_rejects_another_selected_task_from_port():
+    from llm_engine.application.inspect_selected_work import (
+        InspectionResult, LocalInspection, InspectedTask)
+
+    class Port:
+        async def inspect_work(self, task_id):
+            return InspectionResult(
+                'passed', 'inspection_passed', 'Inspected', '',
+                LocalInspection(InspectedTask(RUN, 'Another selection', 'pending', []), []))
+
+    result = asyncio.run(InspectSelectedWork(Port()).execute(TASK))
+    assert result['requested_task_id'] == TASK
+    assert result['status'] == 'failure'
+    assert result['inspection'] is None
+    assert result['code'] == 'inspection_failed'
+    assert result['recovery']
+
+
 def loop_records():
     task, history = records()
     history['attempts'][0]['participants'] = [AGENT]

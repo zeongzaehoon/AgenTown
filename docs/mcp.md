@@ -1119,6 +1119,15 @@ Focused deterministic checks after supervisor dependency/native preparation:
 uv run --directory python --locked python -m pytest tests/test_selected_work_inspection.py tests/test_connection_diagnostic.py tests/test_mcp.py
 ```
 
+The application use case also rejects a port result whose Task or attempt Task
+identity differs from the requested selection. Even a port result marked passed
+then becomes `failure`, with `inspection: null` and explicit refresh guidance.
+The Python repair added a regression test for this boundary. The supervisor's
+scoped profile passed the 502-test Python suite, the 973-test React suite,
+native Rust, desktop and harness checks. Installed-package and browser/process
+recovery gates were deferred by that profile. Live provider calls remained
+skipped and no external client was exercised.
+
 For C66-T1's Python implementation invocation, syntax compilation and a standard-library
 smoke check of failure mapping, real subprocess timeout, child reap and admission
 release passed. The

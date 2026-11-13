@@ -125,10 +125,21 @@ class InspectSelectedWork:
             raise ValueError('A canonical Task UUID is required.')
         result = await self.port.inspect_work(task_id)
         payload = asdict(result)
-        confirmed = result.status == 'passed' and result.inspection is not None
+        confirmed = (
+            result.status == 'passed'
+            and result.inspection is not None
+            and result.inspection.task.id == task_id
+            and all(run.task_id == task_id for run in result.inspection.attempts)
+        )
         payload['status'] = 'success' if confirmed else 'failure'
         if not confirmed:
             payload['inspection'] = None
+            if result.status == 'passed':
+                payload.update(
+                    code='inspection_failed',
+                    message='The local response did not confirm the selected work.',
+                    recovery='Refresh saved work and explicitly inspect the selected Task again.',
+                )
         if confirmed:
             payload['inspection']['evidence'] = {
                 'source': 'installed_local_mcp',
