@@ -3231,3 +3231,52 @@ Supervisor verification passed 1,048 frontend tests, the production build, and
 505 Python tests, with 2 Python tests skipped. The selected frontend profile
 deferred installed-browser and process-recovery gates; those passed in the recent
 C88 full profile. Live provider calls remain skipped, not passed.
+
+### Inspect local MCP Loop attempt execution states (C91-T1)
+
+Launch the existing product flow:
+
+```sh
+uv run --directory python --locked agentown-web --database /absolute/path/product.sqlite3 --port 8765
+```
+
+Open <http://127.0.0.1:8765>. Prerequisites are saved work assigned to an
+employee and recorded Loop sessions/attempts in that product database. From
+Company overview, open a recorded Loop's linked work, then choose **Inspect local
+Loop sessions**. Inspection reads persisted records; it does not preview, start
+or stop work and does not require a provider call.
+
+Each session contains only its own attempts, with ordinal and run ID. Active
+execution reads **Active · Waiting for provider response**. A persisted finished
+attempt shows provider execution success or failure (other terminal outcomes
+retain their recorded wording). Output and error text stay visible. A missing
+execution record reads **Execution record unavailable · Provider completion
+unknown**. Missing state also leaves completion unknown. **Quality unverified**
+remains visible even for provider success. A stopped session does not establish
+that its provider finished; inspect its individual attempts.
+
+Choose **Inspect local Loop sessions** again, or **Inspect retained session …**,
+to refresh persisted state. A running attempt can then become finished under the
+same run ID. Stop remains available for active retained sessions only under the
+existing authority rules. Inspection never acknowledges recovery automatically:
+after uncertain activation, inspect and explicitly acknowledge the records before
+requesting a fresh preview and consent. No activation or Stop is replayed.
+
+Deterministic interaction fixtures require no credentials or prepopulated local
+DB. With frontend dependencies available, run:
+
+```sh
+cd frontend
+npx vitest run src/WorkLoop.test.tsx
+```
+
+The linked-session fixture supplies two sessions for one assigned Task: active
+and successful attempts in one, failed and missing-record attempts in a stopped
+session. It refreshes the active attempt to success with the same identity and
+asserts session separation, retained output/error, quality wording and only
+inspection requests. Existing fixtures cover explicit recovery and retained Stop.
+Supervisor verification passed 1,053 frontend tests, including 32 WorkLoop tests,
+the production build, and 505 Python tests, with 2 Python tests skipped. The
+selected frontend profile deferred installed-browser and process-recovery gates;
+those passed in the recent C88 full profile. Live provider calls remain skipped,
+not passed.

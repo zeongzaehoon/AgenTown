@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, expect, test, vi } from 'vitest';
 import { WorkLoop } from './WorkLoop';
@@ -242,4 +242,64 @@ test('Escape on an outside control leaves preview and checked consent intact', a
   expect((screen.getByRole('checkbox') as HTMLInputElement).checked).toBe(true);
   expect(document.activeElement).toBe(screen.getByRole('button', {name: 'Outside control'}));
   expect(fetcher).toHaveBeenCalledTimes(2);
+});
+
+
+test('linked session inspection distinguishes persisted execution states and refreshes without mutations or cross-association', async () => {
+  const other = '33333333-3333-4333-8333-333333333333';
+  const runs = ['44444444-4444-4444-8444-444444444444', '55555555-5555-4555-8555-555555555555', '66666666-6666-4666-8666-666666666666', '77777777-7777-4777-8777-777777777777'];
+  const sessions = [{...session, admitted: 2}, {...session, session_id: other, state: 'stopped', admitted: 2}];
+  const attempts = [
+    {session_id: policy, run_id: runs[0], ordinal: 1, execution: {state: 'active', outcome: null, output: 'Partial draft'}},
+    {session_id: policy, run_id: runs[1], ordinal: 2, execution: {state: 'finished', outcome: 'reported_success', output: 'Saved success'}},
+    {session_id: other, run_id: runs[2], ordinal: 1, execution: {state: 'finished', outcome: 'failure', error: 'Provider timeout'}},
+    {session_id: other, run_id: runs[3], ordinal: 2, execution: null},
+  ];
+  const fetcher = vi.fn().mockResolvedValueOnce(reply({...inspection(sessions), attempts}, 'loops_inspected'))
+    .mockResolvedValueOnce(reply({...inspection(sessions), attempts: attempts.map((a, i) => i === 0 ? {...a, execution: {state: 'finished', outcome: 'reported_success', output: 'Refreshed success'}} : a)}, 'loops_inspected'));
+  vi.stubGlobal('fetch', fetcher);
+  render(<WorkLoop taskId={task} connected inspected={false} navigation={{taskId: task, sessionId: policy}} />);
+  expect(fetcher).not.toHaveBeenCalled();
+  await userEvent.click(screen.getByRole('button', {name: 'Inspect local Loop sessions'}));
+  const active = within(await screen.findByRole('region', {name: `Local Loop session ${policy}`}));
+  const stopped = within(screen.getByRole('region', {name: `Local Loop session ${other}`}));
+  expect(document.activeElement).toBe(screen.getByRole('region', {name: `Local Loop session ${policy}`}));
+  expect(active.getByText(`Attempt 1 · ${runs[0]} · Active · Waiting for provider response`)).toBeTruthy();
+  expect(active.getByText(`Attempt 2 · ${runs[1]} · Finished · Provider execution succeeded`)).toBeTruthy();
+  expect(active.getByText('Partial draft')).toBeTruthy();
+  expect(active.getByText('Saved success')).toBeTruthy();
+  expect(stopped.getByText(`Attempt 1 · ${runs[2]} · Finished · Provider execution failed`)).toBeTruthy();
+  expect(stopped.getByText('Provider timeout')).toBeTruthy();
+  expect(stopped.getByText(`Attempt 2 · ${runs[3]} · Execution record unavailable · Provider completion unknown`)).toBeTruthy();
+  expect(stopped.getByText(/Stopped · Admitted/)).toBeTruthy();
+  expect(active.queryByText('Provider timeout')).toBeNull();
+  expect(stopped.queryByText('Saved success')).toBeNull();
+  expect(active.getByText('Quality unverified')).toBeTruthy();
+  expect(stopped.getByText('Quality unverified')).toBeTruthy();
+  expect((active.getByRole('button', {name: `Stop local Loop ${policy}`}) as HTMLButtonElement).disabled).toBe(false);
+  expect(stopped.queryByRole('button', {name: `Stop local Loop ${other}`})).toBeNull();
+  await userEvent.click(screen.getByRole('button', {name: 'Inspect local Loop sessions'}));
+  expect(await active.findByText('Refreshed success')).toBeTruthy();
+  expect(active.queryByText('Partial draft')).toBeNull();
+  expect(active.getByText(`Attempt 1 · ${runs[0]} · Finished · Provider execution succeeded`)).toBeTruthy();
+  expect(stopped.getByText(/Execution record unavailable · Provider completion unknown/)).toBeTruthy();
+  expect(fetcher.mock.calls.map(c => c[0])).toEqual(Array(2).fill('/api/connections/v1/loops/inspect'));
+  for (const call of fetcher.mock.calls) expect(JSON.parse(call[1].body)).toEqual({task_id: task});
+  expect(screen.queryByRole('checkbox')).toBeNull();
+});
+
+test.each([
+  [{state: 'active'}, 'Active · Waiting for provider response'],
+  [{state: 'finished', outcome: 'interruption'}, 'Finished · interruption'],
+  [{state: 'finished'}, 'Finished · Terminal outcome unavailable'],
+  [{}, 'Execution state: unavailable · Provider completion unknown'],
+])('partial persisted execution retains honest state: %j', async (execution, label) => {
+  const run = '44444444-4444-4444-8444-444444444444';
+  const fetcher = vi.fn().mockResolvedValue(reply({...inspection([{...session, state: 'stopped', admitted: 1}]), attempts: [{session_id: policy, run_id: run, ordinal: 1, execution}]}, 'loops_inspected'));
+  vi.stubGlobal('fetch', fetcher);
+  render(<WorkLoop taskId={task} connected inspected />);
+  await userEvent.click(screen.getByRole('button', {name: 'Inspect local Loop sessions'}));
+  expect(await screen.findByText(`Attempt 1 · ${run} · ${label}`)).toBeTruthy();
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  expect(fetcher.mock.calls[0][0]).toBe('/api/connections/v1/loops/inspect');
 });

@@ -2,9 +2,20 @@ import type { LoopNavigation } from './OverviewLoops';
 import { useLayoutEffect, useRef, useState } from 'react';
 import { canControl, controlText } from './loop-control';
 import { loopLabel } from './LoopExecution';
-import type { LoopInspection, LoopSession } from './loop-response';
+import type { LoopAttempt, LoopInspection, LoopSession } from './loop-response';
 import type { LoopRecord } from './configuration-api';
 import { localLoop, type LocalLoopPreview, type LoopOperation } from './work-loop-api';
+
+function executionLabel(execution: LoopAttempt['execution']): string {
+  if (!execution) return 'Execution record unavailable · Provider completion unknown';
+  if (execution.state === 'active') return 'Active · Waiting for provider response';
+  if (execution.state === 'finished' || (!execution.state && execution.outcome)) {
+    if ((execution.outcome === 'reported_success' || execution.outcome === 'success')) return 'Finished · Provider execution succeeded';
+    if (execution.outcome === 'failure') return 'Finished · Provider execution failed';
+    return `Finished · ${execution.outcome || 'Terminal outcome unavailable'}`;
+  }
+  return `Execution state: ${execution.state || 'unavailable'} · Provider completion unknown`;
+}
 
 /** Kept mounted across inspection/selection changes so owner Stop remains reachable. */
 export function WorkLoop({taskId, connected, inspected, navigation}: {navigation?: LoopNavigation | null; taskId: string | null; connected: boolean; inspected: boolean}) {
@@ -153,7 +164,7 @@ export function WorkLoop({taskId, connected, inspected, navigation}: {navigation
       <button type="button" disabled={busy || !connected} onClick={() => void perform('inspect', s.preview.task_id)}>Inspect retained session {s.session_id}</button>
       {s.state === 'active' && <button type="button" disabled={busy || !connected || uncertainStops.includes(s.session_id) || (!!records[s.preview.task_id] && !canControl(records[s.preview.task_id].control))} onClick={() => void perform('stop', s.preview.task_id, s)}>Stop local Loop {s.session_id}</button>}
       <p>Saved input</p><pre>{s.preview.input}</pre><p>Quality unverified</p>
-      {records[s.preview.task_id]?.attempts.filter(a => a.session_id === s.session_id).map(a => <article key={a.run_id}><p>Attempt {a.ordinal} · {a.run_id} · {a.execution?.outcome || 'No terminal outcome recorded'}</p>{a.execution?.output != null && <pre>{a.execution.output}</pre>}{a.execution?.error && <p>{a.execution.error}</p>}</article>)}
+      {records[s.preview.task_id]?.attempts.filter(a => a.session_id === s.session_id).map(a => <article key={a.run_id}><p>Attempt {a.ordinal} · {a.run_id} · {executionLabel(a.execution)}</p>{a.execution?.output != null && <pre>{a.execution.output}</pre>}{a.execution?.error && <p>{a.execution.error}</p>}</article>)}
     </section>)}
   </section>;
 }
