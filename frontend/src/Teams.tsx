@@ -36,7 +36,7 @@ function TeamPanel({workspace, connected, onSelectEmployee, openTeam}: {openTeam
       setTeams(result.teams); setStale(false); setError('');
       setSelected(previous => previous || result.teams[0]?.id || '');
     } catch (failure) {
-      if (!signal.aborted) { setStale(true); setError((failure as Error).message); }
+      if (!signal.aborted) { setStale(true); setError(`${(failure as Error).message} Refresh teams successfully and inspect saved teams before retrying. Your drafts are retained; nothing is automatically resent.`); }
     }
   }
   async function perform(action?: (signal: AbortSignal) => Promise<void>) {
@@ -74,7 +74,7 @@ function TeamPanel({workspace, connected, onSelectEmployee, openTeam}: {openTeam
     <form onSubmit={event => {
       event.preventDefault(); if (unavailable || !name.trim()) return;
       void perform(async signal => {
-        const saved = await createTeam(name, signal);
+        const saved = await createTeam(name, signal, (teams ?? []).map(item => item.id));
         if (signal.aborted) return;
         setTeams(previous => [...(previous ?? []), saved]); setSelected(saved.id); setName('');
         setNotice(`Team saved · ID: ${saved.id}`); selector.current?.focus();
@@ -102,7 +102,7 @@ function TeamPanel({workspace, connected, onSelectEmployee, openTeam}: {openTeam
         event.preventDefault(); if (unavailable || !draft.length || draft.length > 100) return;
         const id = team.id;
         void perform(async signal => {
-          const saved = await addTeamMembers(id, draft, signal);
+          const saved = await addTeamMembers(id, draft, signal, team);
           if (signal.aborted) return;
           setTeams(previous => previous?.map(item => item.id === id ? saved : item) ?? [saved]);
           setDrafts(previous => ({...previous, [id]: []}));

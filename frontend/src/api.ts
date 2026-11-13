@@ -122,14 +122,38 @@ export const advice: Record<string, string> = {
 };
 
 export interface Team { id: string; name: string; members: string[] }
+function validTeam(value: unknown): value is Team {
+  if (!value || typeof value !== 'object') return false;
+  const team = value as Team;
+  return typeof team.id === 'string' && !!team.id.trim() &&
+    typeof team.name === 'string' && !!team.name.trim() &&
+    Array.isArray(team.members) && team.members.every(id => typeof id === 'string' && !!id.trim()) &&
+    new Set(team.members).size === team.members.length;
+}
+function requireTeam(value: unknown): Team {
+  if (!validTeam(value)) throw new ApiError('The team save could not be confirmed: invalid response.');
+  return value;
+}
 export async function listTeams(signal?: AbortSignal): Promise<{teams: Team[]}> {
   const result = await api<{teams: Team[]}>('/api/teams', {}, signal, 'GET');
-  if (!result || !Array.isArray(result.teams) || result.teams.some(team =>
-    !team || typeof team.id !== 'string' || typeof team.name !== 'string' ||
-    !Array.isArray(team.members) || team.members.some(id => typeof id !== 'string'))) {
-    throw new ApiError('Team data unavailable: invalid team response. Refresh to try again.');
+  if (!result || !Array.isArray(result.teams) || !result.teams.every(validTeam) ||
+      new Set(result.teams.map(team => team.id)).size !== result.teams.length) {
+    throw new ApiError('Team data unavailable: invalid team response. Refresh teams to try again.');
   }
   return result;
 }
-export const createTeam = (name: string, signal?: AbortSignal) => api<Team>('/api/teams', {name}, signal);
-export const addTeamMembers = (id: string, members: string[], signal?: AbortSignal) => api<Team>(`/api/teams/${encodeURIComponent(id)}/members`, {members}, signal);
+export async function createTeam(name: string, signal?: AbortSignal, existingIds: string[] = []): Promise<Team> {
+  const saved = requireTeam(await api<unknown>('/api/teams', {name}, signal));
+  if (saved.name !== name.replace(/^\p{White_Space}+|\p{White_Space}+$/gu, '') || saved.members.length || existingIds.includes(saved.id)) {
+    throw new ApiError('The team save could not be confirmed: the response does not match the new team.');
+  }
+  return saved;
+}
+export async function addTeamMembers(id: string, members: string[], signal?: AbortSignal, previous?: Team): Promise<Team> {
+  const saved = requireTeam(await api<unknown>(`/api/teams/${encodeURIComponent(id)}/members`, {members}, signal));
+  if (saved.id !== id || members.some(member => !saved.members.includes(member)) ||
+      (previous && (saved.name !== previous.name || previous.members.some(member => !saved.members.includes(member))))) {
+    throw new ApiError('The membership save could not be confirmed: the response does not match the selected team and members.');
+  }
+  return saved;
+}

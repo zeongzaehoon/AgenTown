@@ -69,3 +69,41 @@ test('successful body reading removes timer and caller listener', async () => {
   expect(vi.getTimerCount()).toBe(0);
   expect(remove).toHaveBeenCalledWith('abort', expect.any(Function));
 });
+
+// List replacement is atomic: one invalid record invalidates the entire snapshot.
+for (const teams of [null, [null], [{id: '', name: 'Editors', members: []}],
+  [{id: 't', name: '', members: []}], [{id: 't', name: 'Editors', members: ['']}],
+  [{id: 't', name: 'Editors', members: ['a', 'a']}],
+  [{id: 't', name: 'Editors', members: []}, {id: 't', name: 'Other', members: []}]]) {
+  test(`rejects invalid team snapshot ${JSON.stringify(teams)}`, async () => {
+    const {listTeams} = await import('./api');
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({teams}))));
+    await expect(listTeams()).rejects.toThrow('invalid team response');
+  });
+}
+
+test('valid team receipts allow duplicate names and retain unavailable member IDs', async () => {
+  const {listTeams, createTeam, addTeamMembers} = await import('./api');
+  const first = {id: 't', name: 'Editors', members: ['unavailable']};
+  const second = {id: 'new', name: 'Editors', members: []};
+  vi.stubGlobal('fetch', vi.fn()
+    .mockResolvedValueOnce(new Response(JSON.stringify({teams: [first, second]})))
+    .mockResolvedValueOnce(new Response(JSON.stringify(second)))
+    .mockResolvedValueOnce(new Response(JSON.stringify({...first, members: ['unavailable', 'a']}))));
+  await expect(listTeams()).resolves.toEqual({teams: [first, second]});
+  await expect(createTeam(' Editors ', undefined, ['t'])).resolves.toEqual(second);
+  await expect(addTeamMembers('t', ['a'], undefined, first)).resolves.toEqual({...first, members: ['unavailable', 'a']});
+});
+
+for (const saved of [
+  {id: 'other', name: 'Editors', members: ['old', 'a']},
+  {id: 't', name: 'Renamed', members: ['old', 'a']},
+  {id: 't', name: 'Editors', members: ['old']},
+  {id: 't', name: 'Editors', members: ['a']},
+]) {
+  test(`rejects uncorrelated membership receipt ${JSON.stringify(saved)}`, async () => {
+    const {addTeamMembers} = await import('./api');
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(saved))));
+    await expect(addTeamMembers('t', ['a'], undefined, {id: 't', name: 'Editors', members: ['old']})).rejects.toThrow('could not be confirmed');
+  });
+}

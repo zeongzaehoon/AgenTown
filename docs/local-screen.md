@@ -2161,3 +2161,75 @@ keyboard operation. The fixture's `.calls` file and the screen's retained sessio
 and attempt records provide observable evidence. This implementation workspace
 has no frontend dependencies; these tests and supervisor-selected browser checks
 remain pending. Live provider calls are skipped, not passed.
+
+## Team save uncertainty and explicit recovery (C57-T1)
+
+Launch without provider credentials (use an existing writable database directory):
+
+```sh
+uv run --directory python --locked agentown-web --database /tmp/agentown-teams-recovery.sqlite3 --port 8765
+```
+
+Open <http://127.0.0.1:8765>, create two employees, choose **Browse teams**, and
+create two teams with the same name. Their IDs distinguish them. Select a team,
+add one employee, then select the other employee as a draft addition. Enter a
+new team-name draft. Switching teams and back must preserve that addition.
+Existing members remain visible, including an **Unavailable employee** entry if
+an employee is absent from the workspace snapshot. No work executes here.
+
+For a reproducible uncertain response, paste this into browser developer tools.
+It lets the next team POST reach the real server, then replaces only its receipt;
+it does not change the server API. The save may therefore already be persisted.
+Keep the Network panel open to count requests.
+
+```js
+window.teamRecoveryFetch = window.fetch;
+window.fetch = async (input, init) => {
+  const result = await window.teamRecoveryFetch(input, init);
+  if (init?.method === 'POST' && String(input).startsWith('/api/teams')) {
+    window.fetch = window.teamRecoveryFetch;
+    return new Response('{', {status: 200});
+  }
+  return result;
+};
+```
+
+Activate **Add members** (or repeat with **Create team**). Rapid duplicate
+activation must send one POST. The alert explains uncertainty and instructs
+refresh and inspection. Confirmed records and drafts stay visible; neither save
+button permits resubmission. To exercise a mismatched receipt instead, replace
+`new Response('{', {status: 200})` with
+`Response.json({id: 'wrong-team', name: 'Wrong', members: []})`.
+
+Before recovery, make refresh return an invalid list by installing:
+
+```js
+window.fetch = async (input, init) =>
+  init?.method === 'GET' && String(input) === '/api/teams'
+    ? Response.json({teams: [{id: 'invalid', name: 'Incomplete'}]})
+    : window.teamRecoveryFetch(input, init);
+```
+
+Tab to **Refresh teams** and press Enter. The failed refresh must retain prior
+teams and drafts, announce an error, and keep saves blocked. Restore transport
+with `window.fetch = window.teamRecoveryFetch`, focus **Refresh teams**, and
+press Enter again. Only this successful explicit GET restores save eligibility;
+refresh must never issue another POST. Inspect the saved IDs and membership
+before deliberately retrying. Already saved additions appear as existing members;
+an unchanged creation draft lets you inspect whether its team was saved before
+choosing to submit again. Successful explicit saves announce the saved ID and
+return focus to **Saved team**.
+
+Deterministic interaction and contract coverage is in `Teams.test.tsx` and
+`api.test.tsx`. With frontend dependencies available, run:
+
+```sh
+cd frontend
+npx vitest run src/Teams.test.tsx src/api.test.tsx
+```
+
+These fixtures cover malformed/unreadable and mismatched receipts, lost prior
+members, missing requested additions, duplicate IDs, atomic invalid list
+rejection, failed recovery, retained drafts/selections, duplicate submission and
+keyboard recovery. Supervisor browser/build verification is required separately;
+this reproduction does not require live provider calls.

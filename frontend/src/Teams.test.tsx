@@ -123,3 +123,86 @@ test('App team navigation preserves unsaved work, assignment and existing resend
   expect((screen.getByLabelText('Assign to') as HTMLSelectElement).value).toBe('a');
   expect(fetcher.mock.calls.every(([path]) => path === '/api/state' || path === '/api/teams' || (path === '/api/config/v1/skills' || path === '/api/config/v1/hooks' || path === '/api/config/v1/loops' || path === '/api/loops/v1'))).toBe(true);
 });
+
+for (const operation of ['create', 'members'] as const) {
+  for (const invalid of ['malformed', 'unreadable', 'mismatched', 'incomplete', 'duplicate'] as const) {
+    test(`${operation}: ${invalid} receipt retains confirmed data and drafts until explicit successful refresh`, async () => {
+      const original = {id: 't0', name: 'Editors', members: ['missing']};
+      let recovery: 'initial' | 'failed' | 'valid' = 'initial';
+      let validSave = false;
+      const fetcher = vi.fn(async (_path: string, init: RequestInit) => {
+        if (init.method === 'GET') {
+          if (recovery === 'failed') return response({teams: [original, {...original, name: 'Corrupt replacement'}]});
+          return response({teams: [original, {id: 't1', name: 'Editors', members: []}]});
+        }
+        const saved = operation === 'create' ? {id: 'new', name: 'New team', members: []} : {...original, members: ['missing', 'a']};
+        if (validSave) return response(saved);
+        if (invalid === 'unreadable') return new Response('{');
+        if (invalid === 'malformed') return response({id: 1});
+        if (invalid === 'mismatched') return response({...saved, name: 'Different', id: 'other'});
+        if (invalid === 'incomplete') return response({...saved, members: ['a']});
+        return response(operation === 'create' ? {...saved, id: 't0'} : {...saved, members: ['missing', 'a', 'a']});
+      });
+      vi.stubGlobal('fetch', fetcher);
+      render(<Teams workspace={workspace} connected onSelectEmployee={vi.fn()} />);
+      fireEvent.click(screen.getByRole('button', {name: 'Browse teams'}));
+      await screen.findByText('Team ID: t0');
+      fireEvent.change(screen.getByLabelText('Team name'), {target: {value: 'New team'}});
+      fireEvent.click(screen.getByLabelText('Alex · Employee ID: a'));
+      const submit = () => fireEvent.submit(screen.getByRole('button', {name: operation === 'create' ? 'Create team' : 'Add members'}).closest('form')!);
+      submit(); submit();
+      await screen.findByRole('alert');
+      expect(screen.getByRole('alert').textContent).toContain('nothing is automatically resent');
+      const postCount = () => fetcher.mock.calls.filter(([, init]) => init.method === 'POST').length;
+      expect(postCount()).toBe(1);
+      expect(screen.queryByText(/Team saved ·|Membership saved ·/)).toBeNull();
+      expect(screen.getByText('Unavailable employee · ID: missing')).toBeTruthy();
+      expect((screen.getByLabelText('Team name') as HTMLInputElement).value).toBe('New team');
+      expect((screen.getByLabelText('Alex · Employee ID: a') as HTMLInputElement).checked).toBe(true);
+      expect((screen.getByRole('button', {name: 'Create team'}) as HTMLButtonElement).disabled).toBe(true);
+      submit(); expect(postCount()).toBe(1);
+      fireEvent.change(screen.getByLabelText('Saved team'), {target: {value: 't1'}});
+      fireEvent.change(screen.getByLabelText('Saved team'), {target: {value: 't0'}});
+      expect((screen.getByLabelText('Alex · Employee ID: a') as HTMLInputElement).checked).toBe(true);
+      recovery = 'failed';
+      fireEvent.click(screen.getByRole('button', {name: 'Refresh teams'}));
+      await screen.findByRole('alert');
+      await waitFor(() => expect((screen.getByRole('button', {name: 'Refresh teams'}) as HTMLButtonElement).disabled).toBe(false));
+      expect(screen.queryByText(/Corrupt replacement/)).toBeNull();
+      submit(); expect(postCount()).toBe(1);
+      recovery = 'valid';
+      // Native keyboard activation exercises the enabled recovery control and submit flow.
+      const user = (await import('@testing-library/user-event')).default.setup();
+      screen.getByRole('button', {name: 'Refresh teams'}).focus();
+      await user.keyboard('{Enter}');
+      await screen.findByText('Showing persisted teams.');
+      expect(postCount()).toBe(1);
+      expect((screen.getByLabelText('Alex · Employee ID: a') as HTMLInputElement).checked).toBe(true);
+      validSave = true;
+      screen.getByRole('button', {name: operation === 'create' ? 'Create team' : 'Add members'}).focus();
+      await user.keyboard('{Enter}');
+      await screen.findByText(operation === 'create' ? 'Team saved · ID: new' : 'Membership saved · Team ID: t0');
+      expect(postCount()).toBe(2);
+      expect(document.activeElement).toBe(screen.getByLabelText('Saved team'));
+      if (operation === 'create') expect((screen.getByLabelText('Team name') as HTMLInputElement).value).toBe('');
+      else expect(screen.getByText('Unavailable employee · ID: missing')).toBeTruthy();
+    });
+  }
+}
+
+test('invalid initial snapshot stays unavailable until explicit valid refresh', async () => {
+  const fetcher = vi.fn()
+    .mockResolvedValueOnce(response({teams: [{id: 'broken', name: 'Editors'}]}))
+    .mockResolvedValueOnce(response({teams: []}));
+  vi.stubGlobal('fetch', fetcher);
+  render(<Teams workspace={workspace} connected onSelectEmployee={vi.fn()} />);
+  fireEvent.click(screen.getByRole('button', {name: 'Browse teams'}));
+  await screen.findByText('Team data unavailable.');
+  expect(screen.queryByRole('option', {name: /broken/})).toBeNull();
+  fireEvent.change(screen.getByLabelText('Team name'), {target: {value: 'Retained'}});
+  expect((screen.getByRole('button', {name: 'Create team'}) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(screen.getByRole('button', {name: 'Refresh teams'}));
+  await screen.findByText(/No teams yet/);
+  expect((screen.getByLabelText('Team name') as HTMLInputElement).value).toBe('Retained');
+  expect(fetcher.mock.calls).toHaveLength(2);
+});
