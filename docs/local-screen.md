@@ -2054,3 +2054,62 @@ headers/body, late responses and retained drafts for both creation endpoints.
 This implementation workspace lacks frontend dependencies and test executables;
 these checks and browser validation are pending supervisor verification. Live
 provider validation is skipped, not passed.
+
+### Execution receipt uncertainty (C55-T1)
+
+In a prepared development environment with built frontend assets, launch the
+existing deterministic server (its app is the same `create_app` used by
+`agentown-web`, with a test provider injected; the production CLI has no fixture
+provider switch):
+
+```sh
+printf 'success' > /tmp/c55-response-gate
+uv run --directory python --locked python tests/web_browser_server.py /tmp/c55-work.sqlite3 8766 /tmp/c55-response-gate
+```
+
+Open http://127.0.0.1:8766. Create an employee, save work and execute once.
+The fixture needs no credentials and records provider submissions in
+`/tmp/c55-response-gate.calls`. In Configuration, create and enable a Skill,
+then an employee Hook referring to that Skill with event `run_completed`.
+Keep the successful attempt as the Hook's source. Enter a different unsaved
+draft and keep the saved work selected.
+
+1. Using a browser response override or local intercepting proxy, replace only
+   the next POST `/api/work/{id}/execute` **response**, allowing the request to
+   reach the fixture. Try `null`, `{}`, an array, unreadable JSON, or a genuine
+   receipt with `schema_version` changed to `2`. For Skill and Hook also try
+   removing their provenance object or changing its `preview_id` or `run_id`.
+2. Exercise each path separately: **Retry explicitly** (and **Confirm resend**
+   when the prior attempt has output), **Preview Skill with saved work** then
+   **Execute once with Skill**, and **Preview Hook with saved work** then
+   **Execute once with Hook**. Double-click the execution control: Network must
+   show one execution POST. Draft text, employee selection, saved selection and
+   prior attempts remain; an actionable receipt warning and submission
+   inspection message appear. Skill/Hook execution consent disappears.
+3. Let polling run. Execution stays blocked. Force `/api/state` to fail or
+   return an invalid snapshot, then choose **Refresh connection**: the block
+   remains. Restore valid snapshots; polling still cannot clear it. Remove
+   the receipt override and explicitly choose **Refresh connection**. Inspect
+   attempts for the possible already-completed request before deciding to retry.
+   Refresh sends no execution POST. Skill and Hook need a new explicit preview.
+4. Repeat with unmodified successful receipt bodies. A v1 finalized receipt
+   with matching input, provider/model, new Run ID, deadline, unverified quality,
+   output/error pair and applicable saved provenance allows normal controls.
+   A finalized provider failure (`output: null`, nonblank `error`) is also a
+   valid receipt; it is not evidence of uncertain delivery.
+
+Focused checks for the supervisor when dependencies are available:
+
+```sh
+cd frontend
+npm exec -- tsc --noEmit
+npm exec -- vitest run src/execution-receipt.test.tsx src/HookExecution.test.tsx src/SkillExecution.test.tsx src/deadlines.test.tsx
+```
+
+The added deterministic interactions cover all three paths, valid/malformed/
+unsupported bodies, single submission, retained drafts/selection/history,
+polling, failed refresh, explicit keyboard recovery, consumed preview consent,
+and a stale in-flight refresh. These reproduction steps were not browser-executed
+in the implementation workspace. Frontend dependencies are absent; focused
+execution and supervisor-selected verification remain pending. Live provider
+validation is skipped, not passed.

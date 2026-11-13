@@ -38,7 +38,9 @@ function fixture(state = initial()) {
         Object.assign(attempt, attempts.length === 1 ? {state: 'finished', outcome: 'failure', error: 'rate_limit'} : {state: 'finished', outcome: 'reported_success', output: '<script>unsafe()</script> FULL RESULT', quality: 'unverified'});
         resolve();
       }; });
-      return new Response('{}');
+      return new Response(JSON.stringify({schema_version: 1, quality: 'unverified', run_id: attempt.id,
+        input: state.work[0].input, provider: state.provider, model: state.model, deadline_unix_ms: 100,
+        output: 'output' in attempt ? attempt.output : null, error: 'error' in attempt ? attempt.error : null}));
     }
     throw new Error(`Unexpected request ${path}`);
   });
