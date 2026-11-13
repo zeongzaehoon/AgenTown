@@ -5,7 +5,7 @@ import { HookDevices } from './HookDevices';
 import { App } from './App';
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
-const hooks = [{id: 'one', name: 'Manual', skill_id: 's', target_kind: 'agent', target_id: 'a', event: 'task_created', enabled: true}, {id: 'two', name: 'Manual', skill_id: 's', target_kind: 'team', target_id: 't', event: 'run_failed', enabled: false}];
+const hooks = [{id: 'one', name: 'Manual', skill_id: 's', target_kind: 'agent', target_id: 'a', event: 'run_completed', enabled: true}, {id: 'two', name: 'Manual', skill_id: 's', target_kind: 'team', target_id: 't', event: 'run_failed', enabled: false}];
 
 test('devices show loading, duplicate identities, keyboard controls and stale snapshots', async () => {
   let finish!: (response: Response) => void;
@@ -18,7 +18,7 @@ test('devices show loading, duplicate identities, keyboard controls and stale sn
   finish(new Response(JSON.stringify({hooks})));
   const first = await screen.findByRole('button', {name: 'Open Hook device: Manual · ID: one'});
   const second = screen.getByRole('button', {name: 'Open Hook device: Manual · ID: two'});
-  expect(first.textContent).toContain('Event: task_created');
+  expect(first.textContent).toContain('Event: run_completed');
   expect(second.textContent).toContain('Target: team · ID: t');
   expect(first.textContent).toContain('Configuration enabled');
   expect(second.textContent).toContain('Configuration disabled');
@@ -80,6 +80,15 @@ test('App opens exact IDs repeatedly, retains configuration and work drafts and 
   expect((screen.getByLabelText('Instructions') as HTMLTextAreaElement).value).toBe('New Skill draft');
   fireEvent.click(screen.getByRole('button', {name: 'Open Hook device: Manual · ID: two'}));
   await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('Saved record')));
+  const linked = screen.getByRole('button', {name: 'Open work for Hook: Manual · Hook ID: one · Task ID: w'});
+  fireEvent.change(screen.getByLabelText('Search saved work'), {target: {value: 'obstructing filter'}});
+  linked.focus(); await userEvent.keyboard('{Enter}');
+  expect(document.activeElement).toBe(screen.getByRole('region', {name: 'Requested Hook inspection'}));
+  expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('Unsaved trigger');
+  expect((screen.getByLabelText('What would you like help with?') as HTMLTextAreaElement).value).toBe('Work draft');
+  expect((screen.getByLabelText('Search saved work') as HTMLInputElement).value).toBe('');
+  fireEvent.click(linked);
+  expect(document.activeElement).toBe(screen.getByRole('region', {name: 'Requested Hook inspection'}));
   offline = true;
   fireEvent.click(screen.getByRole('button', {name: 'Refresh configuration'}));
   expect(await screen.findByText(/Configuration disconnected/)).toBeTruthy();
@@ -101,4 +110,15 @@ test('App opens exact IDs repeatedly, retains configuration and work drafts and 
       expect(options.body).toBeUndefined();
     }
   }
+});
+
+test('explicit work choices carry exact IDs with duplicate names and explain unsupported or empty assignments', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({hooks: [hooks[0], {...hooks[0], id: 'duplicate'}, hooks[1], {...hooks[0], id: 'empty', target_id: 'missing'}, {...hooks[0], id: 'created', event: 'task_created'}]}))));
+  const open = vi.fn();
+  render(<HookDevices onOpenWork={open} workspace={{employees: [{id: 'a', name: 'Alex'}], work: [{id: 'w', input: 'Saved', assignees: ['a'], status: 'pending', attempts: []}]} as never} />);
+  const choice = await screen.findByRole('button', {name: 'Open work for Hook: Manual · Hook ID: duplicate · Task ID: w'});
+  choice.focus(); await userEvent.keyboard('{Enter}');
+  expect(open).toHaveBeenCalledWith({taskId: 'w', hookId: 'duplicate', employeeId: 'a'});
+  expect(screen.getByText(/No saved work assigned/)).toBeTruthy();
+  expect(screen.getAllByText(/Team and task-created Hooks remain configuration only/)).toHaveLength(2);
 });

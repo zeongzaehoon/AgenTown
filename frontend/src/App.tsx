@@ -1,3 +1,4 @@
+import type { HookNavigation } from './HookDevices';
 import type { LoopNavigation } from './OverviewLoops';
 import { DraftStatus, useUnsavedDrafts } from './unsaved-drafts';
 import { confirmExecutionHistory, validateExecutionReceipt } from './execution-receipt';
@@ -113,6 +114,7 @@ export function App() {
   const [connected, setConnected] = useState(false);
   const [connectionError, setConnectionError] = useState('');
   const [notice, setNotice] = useState('');
+  const [hookRequest, setHookRequest] = useState<HookNavigation | null>(null);
   const [loopRequest, setLoopRequest] = useState<LoopNavigation | null>(null);
   const [inspectionRequired, setInspectionRequired] = useState(false);
   const executionBlocked = useRef(false);
@@ -333,7 +335,7 @@ export function App() {
           historyRef.current?.focus();
         }}>I inspected execution history</button>
       </section>}
-      <CompanyOverview onOpenSession={request => { setLoopRequest({...request}); setViewEmployee(''); setSearch(''); setOutcome('all'); setSelected(request.taskId); }} onSelectTeamMember={id => { setViewEmployee(id); setSearch(''); setOutcome('all'); searchRef.current?.focus(); }} onOpenTeam={id => setTeamRequest({id})} onOpenClient={id => setClientRequest({id})} onOpenSkill={id => setConfigurationRequest({kind: 'skills', id})} onOpenHook={id => setConfigurationRequest({kind: 'hooks', id})} onOpenLoop={id => setConfigurationRequest({kind: 'loops', id})} workspace={state} connected={connected} error={connectionError} selectedEmployee={viewEmployee} onSelectEmployee={setViewEmployee} onOpenWork={id => {
+      <CompanyOverview onOpenHookWork={request => { setHookRequest({...request}); setLoopRequest(null); setViewEmployee(''); setSearch(''); setOutcome('all'); setSelected(request.taskId); }} onOpenSession={request => { setHookRequest(null); setLoopRequest({...request}); setViewEmployee(''); setSearch(''); setOutcome('all'); setSelected(request.taskId); }} onSelectTeamMember={id => { setViewEmployee(id); setSearch(''); setOutcome('all'); searchRef.current?.focus(); }} onOpenTeam={id => setTeamRequest({id})} onOpenClient={id => setClientRequest({id})} onOpenSkill={id => setConfigurationRequest({kind: 'skills', id})} onOpenHook={id => setConfigurationRequest({kind: 'hooks', id})} onOpenLoop={id => setConfigurationRequest({kind: 'loops', id})} workspace={state} connected={connected} error={connectionError} selectedEmployee={viewEmployee} onSelectEmployee={setViewEmployee} onOpenWork={id => {
         setViewEmployee(''); setSearch(''); setOutcome('all'); setSelected(id); historyRef.current?.focus();
       }} />
       <Teams openTeam={teamRequest} workspace={state} connected={connected} onSelectEmployee={id => {
@@ -407,7 +409,7 @@ export function App() {
             {(selectedExcluded || !work) && <option value="" disabled>Select a matching request</option>}
             {matches.map(w => <option key={w.id} value={w.id}>{w.input.slice(0, 55)} — {workStatus(w)} · ID: {w.id}</option>)}
           </select>
-          <WorkInspection loopRequest={loopRequest?.taskId === selected ? loopRequest : null} taskId={selected || null} connected={connected} />
+          <WorkInspection hookRequest={hookRequest?.taskId === selected ? hookRequest : null} loopRequest={loopRequest?.taskId === selected ? loopRequest : null} taskId={selected || null} connected={connected} />
           <WorkHandoff taskId={work?.id ?? null} connected={connected} />
           <div id="detail">{work && <>
             <h3>Saved work</h3><p>Work ID: {work.id}</p><p className="badge">{workStatus(work)}</p><pre>{work.input}</pre>

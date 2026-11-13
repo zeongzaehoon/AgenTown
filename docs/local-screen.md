@@ -2959,3 +2959,31 @@ Deterministic checks for this slice (with frontend dependencies installed):
 `cd frontend && npx tsc --noEmit && npx vitest run src/LoopDevices.test.tsx src/WorkLoop.test.tsx src/OverviewLoops.test.tsx src/WorkInspection.test.tsx`.
 Supervisor browser/change-based verification is pending for C80-T1; live provider
 calls are skipped under the user’s live-test policy, not counted as passed.
+
+
+### Open a Hook device’s assigned work
+
+Launch `agentown-web --database PATH` using the database containing saved employees,
+assigned work, a Skill and employee `run_completed` or `run_failed` Hooks. In Company
+ overview → Hook trigger devices, choose an explicit saved work item by Task ID
+under the desired Hook ID (names can repeat). The original Configuration button
+remains available, and work/configuration drafts are retained. Team and task-created
+Hooks are configuration only; employees without loaded assignments show an empty
+explanation. Refresh saved history if assignments are missing.
+
+Opening clears history filters and focuses “Requested Hook inspection”. It sends
+no inspection, discovery, preview or execution request. Choose “Inspect through
+local MCP”, then “Find Hooks through local MCP”. Only the exact requested enabled
+employee follow-up Hook is selected, after checking its target against the inspected
+assignment. Missing, disabled, retargeted or unsupported records explain the problem
+without selecting another Hook. Choose “Preview local Hook” explicitly; the server
+validates current state. Review the exact preview and give fresh checkbox consent
+before executing once. Navigation (including the same Task again), disconnection
+and reinspection discard obsolete inspection, previews and consent; late replies
+cannot restore them. Disconnection does not establish cancellation of dispatched work.
+
+Deterministic interaction coverage: `cd frontend && npm test -- HookDevices.test.tsx
+WorkHook.test.tsx`. These fixtures cover duplicate identities, keyboard focus,
+empty/unsupported devices, exact selection, stale replies, draft retention and
+navigation without mutation. Supervisor browser verification remains pending for
+this change. Live provider calls are skipped under the current user policy.

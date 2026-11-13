@@ -1,10 +1,11 @@
+import type { HookNavigation } from './HookDevices';
 import { useLayoutEffect, useRef, useState } from 'react';
 import type { LocalHookPreview } from './work-hook-api';
 import { executeLocalHook, listLocalHooks, previewLocalHook, type LocalHook } from './work-hook-api';
 import type { WorkExecutionResponse } from './work-execution-api';
 
 /** Lifetime is one explicit local inspection; no automatic discovery or replay. */
-export function WorkHook({taskId, onInspect}: {taskId: string; onInspect: () => void}) {
+export function WorkHook({taskId, onInspect, navigation, assignees}: {taskId: string; onInspect: () => void; navigation?: HookNavigation | null; assignees?: string[]}) {
   const [hooks, setHooks] = useState<LocalHook[]>([]);
   const [selected, setSelected] = useState('');
   const [preview, setPreview] = useState<LocalHookPreview | null>(null);
@@ -15,6 +16,9 @@ export function WorkHook({taskId, onInspect}: {taskId: string; onInspect: () => 
   const [result, setResult] = useState<WorkExecutionResponse | null>(null);
   const request = useRef<AbortController | null>(null);
   const previewRegion = useRef<HTMLElement>(null);
+  const selection = useRef<HTMLSelectElement>(null);
+  const [focused, setFocused] = useState(false);
+  useLayoutEffect(() => {if (focused && !busy) selection.current?.focus();}, [focused, busy]);
   const recovery = useRef<HTMLButtonElement>(null);
   useLayoutEffect(() => () => {request.current?.abort(); request.current = null;}, []);
   useLayoutEffect(() => {if (preview) previewRegion.current?.focus();}, [preview]);
@@ -32,9 +36,18 @@ export function WorkHook({taskId, onInspect}: {taskId: string; onInspect: () => 
     try {
       if (operation === 'list') {
         const records = await listLocalHooks(active.signal);
-        if (request.current === active) {setHooks(records); setSelected(''); setMessage(records.some(s => s.enabled && s.target_kind === 'agent' && s.event !== 'task_created') ? 'Choose an enabled Hook.' : 'No enabled employee follow-up Hooks available. Configure a run-completed or run-failed employee Hook and Skill, then inspect again.');}
+        if (request.current === active) {
+          setHooks(records); setSelected(''); setFocused(false);
+          if (navigation) {
+            const found = records.find(h => h.id === navigation.hookId);
+            const explanation = !found ? 'missing' : !found.enabled ? 'disabled' : found.target_kind !== 'agent' || !['run_completed', 'run_failed'].includes(found.event) ? 'unsupported' : found.target_id !== navigation.employeeId || !assignees?.includes(found.target_id) ? 'retargeted or no longer assigned to this work' : '';
+            if (explanation) setMessage(`Requested Hook is ${explanation}. Nothing was previewed or executed. No other Hook was selected.`);
+            else {setSelected(found!.id); setFocused(true); setMessage('Requested Hook selected. Preview explicitly to validate current server state.');}
+          } else setMessage(records.some(s => s.enabled && s.target_kind === 'agent' && s.event !== 'task_created') ? 'Choose an enabled Hook.' : 'No enabled employee follow-up Hooks available. Configure a run-completed or run-failed employee Hook and Skill, then inspect again.');
+        }
       } else if (operation === 'preview') {
         const value = await previewLocalHook(taskId, selected, active.signal);
+        if (navigation && (value.hook_id !== navigation.hookId || value.agent_id !== navigation.employeeId || !assignees?.includes(value.agent_id))) throw new Error('Requested Hook target changed');
         if (request.current === active) setPreview(value);
       } else {
         const value = await executeLocalHook(saved!, active.signal);
@@ -50,8 +63,8 @@ export function WorkHook({taskId, onInspect}: {taskId: string; onInspect: () => 
     <h4>Apply a Hook through local MCP</h4>
     <p>Discovery and preview do not execute work. Enabled means configuration enabled; Hooks never dispatch automatically. Execution uses the server’s provider and model and may incur cost.</p>
     <button type="button" disabled={busy || consumed} onClick={() => void perform('list')}>Find Hooks through local MCP</button>
-    <label>Local enabled Hook <select value={selected} disabled={consumed} onChange={event => {invalidate(); setSelected(event.target.value);}}>
-      <option value="">Choose a Hook</option>{hooks.filter(s => s.enabled && s.target_kind === 'agent' && s.event !== 'task_created').map(s => <option key={s.id} value={s.id}>{s.name} · {s.id}</option>)}
+    <label>Local enabled Hook <select ref={selection} value={selected} disabled={consumed} onChange={event => {invalidate(); setSelected(event.target.value);}}>
+      <option value="">Choose a Hook</option>{hooks.filter(s => (!navigation || s.id === selected) && s.enabled && s.target_kind === 'agent' && s.event !== 'task_created').map(s => <option key={s.id} value={s.id}>{s.name} · {s.id}</option>)}
     </select></label>
     <button type="button" disabled={!selected || consumed} onClick={() => {invalidate(); void perform('preview');}}>Preview local Hook</button>
     <p role="status" aria-live="polite">{busy ? 'Waiting for local MCP…' : message}</p>

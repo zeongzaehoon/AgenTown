@@ -1,4 +1,5 @@
 import { LoopDevices } from './LoopDevices';
+import type { HookNavigation } from './HookDevices';
 import { HookDevices } from './HookDevices';
 import { workstationClients, type ConnectionClientId } from './Connections';
 import { TeamRooms } from './TeamRooms';
@@ -12,7 +13,8 @@ const categories: {key: WorkOutcome; label: string}[] = [
   {key: 'other', label: 'Other recorded work'},
 ];
 
-export function CompanyOverview({workspace, connected, error, onOpenWork, selectedEmployee = '', onSelectEmployee, onOpenHook, onOpenLoop, onOpenSkill, onOpenClient, onOpenTeam, onSelectTeamMember, onOpenSession}: {
+export function CompanyOverview({workspace, connected, error, onOpenWork, selectedEmployee = '', onSelectEmployee, onOpenHook, onOpenLoop, onOpenSkill, onOpenClient, onOpenTeam, onSelectTeamMember, onOpenSession, onOpenHookWork}: {
+  onOpenHookWork?: (request: HookNavigation) => void;
   onOpenSession?: (request: LoopNavigation) => void;
   onSelectTeamMember?: (id: string) => void;
   onOpenTeam?: (id: string) => void;
@@ -52,7 +54,7 @@ export function CompanyOverview({workspace, connected, error, onOpenWork, select
     </section>
     <TeamRooms onOpenWork={onOpenWork} workspace={workspace} connected={connected} selectedEmployee={selectedEmployee} onSelectEmployee={onSelectTeamMember ?? onSelectEmployee} onOpenTeam={onOpenTeam} />
     <SkillBooks onOpenSkill={onOpenSkill} />
-    <HookDevices onOpenHook={onOpenHook} />
+    <HookDevices onOpenHook={onOpenHook} onOpenWork={onOpenHookWork} workspace={workspace} connected={connected} />
     <LoopDevices onOpenLoop={onOpenLoop} onOpenPolicy={onOpenSession} workspace={workspace} connected={connected} />
     <OverviewLoops onOpenSession={onOpenSession} workspace={workspace} onOpenWork={onOpenWork} />
     {workspace && <>

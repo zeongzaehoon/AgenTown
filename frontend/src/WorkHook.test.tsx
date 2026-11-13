@@ -76,7 +76,7 @@ test('rejects identity, count and provenance mismatches', () => {
   expect(() => parseHookResponse(r, task, 'execute', hook, preview)).toThrow();
 });
 
-test.each(['selection', 'disconnect', 'inspection'])('%s invalidates Hook preview and consent in selected-work inspection', async reason => {
+test.each(['selection', 'disconnect', 'inspection', 'navigation'])('%s invalidates Hook preview and consent in selected-work inspection', async reason => {
   const inspected = {schema_version: 1, requested_task_id: task, status: 'success', code: 'inspected', message: 'Inspected', recovery: 'Inspect again', inspection: {
     task: {id: task, title: 'Saved work', status: 'pending', assignees: [hook]}, attempts: [],
     readiness: {schema_version: 1, task_id: task, input: 'Saved work', employee_ids: [hook], expected_runs: 0, active_attempt: false, eligibility: 'eligible', resubmission_consent_required: false},
@@ -89,6 +89,7 @@ test.each(['selection', 'disconnect', 'inspection'])('%s invalidates Hook previe
   await discover(); await userEvent.click(previewButton());
   const consent = await screen.findByLabelText(/I authorize one execution of this exact Hook preview/); await userEvent.click(consent);
   if (reason === 'selection') view.rerender(<WorkInspection taskId={hook} />);
+  else if (reason === 'navigation') view.rerender(<WorkInspection taskId={task} hookRequest={{taskId: task, hookId: hook, employeeId: task}} />);
   else if (reason === 'disconnect') view.rerender(<WorkInspection taskId={task} connected={false} />);
   else await userEvent.click(screen.getByRole('button', {name: 'Inspect through local MCP'}));
   expect(screen.queryByLabelText(/I authorize one execution of this exact Hook preview/)).toBeNull();
@@ -119,4 +120,34 @@ test('late execution receipt is discarded; reinspection requires discovery, fres
   expect((screen.getByRole('button', {name: 'Execute local Hook once'}) as HTMLButtonElement).disabled).toBe(true);
   expect(screen.getByText(/Preview ID: fresh/)).toBeTruthy();
   expect(fetcher.mock.calls.filter(call => String(call[0]).endsWith('/hooks/execute'))).toHaveLength(1);
+});
+
+test.each(['eligible', 'missing', 'disabled', 'retargeted', 'unsupported'])('requested Hook %s never substitutes a duplicate name', async state => {
+  const record = {id: hook, name: 'Summarize', enabled: state !== 'disabled', skill_id: hook, target_id: state === 'retargeted' ? hook : task, target_kind: 'agent', event: state === 'unsupported' ? 'task_created' : 'run_completed'};
+  const fetcher = vi.fn().mockResolvedValue(reply(envelope({schema_version: 1, hooks: [...(state === 'missing' ? [] : [record]), {...record, id: task, enabled: true, event: 'run_completed'}]}, 'hooks_discovered', null)));
+  vi.stubGlobal('fetch', fetcher);
+  render(<WorkHook taskId={task} assignees={[task]} navigation={{taskId: task, hookId: hook, employeeId: task}} onInspect={vi.fn()} />);
+  expect(fetcher).not.toHaveBeenCalled();
+  await userEvent.click(screen.getByRole('button', {name: 'Find Hooks through local MCP'}));
+  const select = screen.getByRole('combobox', {name: 'Local enabled Hook'}) as HTMLSelectElement;
+  await waitFor(() => expect(select.value).toBe(state === 'eligible' ? hook : ''));
+  if (state === 'eligible') await waitFor(() => expect(document.activeElement).toBe(select));
+  else expect(await screen.findByText(/Requested Hook is/)).toBeTruthy();
+  expect(screen.queryByRole('option', {name: `Summarize · ${task}`})).toBeNull();
+  expect(fetcher).toHaveBeenCalledTimes(1);
+});
+
+test('same-Task navigation invalidates pending inspection and discards its late reply', async () => {
+  let finish!: (value: Response) => void;
+  const fetcher = vi.fn(() => new Promise<Response>(resolve => {finish = resolve;}));
+  vi.stubGlobal('fetch', fetcher);
+  const navigation = {taskId: task, hookId: hook, employeeId: task};
+  const view = render(<WorkInspection taskId={task} hookRequest={navigation} />);
+  expect(document.activeElement).toBe(screen.getByRole('region', {name: 'Requested Hook inspection'}));
+  await userEvent.click(screen.getByRole('button', {name: 'Inspect through local MCP'}));
+  view.rerender(<WorkInspection taskId={task} hookRequest={{...navigation}} />);
+  await act(async () => {finish(reply({}));});
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(screen.queryByRole('button', {name: 'Find Hooks through local MCP'})).toBeNull();
+  expect(fetcher).toHaveBeenCalledTimes(1);
 });
