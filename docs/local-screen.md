@@ -2533,6 +2533,9 @@ emergency-stop checks above still apply.
 `LoopExecution.test.tsx` deterministically triggers the product polling callback
 for focused start, focused cancel and outside-focus cases, retaining the exact
 Loop-region focus guarantee and checking fresh preview plus explicit consent.
+Focus is tracked while the preview is mounted, so invalidation can restore it
+even after the removed control has yielded focus to the page body. Moving focus
+outside the preview before invalidation leaves that outside control focused.
 This invocation did not launch the product or run browser checks. Frontend
 dependencies are absent in the isolated snapshot; focused tests, frontend
 tests/build and ordinary Python checks remain pending supervisor verification.
