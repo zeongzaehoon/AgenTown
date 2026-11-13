@@ -144,23 +144,55 @@ test('missing or unknown availability fails closed even when can_control is true
   expect(f.props.submit).not.toHaveBeenCalled();
 });
 
-test('authority loss invalidates focused preview and recovery requires fresh consent', async () => {
-  const f = setup();
-  let owner = true;
-  const original = globalThis.fetch;
-  vi.stubGlobal('fetch', async (path: string, options: RequestInit) => path === '/api/loops/v1'
-    ? new Response(JSON.stringify({...f.data, control: owner
-      ? {state: 'available', can_control: true, message: ''}
-      : {state: 'competing_owner', can_control: false, message: ''}})) : original(path, options));
-  render(<LoopExecution {...f.props} />);
-  await inspect();
-  owner = false;
-  await waitFor(() => expect(screen.queryByRole('button', {name: 'Authorize and start bounded Loop'})).toBeNull(), {timeout: 2000});
-  expect(document.activeElement).toBe(screen.getByRole('region', {name: 'Run a bounded Loop'}));
-  owner = true;
-  await waitFor(() => expect((screen.getByRole('button', {name: 'Preview Loop with saved work'}) as HTMLButtonElement).disabled).toBe(false), {timeout: 2000});
-  expect(screen.queryByRole('button', {name: 'Authorize and start bounded Loop'})).toBeNull();
-  expect(f.props.submit).not.toHaveBeenCalled();
+test.each(['start', 'cancel', 'outside'])('authority loss with focus on %s invalidates consent and recovery requires fresh consent', async focus => {
+  let poll = () => {};
+  const realInterval = globalThis.setInterval;
+  const interval = vi.spyOn(globalThis, 'setInterval').mockImplementation((callback, delay, ...args) => {
+    if (delay === 800) { poll = callback as () => void; return 1 as unknown as ReturnType<typeof setInterval>; }
+    return realInterval(callback, delay, ...args);
+  });
+  try {
+    const f = setup();
+    f.data.sessions = [{...session, state: 'stopped'}];
+    let owner = true;
+    const original = globalThis.fetch;
+    vi.stubGlobal('fetch', async (path: string, options: RequestInit) => path === '/api/loops/v1'
+      ? new Response(JSON.stringify({...f.data, control: owner
+        ? {state: 'available', can_control: true, message: ''}
+        : {state: 'competing_owner', can_control: false, message: ''}})) : original(path, options));
+    const view = render(<><button>Outside Loop</button><LoopExecution {...f.props} draft="Keep my draft" /></>);
+    const start = await inspect();
+    const outside = screen.getByRole('button', {name: 'Outside Loop'});
+    const target = focus === 'start' ? start : focus === 'cancel'
+      ? screen.getByRole('button', {name: 'Cancel Loop preview'}) : outside;
+    target.focus();
+    expect(document.activeElement).toBe(target);
+    owner = false;
+    await act(async () => poll());
+    expect(screen.queryByRole('region', {name: 'Loop execution preview'})).toBeNull();
+    expect(document.activeElement).toBe(focus === 'outside' ? outside : screen.getByRole('region', {name: 'Run a bounded Loop'}));
+    expect((screen.getByLabelText('Saved Loop') as HTMLSelectElement).value).toBe('l');
+    expect(screen.getByRole('region', {name: 'Loop session session'})).toBeTruthy();
+    expect((screen.getByRole('button', {name: 'Preview Loop with saved work'}) as HTMLButtonElement).disabled).toBe(true);
+    const recoveryFocus = document.activeElement;
+    owner = true;
+    await act(async () => poll());
+    expect(document.activeElement).toBe(recoveryFocus);
+    expect((screen.getByRole('button', {name: 'Preview Loop with saved work'}) as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.queryByRole('button', {name: 'Authorize and start bounded Loop'})).toBeNull();
+    expect(f.props.submit).not.toHaveBeenCalled();
+    // An unchanged draft survives recovery; rerendering it must not invalidate
+    // the newly requested preview. Recovery itself never fetches a preview.
+    expect(f.fetcher.mock.calls.filter(([path]) => path.endsWith('/preview'))).toHaveLength(1);
+    const freshStart = await inspect();
+    view.rerender(<><button>Outside Loop</button><LoopExecution {...f.props} draft="Keep my draft" /></>);
+    expect(screen.getByRole('button', {name: 'Authorize and start bounded Loop'})).toBe(freshStart);
+    expect(f.fetcher.mock.calls.filter(([path]) => path.endsWith('/preview'))).toHaveLength(2);
+    expect(f.props.submit).not.toHaveBeenCalled();
+    await userEvent.setup().keyboard('{Enter}');
+    expect(f.props.submit).toHaveBeenCalledTimes(1);
+    expect(f.props.submit).toHaveBeenCalledWith('/api/loops/v1/start', {preview_id: 'p', expected_runs: 0}, false);
+  } finally { interval.mockRestore(); }
 });
 
 test.each(['policy', 'preview', 'attempt', 'session', 'null'])('malformed %s responses preserve selection and drafts, invalidate focused consent and recover without replay', async kind => {

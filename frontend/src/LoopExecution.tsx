@@ -1,5 +1,5 @@
 import { canControl, controlText, sourceText, type LoopControl } from './loop-control';
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ApiError, api, type Work, type Workspace } from './api';
 import { configurationRequest, savedLoopPolicies, type LoopRecord } from './configuration-api';
 
@@ -50,6 +50,13 @@ export function LoopExecution({work, workspace, connected, draft, disabled, avai
   const inspectButton = useRef<HTMLButtonElement>(null);
   const startButton = useRef<HTMLButtonElement>(null);
   const focused = useRef(false);
+  const previewRegion = useRef<HTMLElement | null>(null);
+  const capturePreview = useCallback((node: HTMLElement | null) => {
+    // Ref detachment runs before removal: afterward the browser has already
+    // moved focus to body and blur events cannot identify the removed control.
+    if (!node) focused.current = previewRegion.current?.contains(document.activeElement) ?? false;
+    previewRegion.current = node;
+  }, []);
   const active = inspection?.sessions.some(s => s.preview.task_id === work.id && s.state === 'active') ?? false;
   const snapshot = JSON.stringify([work, workspace.configuration, workspace.provider, workspace.model, draft, connected, selected, policies, available, control, disabled, active]);
   const current = useRef(snapshot);
@@ -143,7 +150,7 @@ export function LoopExecution({work, workspace, connected, draft, disabled, avai
     <p role="status" aria-label="Loop request outcome">{message}</p>
     <p role="status">{controlText(control)}</p>
     <p>Inspection and availability never claim ownership or resume work. Availability is advisory; the server checks ownership again for every action.</p>
-    {preview && valid && <section aria-label="Loop execution preview" onFocusCapture={() => { focused.current = true; }} onBlurCapture={e => { if (!e.currentTarget.contains(e.relatedTarget)) focused.current = false; }} onKeyDown={e => { if (e.key === 'Escape') { e.preventDefault(); setPreview(null); focusBack(); } }}>
+    {preview && valid && <section ref={capturePreview} aria-label="Loop execution preview" onKeyDown={e => { if (e.key === 'Escape') { e.preventDefault(); setPreview(null); focusBack(); } }}>
       <p>Employee: {workspace.employees.find(e => e.id === preview.value.agent_id)?.name} · {preview.value.agent_id}</p>
       <pre>{preview.value.input}</pre>
       <p>Maximum attempts: {preview.value.max_iterations} · Interval: {preview.value.interval_seconds} seconds. Earlier attempts are preserved. Preview does not call a provider.</p>

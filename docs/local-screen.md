@@ -2507,3 +2507,33 @@ This implementation invocation did not execute the launch or browser exercise.
 Frontend dependencies were unavailable in the isolated snapshot; focused checks
 and the supervisor browser gate are pending. Live provider calls are skipped,
 not passed. Earlier receipt-only instructions are superseded by this section.
+
+### Loop consent focus recovery (C65-T1)
+
+```sh
+uv run --directory python --locked agentown-web --database /tmp/agentown-loop-recovery.sqlite3 --port 8765
+```
+
+Open http://127.0.0.1:8765 and open saved assigned work with an enabled Loop
+(or create an employee, save assigned work, and configure that Loop first).
+Keep an unsaved work draft. Preview the selected Loop and leave keyboard focus
+on **Authorize and start bounded Loop** or **Cancel Loop preview**. Using the
+existing deterministic inspection fixture or network interception, return
+`control: {state: "competing_owner", can_control: false, message: ""}` on the next
+`GET /api/loops/v1`, preserving the existing sessions and attempts.
+
+Consent disappears and focus reaches the labeled **Run a bounded Loop** region
+when preview is unavailable. Repeat with focus on another control outside the
+preview: its focus must remain unchanged. Return the original available authority
+on a fresh inspection. Selection, draft and readable history remain; recovery
+does not move focus or replay start/stop. A new start requires a new preview and
+explicit authorization. The C64 persisted-confirmation, explicit recovery and
+emergency-stop checks above still apply.
+
+`LoopExecution.test.tsx` deterministically triggers the product polling callback
+for focused start, focused cancel and outside-focus cases, retaining the exact
+Loop-region focus guarantee and checking fresh preview plus explicit consent.
+This invocation did not launch the product or run browser checks. Frontend
+dependencies are absent in the isolated snapshot; focused tests, frontend
+tests/build and ordinary Python checks remain pending supervisor verification.
+Live provider calls are skipped, not passed.
