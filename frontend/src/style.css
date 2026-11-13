@@ -56,3 +56,6 @@
 .connection-steps > li { padding: 0 0 1.25rem .5rem; min-width: 0; }
 .connection-steps h4 { font-size: 1.1rem; margin-bottom: .5rem; }
 .connection-guidance { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.skill-work-chooser { display: grid; gap: 8px; margin-top: 12px; min-width: 0; }
+.skill-work-chooser select { width: 100%; min-width: 0; }

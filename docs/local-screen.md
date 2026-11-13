@@ -2992,11 +2992,16 @@ this change. Live provider calls are skipped under the current user policy.
 
 Launch `agentown-web --database PATH`, open the printed local URL, then use
 Company overview → Skill library. The existing book button opens Configuration.
-Each book also lists loaded saved work with exact Task and Skill IDs, including
-when names are duplicated. If history is empty, save work or refresh saved history.
+Each book has a labeled saved-work chooser and one **Open** action. Options
+include exact Task IDs; labels include exact Skill IDs, even with duplicate names
+or work text. The compact native chooser supports standard keyboard navigation. If history is empty, save work or refresh saved history.
 Unavailable, refreshing or stale book snapshots disable work navigation.
 
-Choose a work button with the keyboard or pointer. The request clears history
+Choose saved work, then Tab to **Open** and press Enter or Space (or click it).
+Choosing alone makes no request, grants no consent and leaves inspection unchanged.
+Valid choices survive history polling and reordering. If chosen work disappears,
+the chooser clears and requires a new explicit choice, even if that Task returns.
+Disconnected history explains why Open is unavailable. The Open action clears history
 filters, retains unsaved drafts and focuses Requested Skill inspection. Navigation
 makes no MCP request and grants no consent. Choose **Inspect through local MCP**,
 then **Find Skills through local MCP**. Only the requested enabled Skill ID is
@@ -3008,8 +3013,7 @@ invalidates inspection, previews and consent; late replies cannot restore them.
 Inspect and discover again explicitly after recovery.
 
 Deterministic interaction coverage lives in `SkillBooks.test.tsx` and
-`WorkSkill.test.tsx`. The full supervisor profile also exercised 38 Chromium
-steps in two browser tests for this snapshot. Real provider calls are skipped
+`WorkSkill.test.tsx`. Browser validation for the saved-work chooser is pending the supervisor gate. Real provider calls are skipped
 under the live-test policy, never passed.
 
 ### Inspect retained local MCP Loops from Company overview
