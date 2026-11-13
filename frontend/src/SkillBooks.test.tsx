@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, expect, test, vi } from 'vitest';
 import type { Workspace } from './api';
@@ -173,4 +173,59 @@ test('empty, disconnected, refreshing and stale snapshots explain unavailable Op
   expect(await screen.findByText(/Skill books are stale. Refresh Skill books before opening/)).toBeTruthy();
   expect(chooser.value).toBe('w'); expect(action.disabled).toBe(true);
   fireEvent.click(action); expect(open).not.toHaveBeenCalled();
+});
+
+
+test('recorded Skill disclosures match persisted IDs, preserve context and focus through refresh, and send no requests', async () => {
+  let configured = skills;
+  const fetcher = vi.fn(async () => new Response(JSON.stringify({skills: configured})));
+  vi.stubGlobal('fetch', fetcher);
+  const saved = {run_id: 'direct', preview_id: 'saved-preview', skill_id: 'one', skill_name: 'Original manual', instructions: 'Original instructions', input: 'Original effective input', admitted_at: 1};
+  const direct = {id: 'direct', state: 'active' as const, outcome: null, participants: [], skill: saved};
+  const hook = {...saved, run_id: 'hook', hook_id: 'h', hook_name: 'Follow up', event: 'run_completed', agent_id: 'a', source_run_id: 'source', source_outcome: 'success'};
+  const workspace: Workspace = {employees: [], configuration: null, provider: 'test', model: null, work: [
+    {id: 'task', input: 'Task input', status: 'pending', assignees: [], attempts: [direct,
+      {id: 'hook', state: 'finished', outcome: 'failure', participants: [], hook, error: 'timeout'},
+      {id: 'unrelated', state: 'finished', outcome: 'success', participants: [], skill: {...saved, skill_id: 'elsewhere', skill_name: 'Manual'}, output: 'Unrelated output'}]},
+    {id: 'other-task', input: 'Other task', status: 'pending', assignees: [], attempts: [
+      {...direct, id: 'both', skill: {...saved, run_id: 'both'}, hook: {...hook, run_id: 'both'}}]},
+  ]};
+  const view = render(<SkillBooks workspace={workspace} />);
+  const button = await screen.findByRole('button', {name: 'Recorded use for Skill: Manual · Skill ID: one'});
+  const user = userEvent.setup();
+  const before = fetcher.mock.calls.length;
+  button.focus(); await user.keyboard('{Enter}');
+  expect(button.getAttribute('aria-expanded')).toBe('true');
+  expect(document.activeElement).toBe(button);
+  expect(screen.getAllByRole('region', {name: /Recorded Skill use/})).toHaveLength(3);
+  const directRegion = screen.getByRole('region', {name: 'Recorded Skill use · Task task · Run direct'});
+  expect(within(directRegion).getByText('Original instructions')).toBeTruthy();
+  expect(within(directRegion).getByText('Original effective input')).toBeTruthy();
+  expect(within(directRegion).getByText(/Preview ID: saved-preview/)).toBeTruthy();
+  expect(within(directRegion).getByText('Quality unverified')).toBeTruthy();
+  expect(screen.getAllByText('Hook-backed Skill use')).toHaveLength(2);
+  expect(screen.queryByText('Unrelated output')).toBeNull();
+  expect(screen.queryByRole('region', {name: /Run unrelated/})).toBeNull();
+  await user.keyboard(' '); expect(button.getAttribute('aria-expanded')).toBe('false');
+  await user.keyboard(' '); expect(button.getAttribute('aria-expanded')).toBe('true');
+  expect(fetcher).toHaveBeenCalledTimes(before);
+  const refreshed: Workspace = {...workspace, work: workspace.work.map(work => ({...work, attempts: work.attempts.map(attempt => attempt.id === 'direct' ? {...attempt, state: 'finished' as const, outcome: 'success', output: 'Fresh saved output'} : attempt)}))};
+  view.rerender(<SkillBooks workspace={refreshed} />);
+  expect(within(directRegion).getByText('Fresh saved output')).toBeTruthy();
+  expect(document.activeElement).toBe(button);
+  expect(button.getAttribute('aria-expanded')).toBe('true');
+  configured = [{...skills[0], name: 'Edited manual', instructions: 'Rewritten configuration'}, skills[1]];
+  fireEvent.click(screen.getByRole('button', {name: 'Refresh Skill books'}));
+  await screen.findByRole('button', {name: 'Recorded use for Skill: Edited manual · Skill ID: one'});
+  expect(document.activeElement).toBe(button);
+  expect(within(directRegion).getByText('Original instructions')).toBeTruthy();
+  expect(within(directRegion).queryByText('Rewritten configuration')).toBeNull();
+  view.rerender(<SkillBooks workspace={refreshed} connected={false} />);
+  expect(screen.getAllByText(/Disconnected — stale saved-work snapshot/).length).toBeGreaterThan(0);
+  expect(within(directRegion).getByText('Fresh saved output')).toBeTruthy();
+  view.rerender(<SkillBooks workspace={{...workspace, work: []}} />);
+  expect(screen.getAllByText(/No matching records in loaded history/).length).toBeGreaterThan(0);
+  view.rerender(<SkillBooks workspace={null} connected={false} />);
+  expect(screen.getAllByText(/Workspace unavailable. Refresh connection/).length).toBeGreaterThan(0);
+  expect(fetcher).toHaveBeenCalledTimes(before + 1);
 });

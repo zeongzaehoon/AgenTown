@@ -3358,3 +3358,41 @@ frontend tests, including 44 OverviewLoops tests, the production build, 508
 Python tests, Rust and desktop checks, and two Chromium browser checks; 2 Python
 tests were skipped. Live provider calls are skipped, not passed, under the user
 live-test policy.
+
+
+### Inspect recorded Skill use in Company overview (C94-T1)
+
+Launch `agentown-web --database /absolute/path/product.sqlite3 --port 8765`
+and open <http://127.0.0.1:8765> → Company overview → **Skill library**.
+Prerequisite: existing Skills and saved Workspace attempt provenance in the product
+database. No credentials or backend expansion are required for inspection.
+
+Focus **Recorded use for Skill: NAME · Skill ID: ID** and press Enter or Space.
+The local disclosure shows matching attempts across loaded saved Tasks using only
+persisted direct Skill or Hook Skill IDs. Names never establish a match. Each
+matching attempt appears once, including when both provenance forms match.
+Inspect Task/Run identity, saved Skill name, instructions, effective input and
+preview identity, execution state, recorded output/error and **Quality unverified**.
+Current configuration edits do not rewrite this saved context. Existing book
+navigation and saved-work selection remain available independently.
+
+Keep the disclosure expanded and focused while saved history refreshes. Updates
+to the same Run appear in place, preserving the button and its focus. **Refresh
+Skill books** refreshes configuration only; use the existing connection/history
+refresh to load newer attempts. Opening or closing recorded use sends no request,
+grants no execution consent and starts no work. No matches means no matching
+records in the loaded history, not proof that this Skill has never been used.
+Unavailable Workspace data is distinct from an empty loaded history. When the
+connection fails, retained records are labeled a stale disconnected snapshot;
+they do not establish current execution state.
+
+Deterministic interaction coverage is in `frontend/src/SkillBooks.test.tsx`:
+`cd frontend && npx vitest run src/SkillBooks.test.tsx` (with dependencies installed).
+Coverage includes direct/Hook ID matching, unrelated exclusion, duplicate match
+suppression, configuration refresh preserving saved context, Enter/Space,
+request-free disclosure, same-Run refresh, retained focus, unavailable Workspace,
+empty history and disconnected retained records. Supervisor verification passed
+1,062 frontend tests, including 7 SkillBooks tests, TypeScript checks, the
+production build and 505 Python tests; 2 Python tests were skipped. The selected
+frontend profile deferred installed-browser and process-recovery gates. Live
+provider tests remain skipped, not passed.
