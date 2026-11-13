@@ -3280,3 +3280,49 @@ the production build, and 505 Python tests, with 2 Python tests skipped. The
 selected frontend profile deferred installed-browser and process-recovery gates;
 those passed in the recent C88 full profile. Live provider calls remain skipped,
 not passed.
+
+### Company overview local MCP attempt details (C92-T1)
+
+Launch `agentown-web --database /absolute/path/product.sqlite3 --port 8765`
+(or `uv run --directory python --locked agentown-web --database
+/absolute/path/product.sqlite3 --port 8765` from this checkout), then open
+<http://127.0.0.1:8765> → Company overview. The packaged desktop app provides
+the same Company overview surface. Prerequisite: the existing local MCP company
+inspection API and recorded sessions/attempts in the selected product database.
+Linked Tasks do not need to be present in the loaded workspace.
+
+1. Choose **Inspect company Loops through local MCP** explicitly. For each
+   recorded session, focus **Attempt details for local MCP Loop …** and press
+   Enter or Space to expand or collapse. Focus stays on the disclosure button.
+   Details can be inspected even when linked work is unavailable; opening work
+   is optional.
+2. Each expanded session shows only its matching attempts: ordinal, Run ID,
+   persisted execution state, output/error and **Quality unverified**. C91
+   execution wording applies: active means waiting for provider response,
+   finished success/failure describes execution only, and missing records or
+   missing state leave provider completion unknown. No recorded attempts also
+   leaves provider completion unknown.
+3. Choose **Inspect company Loops through local MCP** again to update persisted
+   records, including a state change under the same Run ID. Existing session
+   disclosures retain their expansion state. Reinspection does not move keyboard
+   focus from a retained disclosure. After inspection expires (2.4 seconds), or
+   inspection fails, expanded retained details visibly say **Stale attempt
+   details** until successful explicit reinspection.
+4. Expansion/collapse reads retained records only: it sends no request, grants
+   no consent and never previews, activates or stops work. Stop remains a
+   separate explicit control with its existing authority requirements.
+
+Deterministic fixtures need no credentials or local database. With frontend
+dependencies installed, run `cd frontend && npx tsc --noEmit && npx vitest run
+src/OverviewLoops.test.tsx src/WorkLoop.test.tsx`. Added OverviewLoops tests
+cover multiple sessions with absent linked work, keyboard expansion/collapse
+and stable focus, session separation, output/error and missing execution records,
+same-Run-ID refresh, failed/unavailable/expired inspection, retained stale
+records and request-free expansion. The keyboard test freezes polling intervals
+only, allowing keyboard interaction timeouts to settle; stale-state tests advance
+the full fake clock explicitly. Integration validation passed TypeScript checking
+and all 40 OverviewLoops tests using existing frontend dependencies. Supervisor
+verification passed 1,057 frontend tests, the production build, and 505 Python
+tests, with 2 Python tests skipped. The selected frontend profile deferred
+installed-browser and process-recovery gates; those passed in the recent C88 full
+profile. Live provider validation is skipped, not passed.

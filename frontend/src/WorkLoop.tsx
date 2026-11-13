@@ -6,7 +6,7 @@ import type { LoopAttempt, LoopInspection, LoopSession } from './loop-response';
 import type { LoopRecord } from './configuration-api';
 import { localLoop, type LocalLoopPreview, type LoopOperation } from './work-loop-api';
 
-function executionLabel(execution: LoopAttempt['execution']): string {
+export function executionLabel(execution: LoopAttempt['execution']): string {
   if (!execution) return 'Execution record unavailable · Provider completion unknown';
   if (execution.state === 'active') return 'Active · Waiting for provider response';
   if (execution.state === 'finished' || (!execution.state && execution.outcome)) {

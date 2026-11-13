@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, expect, test, vi } from 'vitest';
 import { OverviewLoops } from './OverviewLoops';
@@ -506,4 +506,104 @@ test('company Stop requires fresh explicit granted authority and an active sessi
   await act(async () => { fireEvent.click(inspect); });
   expect(stop.getAttribute('aria-disabled')).toBe('true'); fireEvent.click(stop);
   expect(paths.some(p => p.endsWith('/stop'))).toBe(false);
+});
+
+test('company attempt details are session-scoped, keyboard accessible and read retained data without requests', async () => {
+  // Freeze background polling while leaving user-event and React's async
+  // wrapper free to settle their timeout-based keyboard interactions.
+  vi.useFakeTimers({toFake: ['setInterval', 'clearInterval']});
+  const user = userEvent.setup();
+  const sessions = [companySession(1), {...companySession(2), state: 'stopped', admitted: 2}];
+  let attempts: LoopInspection['attempts'] = [
+    {session_id: uid(1), run_id: uid(101), ordinal: 1, execution: {state: 'active', output: null, error: null}},
+    {session_id: uid(2), run_id: uid(102), ordinal: 1, execution: {state: 'finished', outcome: 'failure', output: 'Partial fixture output', error: 'Fixture failure'}},
+    {session_id: uid(2), run_id: uid(103), ordinal: 2, execution: null},
+  ];
+  const requests: string[] = [];
+  const open = vi.fn();
+  vi.stubGlobal('fetch', vi.fn(async (path: string, init?: RequestInit) => {
+    requests.push(path);
+    if (path === '/api/loops/v1') return new Response(JSON.stringify({...initial(), sessions: [], attempts: []}));
+    expect(path).toBe('/api/connections/v1/loops/inspect-company');
+    expect(JSON.parse(init!.body as string)).toEqual({});
+    const reply = companyReply(sessions);
+    return new Response(JSON.stringify({...reply, data: {...reply.data, attempts}}));
+  }));
+  render(<OverviewLoops workspace={{...workspace, work: []}} onOpenWork={open} onOpenSession={open} />);
+  await act(async () => {});
+  const inspect = screen.getByRole('button', {name: 'Inspect company Loops through local MCP'});
+  await act(async () => { fireEvent.click(inspect); });
+  const first = screen.getByRole('button', {name: `Attempt details for local MCP Loop ${uid(1)}`});
+  const second = screen.getByRole('button', {name: `Attempt details for local MCP Loop ${uid(2)}`});
+  const beforeExpand = [...requests];
+  first.focus(); await user.keyboard('{Enter}');
+  expect(document.activeElement).toBe(first);
+  expect(first.getAttribute('aria-expanded')).toBe('true');
+  const firstDetails = screen.getByRole('region', {name: `Attempts for local MCP Loop ${uid(1)}`});
+  expect(first.getAttribute('aria-controls')).toBe(firstDetails.id);
+  expect(within(firstDetails).getByText(`Attempt 1 · Run ID: ${uid(101)} · Active · Waiting for provider response`)).toBeTruthy();
+  expect(within(firstDetails).queryByText(/Fixture failure/)).toBeNull();
+  second.focus(); await user.keyboard(' ');
+  expect(document.activeElement).toBe(second);
+  const secondDetails = screen.getByRole('region', {name: `Attempts for local MCP Loop ${uid(2)}`});
+  expect(within(secondDetails).getByText(`Attempt 1 · Run ID: ${uid(102)} · Finished · Provider execution failed`)).toBeTruthy();
+  expect(within(secondDetails).getByText('Partial fixture output')).toBeTruthy();
+  expect(within(secondDetails).getByText('Fixture failure')).toBeTruthy();
+  expect(within(secondDetails).getByText(`Attempt 2 · Run ID: ${uid(103)} · Execution record unavailable · Provider completion unknown`)).toBeTruthy();
+  expect(within(secondDetails).queryByText(/Waiting for provider response/)).toBeNull();
+  expect(within(firstDetails).getByText('Quality unverified')).toBeTruthy();
+  expect(within(secondDetails).getByText('Quality unverified')).toBeTruthy();
+  await user.keyboard(' ');
+  expect(document.activeElement).toBe(second);
+  expect(second.getAttribute('aria-expanded')).toBe('false');
+  expect(screen.queryByRole('region', {name: `Attempts for local MCP Loop ${uid(2)}`})).toBeNull();
+  expect(requests).toEqual(beforeExpand); // Fake clock isolates overview background polling.
+  expect(open).not.toHaveBeenCalled();
+  expect(screen.queryByRole('checkbox', {name: /consent/i})).toBeNull();
+
+  attempts = [{...attempts[0], execution: {state: 'finished', outcome: 'reported_success', output: 'Refreshed fixture result', error: null}}, ...attempts.slice(1)];
+  // Reinspection leaves an already-focused disclosure mounted and expanded.
+  first.focus();
+  await act(async () => {fireEvent.click(inspect);});
+  expect(document.activeElement).toBe(first);
+  expect(first.getAttribute('aria-expanded')).toBe('true');
+  expect(within(firstDetails).getByText(`Attempt 1 · Run ID: ${uid(101)} · Finished · Provider execution succeeded`)).toBeTruthy();
+  expect(within(firstDetails).getByText('Refreshed fixture result')).toBeTruthy();
+  expect(within(firstDetails).getByText('Quality unverified')).toBeTruthy();
+  expect(requests).toEqual([...beforeExpand, '/api/connections/v1/loops/inspect-company']);
+});
+
+test.each(['expired', 'failed', 'unavailable'])('retained company attempt details visibly become stale after %s inspection', async reason => {
+  vi.useFakeTimers();
+  let failed = false;
+  const companyPaths: string[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (path: string) => {
+    if (path === '/api/loops/v1') return new Response(JSON.stringify({...initial(), sessions: [], attempts: []}));
+    companyPaths.push(path);
+    expect(path).toBe('/api/connections/v1/loops/inspect-company');
+    if (failed && reason === 'failed') throw new Error('offline');
+    if (failed && reason === 'unavailable') return new Response(JSON.stringify({schema_version: 1, scope: 'company', status: 'unavailable', code: 'owner_unavailable', recovery: 'Inspect again', data: null}));
+    const reply = companyReply([companySession(1)]);
+    return new Response(JSON.stringify({...reply, data: {...reply.data, attempts: [{session_id: uid(1), run_id: uid(101), ordinal: 1, execution: {output: 'Retained fixture output', error: null}}]}}));
+  }));
+  render(<OverviewLoops workspace={{...workspace, work: []}} onOpenWork={vi.fn()} />);
+  const inspect = screen.getByRole('button', {name: 'Inspect company Loops through local MCP'});
+  await act(async () => {fireEvent.click(inspect);});
+  const toggle = screen.getByRole('button', {name: `Attempt details for local MCP Loop ${uid(1)}`});
+  fireEvent.click(toggle); toggle.focus();
+  if (reason === 'expired') await act(async () => {await vi.advanceTimersByTimeAsync(2400);});
+  else {failed = true; await act(async () => {fireEvent.click(inspect);});}
+  const details = screen.getByRole('region', {name: `Attempts for local MCP Loop ${uid(1)}`});
+  expect(within(details).getByText(/Stale attempt details/)).toBeTruthy();
+  expect(within(details).getByText('Retained fixture output')).toBeTruthy();
+  expect(within(details).getByText(/Execution state: unavailable · Provider completion unknown/)).toBeTruthy();
+  expect(document.activeElement).toBe(toggle);
+  const beforeToggle = [...companyPaths];
+  fireEvent.click(toggle); fireEvent.click(toggle);
+  expect(companyPaths).toEqual(beforeToggle);
+  expect(within(screen.getByRole('region', {name: `Attempts for local MCP Loop ${uid(1)}`})).getByText(/Stale attempt details/)).toBeTruthy();
+  failed = false;
+  await act(async () => {fireEvent.click(inspect);});
+  expect(screen.queryByText(/Stale attempt details/)).toBeNull();
+  expect(toggle.getAttribute('aria-expanded')).toBe('true');
 });

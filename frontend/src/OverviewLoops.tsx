@@ -3,6 +3,7 @@ import { canControl, controlText, sourceText, type LoopControl } from './loop-co
 import { useEffect, useRef, useState } from 'react';
 import { ApiError, api, type Workspace } from './api';
 import { loopLabel } from './LoopExecution';
+import { executionLabel } from './WorkLoop';
 import { confirmedLoop, loopInspection, loopReceipt, type LoopInspection } from './loop-response';
 
 export type LoopNavigation = {taskId: string; sessionId: string; policyId?: never} | {taskId: string; policyId: string; sessionId?: never};
@@ -73,7 +74,7 @@ export function OverviewLoops({workspace, onOpenWork, onOpenSession}: {onOpenSes
     <p role="status" aria-label="Overview Loop authority">{controlText(control)}</p>
     <p role="status" aria-label="Overview Loop stop outcome">{message}</p>
     <button type="button" aria-disabled={busy} onClick={() => { if (!lock.current) refresh.current(); }}>Inspect Loop sessions again</button>
-    <p>Loop admissions are separate from ordinary request counts. Open saved work to inspect attempts. Stop requires fresh inspection and granted local authority; otherwise stop through the owning MCP or web server. Stop prevents new admissions and requests local cancellation. Remote completion may remain unknown. Nothing starts or resumes here.</p>
+    <p>Loop admissions are separate from ordinary request counts. Expand local MCP session details here, or open saved work to inspect attempts. Stop requires fresh inspection and granted local authority; otherwise stop through the owning MCP or web server. Stop prevents new admissions and requests local cancellation. Remote completion may remain unknown. Nothing starts or resumes here.</p>
     {inspection && !inspection.sessions.length && <p>No recorded Loop sessions.</p>}
     {!!inspection?.sessions.length && <ul aria-label="Recorded Loop sessions">{inspection.sessions.map(session => {
       const work = workspace?.work.find(w => w.id === session.preview.task_id);
@@ -103,6 +104,7 @@ function CompanyMcpLoops({workspace, onOpenSession}: {workspace: Workspace | nul
   const [status, setStatus] = useState('Not inspected. Explicitly inspect recorded sessions through the retained local MCP owner.');
   const [busy, setBusy] = useState(false);
   const [fresh, setFresh] = useState(false);
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const stopLock = useRef(false);
   const inspectedAt = useRef(0);
   const active = useRef<AbortController | null>(null);
@@ -177,6 +179,22 @@ function CompanyMcpLoops({workspace, onOpenSession}: {workspace: Workspace | nul
             : !canControl(inspection.control) ? controlText(inspection.control) : 'Stop this exact session by explicit action. Ownership is checked again by the server.'}</p>
           <p>{sourceText(s.declared_source)}</p>
           <p>{loopLabel(s, inspection.attempts)} · Admitted: {s.admitted} / {s.preview.max_iterations}</p>
+          <button type="button" aria-expanded={expanded.has(s.session_id)} aria-controls={`mcp-attempts-${s.session_id}`}
+            onClick={() => setExpanded(previous => {
+              const next = new Set(previous);
+              if (next.has(s.session_id)) next.delete(s.session_id); else next.add(s.session_id);
+              return next;
+            })}>Attempt details for local MCP Loop {s.session_id}</button>
+          {expanded.has(s.session_id) && <section id={`mcp-attempts-${s.session_id}`} aria-label={`Attempts for local MCP Loop ${s.session_id}`}>
+            <p>{fresh ? 'Recorded attempts from the last explicit inspection.' : 'Stale attempt details. Inspect company Loops again for current persisted execution state.'}</p>
+            <p>Quality unverified</p>
+            {!inspection.attempts.some(a => a.session_id === s.session_id) && <p>No recorded attempts for this session. Provider completion unknown.</p>}
+            {inspection.attempts.filter(a => a.session_id === s.session_id).map(a => <article key={a.run_id}>
+              <p>Attempt {a.ordinal} · Run ID: {a.run_id} · {executionLabel(a.execution)}</p>
+              {a.execution?.output != null && <><p>Output</p><pre>{a.execution.output}</pre></>}
+              {a.execution?.error && <><p>Error</p><p>{a.execution.error}</p></>}
+            </article>)}
+          </section>}
           {work && onOpenSession ? <button type="button" disabled={busy} onClick={() => onOpenSession({taskId: s.preview.task_id, sessionId: s.session_id})}>Inspect local MCP session {s.session_id} in work</button>
             : <p>{workspace ? 'Linked work is unavailable in the loaded workspace. Session records remain inspectable here; reload the workspace before opening work.' : 'Linked work is not loaded yet.'}</p>}
         </li>;
