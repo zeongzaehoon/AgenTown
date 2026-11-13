@@ -2862,3 +2862,14 @@ disconnection, reinspection and replacement previews discard consent and ignore
 late replies. Unsaved drafts and ordinary execution/Skill/recovery remain in
 their existing controls. Deterministic coverage lives in `WorkHook.test.tsx`;
 supervisor browser validation is pending for this change.
+
+Selected-work bounded Loop APIs are available under
+`/api/connections/v1/loops/{list,preview,start,inspect,stop}` when running
+`agentown-web --database /absolute/company.sqlite --provider anthropic --model MODEL_ID`.
+See [the runnable request sequence and ownership limitations](mcp.md#selected-work-loop-control-through-the-local-screen-server).
+These APIs require existing assigned work and an enabled saved Loop policy. Preview
+is credential-free; activation requires explicit consent to the exact observed
+input, employee, attempt count, bounds and server provider/model. The web process
+retains the installed MCP execution owner until shutdown, so inspection and Stop
+reach the same owner. Deterministic subprocess fixtures are test evidence only;
+real provider operation remains skipped, and browser verification is pending.

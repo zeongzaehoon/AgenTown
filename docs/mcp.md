@@ -1310,3 +1310,62 @@ execution and Hook provenance before showing a result; provider success remains
 quality-unverified. Uncertain delivery is never automatically retried: explicitly
 inspect and preview afresh. This does not establish external-client or live
 provider validation. See the local-screen walkthrough for prerequisites and steps.
+
+### Selected-work Loop control through the local screen server
+
+Launch `agentown-web --database /absolute/company.sqlite --provider anthropic --model MODEL_ID`.
+The database must already contain assigned text work and a saved enabled Loop policy.
+Discovery and preview work without provider credentials and never construct a provider.
+They do not activate enabled configuration. Real provider validation remains skipped.
+
+All requests below are POSTs to `http://127.0.0.1:8765`, with
+`Origin: http://127.0.0.1:8765` and `Content-Type: application/json`:
+
+| Path | JSON body |
+| --- | --- |
+| `/api/connections/v1/loops/list` | `{"task_id":"TASK_UUID"}` |
+| `/api/connections/v1/loops/preview` | `{"task_id":"TASK_UUID","policy_id":"POLICY_UUID"}` |
+| `/api/connections/v1/loops/start` | `{"task_id":"TASK_UUID","consent":COMPLETE_PREVIEW_DATA,"execution_consent":true}` |
+| `/api/connections/v1/loops/inspect` | `{"task_id":"TASK_UUID"}` |
+| `/api/connections/v1/loops/stop` | `{"task_id":"TASK_UUID","session_id":"SESSION_UUID"}` |
+
+For example, with `TASK_ID` and `POLICY_ID` set to saved IDs:
+
+```sh
+curl -sS http://127.0.0.1:8765/api/connections/v1/loops/preview \
+  -H 'Origin: http://127.0.0.1:8765' -H 'Content-Type: application/json' \
+  -d "{\"task_id\":\"$TASK_ID\",\"policy_id\":\"$POLICY_ID\"}" > loop-preview.json
+jq '.data' loop-preview.json
+```
+
+Read the entire preview: saved input, employee, Task, policy, attempt count,
+maximum iterations, interval, provider and model. Only after explicitly approving
+that exact preview, build and submit the start request:
+
+```sh
+jq '{task_id:.requested_task_id,consent:.data,execution_consent:true}' \
+  loop-preview.json > loop-start.json
+curl -sS http://127.0.0.1:8765/api/connections/v1/loops/start \
+  -H 'Origin: http://127.0.0.1:8765' -H 'Content-Type: application/json' \
+  --data-binary @loop-start.json
+```
+
+The adapter retains one installed local MCP child across preview, activation,
+inspection and Stop. Its Rust execution owner controls admissions and persisted
+session/Run provenance. Calls are serialized; the preview ledger is bounded and
+lives only in this web process. Consent includes all preview fields plus the
+server-selected provider/model; arbitrary or changed consent is rejected before
+dispatch. Rust independently rejects stale saved work/policy/counts. Consent is
+consumed before activation delivery, including failures with an uncertain result.
+Never automatically resubmit a start request after timeout, tool error or lost
+receipt. Inspect first, then obtain a fresh preview for any new explicit activation.
+
+Use Stop through this same web process. Another web/MCP owner cannot take over a
+live session; inspection reports `competing_owner`. The older direct `/api/loops/v1`
+API is a separate owner and cannot bypass this restriction. Normal web shutdown
+closes MCP stdin, allowing its lifespan to stop owned sessions and cancel local
+attempts before exit. A hung child is killed after a bounded cleanup wait. Abrupt
+process death may leave interrupted records until the next explicit owner action;
+read-only inspection never acquires authority or replays work. A restarted web
+process has no old consent and never automatically starts a session. Stop prevents
+further admissions; already delivered remote requests may still finish or incur cost.

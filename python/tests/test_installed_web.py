@@ -177,3 +177,17 @@ asyncio.run(check())
     receipt = json.loads(result.stdout)
     assert receipt['hook']['target_kind'] == 'agent'
     assert receipt['execution']['quality'] == 'unverified'
+
+
+def test_installed_selected_loop_retained_owner(tmp_path, installed_package):
+    """Real installed MCP child, deterministic provider; no checkout imports."""
+    python, runtime, env = installed_package
+    fixture = runtime / 'loop_mcp_fixture.py'
+    fixture.write_text(Path(__file__).with_name('mcp_fixture_server.py').read_text())
+    scenario = runtime / 'loop_scenario.py'
+    scenario.write_text(Path(__file__).with_name('selected_loop_scenario.py').read_text())
+    child_env = dict(env)
+    child_env['ANTHROPIC_API_KEY'] = 'installed-loop-fixture-only'
+    result = subprocess.run([str(python), '-I', str(scenario), str(tmp_path / 'loop.sqlite'), str(fixture)],
+                            cwd=runtime, env=child_env, capture_output=True, text=True, timeout=120)
+    assert result.returncode == 0, result.stdout + result.stderr
