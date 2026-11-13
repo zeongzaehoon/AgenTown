@@ -2290,3 +2290,52 @@ on edits, both toggle directions, duplicate creation IDs, failed/successful
 refresh, retained confirmed values/drafts/selections and keyboard recovery across
 all three types. Frontend tests/build and ordinary Python checks remain part of
 supervisor verification; live provider calls are skipped under user policy.
+
+## Unsaved employee, team and configuration drafts (C59-T1)
+
+Use the checkout launch instructions above, or start the already built local
+product without provider configuration:
+
+```sh
+uv run --directory python --locked agentown-web --database /tmp/agentown-drafts.sqlite3
+```
+
+Open http://127.0.0.1:8765. No credentials, work text or execution is needed.
+
+1. Leave **What would you like help with?** empty. Browse teams and open
+   configuration. Untouched new forms and selected saved records must not show
+   unsaved status or request a leave warning.
+2. Type an employee name, a new team name, and select an employee to add to a
+   saved team. Edit a saved Skill's instructions, a Hook field or a Loop limit.
+   Each meaningful draft shows **Unsaved drafts**. Attempt a reload or tab close,
+   then choose to stay. The browser should warn after user interaction (wording
+   and whether a dialog is allowed are controlled by the browser).
+3. Switch teams, record types and records. Close teams and configuration. Draft
+   summaries remain visible, including record IDs, and leaving is still protected.
+   Reopen the panels: selections and field values remain in this session.
+4. Revert a field to its original value, uncheck a selected member, or use the
+   corresponding **Discard … draft** control. Only that draft is cleared. With
+   several drafts present, saving/discarding one must leave protection active
+   until the others are saved, reverted or discarded. Successful validated saves
+   clear their own contribution. Untouched Hook/Loop defaults never contribute.
+5. Use the receipt-recovery exercises above to reject a team or configuration
+   save. Drafts and leave protection remain; refresh does not resend them.
+   Inspect confirmed values before explicitly retrying. Discard remains an
+   explicit choice even after failure. Finally type work text: existing work
+   draft protection must still operate independently.
+
+Drafts are in memory, not durable storage. A browser warning cannot guarantee
+recovery after a forced close or crash. Closing a panel retains its drafts.
+
+Deterministic React interaction coverage (with frontend dependencies installed):
+
+```sh
+cd frontend
+npx vitest run src/unsaved-drafts.test.tsx src/Teams.test.tsx src/Configuration.test.tsx
+```
+
+The interaction tests dispatch cancellable `beforeunload` events to inspect the
+actual leave guard without browser-dialog automation. Supervisor verification
+must run the frontend TypeScript/test gate and the applicable product profile.
+Browser exercise and consolidated verification are pending for this snapshot;
+live provider calls are skipped under user policy.

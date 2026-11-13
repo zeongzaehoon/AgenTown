@@ -1,3 +1,4 @@
+import { DraftStatus, useUnsavedDrafts } from './unsaved-drafts';
 import { validateExecutionReceipt } from './execution-receipt';
 import { validateWorkspace } from './workspace-validation';
 import { type ConfigurationNavigation } from './configuration-api';
@@ -155,15 +156,7 @@ export function App() {
   const inputError = serverInputError || (inputTouched ? workInputError(input, assignee) : '');
   const hasUnsavedDraft = input.length > 0;
 
-  useEffect(() => {
-    if (!hasUnsavedDraft) return;
-    function confirmLeave(event: BeforeUnloadEvent) {
-      event.preventDefault();
-      event.returnValue = ''; // Compatibility with browsers using the legacy signal.
-    }
-    window.addEventListener('beforeunload', confirmLeave);
-    return () => window.removeEventListener('beforeunload', confirmLeave);
-  }, [hasUnsavedDraft]);
+  useUnsavedDrafts(hasUnsavedDraft);
 
   const refresh = useCallback(async () => {
     // Cancel superseded snapshots so an older poll cannot overwrite a mutation refresh.
@@ -326,6 +319,8 @@ export function App() {
           if (signal.aborted) return;
           setEmployee(id); setName(previous => previous === name ? '' : previous); pendingFocus.current = 'input';
         });}}>
+          <DraftStatus labels={name.trim() ? ['Employee name'] : []} />
+          <button type="button" disabled={busy.has('employee') || !name} onClick={() => setName('')}>Discard employee draft</button>
           <label htmlFor="name">Employee name</label><input id="name" name="name" required maxLength={200} autoComplete="off" value={name} onChange={e => setName(e.target.value)} />
           <button disabled={!!creationRecovery || !connected || busy.has('employee')}>Create employee</button>
         </form></section>

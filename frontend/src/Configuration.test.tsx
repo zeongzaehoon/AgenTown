@@ -5,6 +5,11 @@ import userEvent from '@testing-library/user-event';
 import { Configuration } from './Configuration';
 import type { Workspace } from './api';
 import type { ConfigurationRecord } from './configuration-api';
+function leaveProtected() {
+  const event = new Event('beforeunload', {cancelable: true});
+  window.dispatchEvent(event);
+  return event.defaultPrevented;
+}
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 const workspace: Workspace = {employees: [{id: 'a', name: 'Alex'}], work: [{id: 'w', input: 'Draft', status: 'pending', assignees: ['a'], attempts: []}], configuration: null, provider: 'test', model: null};
 const response = (value: unknown, status = 200) => new Response(JSON.stringify(value), {status});
@@ -35,7 +40,7 @@ async function open() {
   fireEvent.click(screen.getByRole('button', {name: 'Open configuration'}));
   await screen.findByText('Showing saved configuration.');
 }
-async function saved(kind: string) { await screen.findByText(`${kind} saved · ID: ${kind.toLowerCase()}s-0`); }
+async function saved(kind: string) { await screen.findByText(`${kind} saved · ID: ${kind.toLowerCase()}s-0`); expect(leaveProtected()).toBe(false); }
 test('create, edit, toggle all types and inspect persisted IDs after remount without execution', async () => {
   const f = fixture(); const view = render(<StrictMode><Configuration workspace={workspace} /></StrictMode>); await open();
   expect(screen.getByText('No saved skills yet.')).toBeTruthy();
@@ -77,7 +82,7 @@ test('failure preserves drafts and saved snapshot; refresh unlocks only explicit
   const f = fixture(); render(<Configuration workspace={workspace} />); await open();
   change('Name', 'Keep draft'); change('Instructions', 'Keep instructions'); f.offline(true);
   fireEvent.click(screen.getByRole('button', {name: 'Create Skill'}));
-  await screen.findByRole('alert'); expect(screen.getByText(/loaded values are stale/)).toBeTruthy();
+  await screen.findByRole('alert'); expect(leaveProtected()).toBe(true); expect(screen.getByText(/loaded values are stale/)).toBeTruthy();
   expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('Keep draft');
   expect((screen.getByRole('button', {name: 'Create Skill'}) as HTMLButtonElement).disabled).toBe(true);
   f.offline(false); fireEvent.click(screen.getByRole('button', {name: 'Refresh configuration'})); await screen.findByText('Showing saved configuration.');
@@ -116,6 +121,8 @@ test('keyboard opens the labeled workspace and saves with focus returned to sele
   await user.click(screen.getByLabelText('Name')); await user.type(screen.getByLabelText('Name'), 'Keyboard skill');
   await user.tab(); expect(document.activeElement).toBe(screen.getByLabelText('Instructions'));
   await user.keyboard('Use clear words.'); await user.tab();
+  expect(document.activeElement).toBe(screen.getByRole('button', {name: 'Discard configuration draft'}));
+  await user.tab();
   expect(document.activeElement).toBe(screen.getByRole('button', {name: 'Create Skill'}));
   await user.keyboard('{Enter}'); await saved('Skill');
   expect(document.activeElement).toBe(screen.getByLabelText('Saved record'));
@@ -201,6 +208,7 @@ for (const kind of kinds) {
         button().focus(); await user.keyboard('{Enter}');
         await screen.findByText(new RegExp(`${kind === 'skills' ? 'Skill' : kind === 'hooks' ? 'Hook' : 'Loop'} saved · ID:`));
         expect(mutationCount(f)).toBe(2);
+        expect(leaveProtected()).toBe(action === 'enable');
         if (action !== 'enable') expect(document.activeElement).toBe(screen.getByLabelText('Saved record'));
       });
     }
@@ -229,6 +237,7 @@ for (const kind of kinds) {
           : action === 'enable' ? 'Enable configuration' : 'Disable configuration';
         f.transform((value, mutation) => mutation ? {...value as object, [field]: wrong} : value);
         fireEvent.click(screen.getByRole('button', {name: buttonName})); await screen.findByRole('alert');
+        expect(leaveProtected()).toBe(true);
         expect(screen.queryByText(new RegExp(`${label} saved · ID:`))).toBeNull();
         expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('Retained draft');
         expect((screen.getByLabelText('Saved record') as HTMLSelectElement).value).toBe(action === 'create' ? '' : original.id);
@@ -252,6 +261,7 @@ for (const kind of kinds) {
         screen.getByRole('button', {name: buttonName}).focus(); await user.keyboard('{Enter}');
         await screen.findByText(new RegExp(`${label} saved · ID:`));
         expect(mutationCount(f)).toBe(2);
+        expect(leaveProtected()).toBe(action === 'enable' || action === 'disable');
       });
     }
   }

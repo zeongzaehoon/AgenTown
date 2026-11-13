@@ -1,18 +1,20 @@
+import { DraftStatus } from './unsaved-drafts';
 import { useEffect, useRef, useState } from 'react';
 import { addTeamMembers, createTeam, listTeams, type Team, type Workspace } from './api';
 
 export function Teams(props: {openTeam?: {id: string} | null; workspace: Workspace | null; connected: boolean; onSelectEmployee: (id: string) => void}) {
   const [open, setOpen] = useState(false);
-  useEffect(() => { if (props.openTeam) setOpen(true); }, [props.openTeam]);
+  const [visited, setVisited] = useState(false);
+  useEffect(() => { if (props.openTeam) { setOpen(true); setVisited(true); } }, [props.openTeam]);
   return <section aria-labelledby="teams-title">
     <h2 id="teams-title">Teams</h2>
     <p>Membership does not assign work or start collaboration. Nothing executes when you create a team, add members or browse their work.</p>
-    <button type="button" aria-expanded={open} aria-controls="teams-panel" onClick={() => setOpen(true)}>Browse teams</button>
-    <div id="teams-panel">{open && <TeamPanel {...props} />}</div>
+    <button type="button" aria-expanded={open} aria-controls="teams-panel" onClick={() => { setOpen(true); setVisited(true); }}>Browse teams</button>
+    <div id="teams-panel">{visited && <TeamPanel {...props} hidden={!open} onClose={() => setOpen(false)} />}</div>
   </section>;
 }
 
-function TeamPanel({workspace, connected, onSelectEmployee, openTeam}: {openTeam?: {id: string} | null; workspace: Workspace | null; connected: boolean; onSelectEmployee: (id: string) => void}) {
+function TeamPanel({workspace, connected, onSelectEmployee, openTeam, hidden, onClose}: {hidden: boolean; onClose: () => void;openTeam?: {id: string} | null; workspace: Workspace | null; connected: boolean; onSelectEmployee: (id: string) => void}) {
   const [teams, setTeams] = useState<Team[] | null>(null);
   const [selected, setSelected] = useState(openTeam?.id ?? '');
   const [name, setName] = useState('');
@@ -67,6 +69,9 @@ function TeamPanel({workspace, connected, onSelectEmployee, openTeam}: {openTeam
   }, [openTeam]);
   const unavailable = !connected || stale || teams === null || busy;
   return <>
+    <DraftStatus labels={[...(name.trim() ? ['New team name'] : []), ...Object.entries(drafts).filter(([, members]) => members.length > 0).map(([id]) => `Team membership · ${teams?.find(item => item.id === id)?.name ?? id} · ID: ${id}`)]} />
+    <div hidden={hidden}>
+    <button type="button" onClick={onClose}>Close teams</button>
     <p role="status">{busy ? 'Loading or saving teams…' : teams === null ? 'Team data unavailable.' : stale || !connected ? 'Showing stale team data. Refresh teams before making changes.' : 'Showing persisted teams.'}</p>
     {error && <p role="alert">{error}</p>}
     <p role="status">{notice}</p>
@@ -80,6 +85,7 @@ function TeamPanel({workspace, connected, onSelectEmployee, openTeam}: {openTeam
         setNotice(`Team saved · ID: ${saved.id}`); selector.current?.focus();
       });
     }}>
+      <button type="button" disabled={busy || !name} onClick={() => setName('')}>Discard team name draft</button>
       <label htmlFor="team-name">Team name</label>
       <input id="team-name" disabled={busy} value={name} maxLength={200} required onChange={event => setName(event.target.value)} />
       <button type="submit" disabled={unavailable || !name.trim()}>Create team</button>
@@ -118,9 +124,11 @@ function TeamPanel({workspace, connected, onSelectEmployee, openTeam}: {openTeam
             }} />{employee.name} · Employee ID: {employee.id}{team.members.includes(employee.id) ? ' · Already a member' : ''}
           </label>)}
         </fieldset>
+        <button type="button" disabled={busy || !(drafts[selected]?.length)} onClick={() => setDrafts(previous => ({...previous, [selected]: []}))}>Discard membership draft</button>
         <p>{draft.length} selected to add. Selections are retained when switching teams or refreshing; review them before saving.</p>
         <button type="submit" disabled={unavailable || !draft.length || draft.length > 100}>Add members</button>
       </form>
     </>}
+    </div>
   </>;
 }

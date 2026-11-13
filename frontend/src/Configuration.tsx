@@ -1,3 +1,4 @@
+import { DraftStatus } from './unsaved-drafts';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { type Workspace, listTeams, type Team } from './api';
 import { savedSkills, savedHooks, savedLoopPolicies, confirmedConfigurationReceipt, configurationRequest, type ConfigurationNavigation, type ConfigurationFields, type ConfigurationKind, type ConfigurationRecord } from './configuration-api';
@@ -14,18 +15,21 @@ function draftOf(record: ConfigurationRecord): Draft {
 }
 export function Configuration({workspace, openSkill, openRecord}: {workspace: Workspace | null; openSkill?: {id: string} | null; openRecord?: ConfigurationNavigation | null}) {
   const [open, setOpen] = useState(false);
+  const [visited, setVisited] = useState(false);
+  useEffect(() => { if (openSkill || openRecord) { setOpen(true); setVisited(true); } }, [openSkill, openRecord]);
   return <section aria-labelledby="configuration-title"><h2 id="configuration-title">Configuration</h2>
     <p>Manage Skills, Hooks and Loop policies. Configuration does not execute work. Enabled means configuration enabled. Apply a Skill only through the saved-work preview and explicit execution controls. Hooks and Loops do not execute automatically.</p>
-    <button type="button" aria-expanded={open || !!openSkill || !!openRecord} aria-controls="configuration-panel" onClick={() => setOpen(true)}>Open configuration</button>
-    <div id="configuration-panel">{(open || !!openSkill || !!openRecord) && <ConfigurationPanel workspace={workspace} openSkill={openSkill} openRecord={openRecord} />}</div>
+    <button type="button" aria-expanded={open} aria-controls="configuration-panel" onClick={() => { setOpen(true); setVisited(true); }}>Open configuration</button>
+    <div id="configuration-panel">{visited && <ConfigurationPanel workspace={workspace} openSkill={openSkill} openRecord={openRecord} hidden={!open} onClose={() => setOpen(false)} />}</div>
   </section>;
 }
-function ConfigurationPanel({workspace, openSkill, openRecord}: {workspace: Workspace | null; openSkill?: {id: string} | null; openRecord?: ConfigurationNavigation | null}) {
+function ConfigurationPanel({workspace, openSkill, openRecord, hidden, onClose}: {hidden: boolean; onClose: () => void;workspace: Workspace | null; openSkill?: {id: string} | null; openRecord?: ConfigurationNavigation | null}) {
   const [kind, setKind] = useState<ConfigurationKind>('skills');
   const [records, setRecords] = useState<Record<ConfigurationKind, ConfigurationRecord[]> | null>(null);
   const [teams, setTeams] = useState<Team[]>([]);
   const [selection, setSelection] = useState<Record<ConfigurationKind, string>>({skills: '', hooks: '', loops: ''});
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
+  const baselines = useRef<Record<string, Draft>>({});
   const [busy, setBusy] = useState(false);
   const [stale, setStale] = useState(false);
   const [error, setError] = useState('');
@@ -39,7 +43,15 @@ function ConfigurationPanel({workspace, openSkill, openRecord}: {workspace: Work
   const key = `${kind}/${selected}`;
   const draft = drafts[key] ?? (record ? draftOf(record) : defaults[kind]);
   const blocked = busy || stale || !records || (!!selected && !record);
-  function change(field: string, value: string) { setDrafts(previous => ({...previous, [key]: {...draft, [field]: value}})); }
+  function changeFields(fields: Draft) {
+    baselines.current[key] ??= record ? draftOf(record) : defaults[kind];
+    setDrafts(previous => ({...previous, [key]: {...draft, ...fields}}));
+  }
+  function change(field: string, value: string) { changeFields({[field]: value}); }
+  const dirtyKeys = Object.keys(drafts).filter(id => {
+    const baseline = baselines.current[id];
+    return !baseline || Object.keys({...baseline, ...drafts[id]}).some(field => drafts[id][field] !== baseline[field]);
+  });
   async function perform(action?: (signal: AbortSignal) => Promise<void>) {
     if (lock.current) return;
     lock.current = true; setBusy(true); setError(''); setNotice('');
@@ -93,6 +105,12 @@ function ConfigurationPanel({workspace, openSkill, openRecord}: {workspace: Work
     </select></label>;
   }
   return <>
+    <DraftStatus labels={dirtyKeys.map(id => {
+      const [type, recordId] = id.split('/');
+      return `${labels[type as ConfigurationKind]} · ${recordId || 'new record'}`;
+    })} />
+    <div hidden={hidden}>
+    <button type="button" onClick={onClose}>Close configuration</button>
     <p role="status">{busy ? 'Loading or saving configuration…' : stale ? 'Configuration disconnected: loaded values are stale.' : records ? 'Showing saved configuration.' : 'Configuration unavailable.'}</p>
     {error && <p role="alert">{error}</p>}<p role="status">{notice}</p>
     <button type="button" disabled={busy} onClick={() => void perform()}>Refresh configuration</button>
@@ -115,6 +133,7 @@ function ConfigurationPanel({workspace, openSkill, openRecord}: {workspace: Work
         const response = await configurationRequest<unknown>(kind, selected ? `/${encodeURIComponent(selected)}` : '', fields as unknown as ConfigurationFields, signal);
         if (signal.aborted) return;
         const saved = confirmedConfigurationReceipt(kind, response, fields as unknown as ConfigurationFields, record?.enabled ?? false, record, records?.[kind]);
+        delete baselines.current[key]; delete baselines.current[`${kind}/${saved.id}`];
         remember(saved); setSelection(previous => ({...previous, [kind]: saved.id}));
         setDrafts(previous => { const next = {...previous}; delete next[key]; delete next[`${kind}/${saved.id}`]; return next; });
         focusSelection.current = true;
@@ -124,7 +143,7 @@ function ConfigurationPanel({workspace, openSkill, openRecord}: {workspace: Work
       {kind === 'skills' && <label>Instructions<textarea disabled={busy} value={draft.instructions} onChange={event => change('instructions', event.target.value)} /></label>}
       {kind === 'hooks' && <>
         {selectField('skill_id', 'Skill', records?.skills ?? [])}
-        <label>Target type<select disabled={busy} value={draft.target_kind} onChange={event => setDrafts(previous => ({...previous, [key]: {...draft, target_kind: event.target.value, target_id: ''}}))}><option value="agent">Employee</option><option value="team">Team</option></select></label>
+        <label>Target type<select disabled={busy} value={draft.target_kind} onChange={event => changeFields({target_kind: event.target.value, target_id: ''})}><option value="agent">Employee</option><option value="team">Team</option></select></label>
         {selectField('target_id', 'Target', targets)}
         <label>Event<select disabled={busy} value={draft.event} onChange={event => change('event', event.target.value)}><option value="task_created">Work created</option><option value="run_completed">Run completed</option><option value="run_failed">Run failed</option></select></label>
       </>}
@@ -133,9 +152,14 @@ function ConfigurationPanel({workspace, openSkill, openRecord}: {workspace: Work
         <label>Maximum iterations<input disabled={busy} type="number" min="1" max="100" step="1" value={draft.max_iterations} onChange={event => change('max_iterations', event.target.value)} /></label>
         <label>Interval seconds<input disabled={busy} type="number" min="60" max="86400" step="1" value={draft.interval_seconds} onChange={event => change('interval_seconds', event.target.value)} /></label>
       </>}
+      <button type="button" disabled={busy || !dirtyKeys.includes(key)} onClick={() => {
+        delete baselines.current[key];
+        setDrafts(previous => { const next = {...previous}; delete next[key]; return next; });
+      }}>Discard configuration draft</button>
       <p id="config-validation">{validation || 'Ready to save configuration only.'}</p>
       <button type="submit" aria-describedby="config-validation" disabled={blocked || !!validation}>{selected ? 'Save changes' : `Create ${labels[kind]}`}</button>
     </form>
     <p>Drafts are retained while switching records and refreshing in this session. Reloading discards unsaved drafts. The server validates references and fields when saving.</p>
+    </div>
   </>;
 }

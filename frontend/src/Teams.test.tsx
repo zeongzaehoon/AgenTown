@@ -3,6 +3,11 @@ import { afterEach, expect, test, vi } from 'vitest';
 import { Teams } from './Teams';
 import type { Team, Workspace } from './api';
 
+function leaveProtected() {
+  const event = new Event('beforeunload', {cancelable: true});
+  window.dispatchEvent(event);
+  return event.defaultPrevented;
+}
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 const workspace: Workspace = {employees: [{id: 'a', name: 'Alex'}, {id: 'b', name: 'Alex'}], work: [], configuration: null, provider: 'test', model: null};
 const response = (data: unknown, status = 200) => new Response(JSON.stringify(data), {status});
@@ -41,6 +46,7 @@ test('create duplicate names, persist membership across remount, and navigate by
   fireEvent.click(screen.getByLabelText('Alex · Employee ID: b'));
   fireEvent.click(screen.getByRole('button', {name: 'Add members'}));
   await screen.findByText('Membership saved · Team ID: t0');
+  expect(leaveProtected()).toBe(false);
   fireEvent.click(screen.getByRole('button', {name: 'View member work: Alex · ID: b'}));
   expect(fixture.select).toHaveBeenCalledWith('b');
   fixture.view.unmount();
@@ -52,6 +58,7 @@ test('create duplicate names, persist membership across remount, and navigate by
 test('failed initial load recovers; stale snapshot retains name and per-team membership drafts', async () => {
   const fixture = setup([{id: 't0', name: 'Editors', members: []}, {id: 't1', name: 'Editors', members: []}]);
   await screen.findByText('Team ID: t0');
+  expect(leaveProtected()).toBe(false);
   fireEvent.change(screen.getByLabelText('Team name'), {target: {value: 'Keep name'}});
   fireEvent.click(screen.getByLabelText('Alex · Employee ID: a'));
   fireEvent.change(screen.getByLabelText('Saved team'), {target: {value: 't1'}});
@@ -60,6 +67,7 @@ test('failed initial load recovers; stale snapshot retains name and per-team mem
   fixture.fail(true);
   fireEvent.click(screen.getByRole('button', {name: 'Add members'}));
   await screen.findByRole('alert');
+  expect(leaveProtected()).toBe(true);
   expect(screen.getByText(/Showing stale team data/)).toBeTruthy();
   expect((screen.getByLabelText('Team name') as HTMLInputElement).value).toBe('Keep name');
   expect((screen.getByLabelText('Alex · Employee ID: a') as HTMLInputElement).checked).toBe(true);
@@ -113,6 +121,9 @@ test('App team navigation preserves unsaved work, assignment and existing resend
   await screen.findByText('Saved result');
   fireEvent.change(screen.getByLabelText('What would you like help with?'), {target: {value: 'Retained draft'}});
   fireEvent.change(screen.getByLabelText('Assign to'), {target: {value: 'a'}});
+  // Saved history can render before the independent Loop availability check.
+  // Wait for the same admission state a user needs before requesting consent.
+  await waitFor(() => expect((screen.getByRole('button', {name: 'Retry explicitly'}) as HTMLButtonElement).disabled).toBe(false));
   fireEvent.click(screen.getByRole('button', {name: 'Retry explicitly'}));
   expect(screen.getByRole('region', {name: 'Resend saved work?'})).toBeTruthy();
   fireEvent.click(screen.getByRole('button', {name: 'Browse teams'}));
@@ -147,11 +158,13 @@ for (const operation of ['create', 'members'] as const) {
       render(<Teams workspace={workspace} connected onSelectEmployee={vi.fn()} />);
       fireEvent.click(screen.getByRole('button', {name: 'Browse teams'}));
       await screen.findByText('Team ID: t0');
+  expect(leaveProtected()).toBe(false);
       fireEvent.change(screen.getByLabelText('Team name'), {target: {value: 'New team'}});
       fireEvent.click(screen.getByLabelText('Alex · Employee ID: a'));
       const submit = () => fireEvent.submit(screen.getByRole('button', {name: operation === 'create' ? 'Create team' : 'Add members'}).closest('form')!);
       submit(); submit();
       await screen.findByRole('alert');
+  expect(leaveProtected()).toBe(true);
       expect(screen.getByRole('alert').textContent).toContain('nothing is automatically resent');
       const postCount = () => fetcher.mock.calls.filter(([, init]) => init.method === 'POST').length;
       expect(postCount()).toBe(1);
@@ -167,6 +180,7 @@ for (const operation of ['create', 'members'] as const) {
       recovery = 'failed';
       fireEvent.click(screen.getByRole('button', {name: 'Refresh teams'}));
       await screen.findByRole('alert');
+  expect(leaveProtected()).toBe(true);
       await waitFor(() => expect((screen.getByRole('button', {name: 'Refresh teams'}) as HTMLButtonElement).disabled).toBe(false));
       expect(screen.queryByText(/Corrupt replacement/)).toBeNull();
       submit(); expect(postCount()).toBe(1);
@@ -183,6 +197,7 @@ for (const operation of ['create', 'members'] as const) {
       await user.keyboard('{Enter}');
       await screen.findByText(operation === 'create' ? 'Team saved · ID: new' : 'Membership saved · Team ID: t0');
       expect(postCount()).toBe(2);
+      expect(leaveProtected()).toBe(true);
       expect(document.activeElement).toBe(screen.getByLabelText('Saved team'));
       if (operation === 'create') expect((screen.getByLabelText('Team name') as HTMLInputElement).value).toBe('');
       else expect(screen.getByText('Unavailable employee · ID: missing')).toBeTruthy();
