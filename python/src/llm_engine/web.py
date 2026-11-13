@@ -55,7 +55,7 @@ class LocalBoundary:
         await self.app(scope, receive, secured)
 
 
-def create_app(database, model=None, *, port=8765, provider=None, provider_name="anthropic"):
+def create_app(database, model=None, *, port=8765, provider=None, provider_name="anthropic", execution_port=None):
     database = str(database)
     # Injection is for tests only. The CLI uses the selected configured provider.
     configuration = None
@@ -71,6 +71,11 @@ def create_app(database, model=None, *, port=8765, provider=None, provider_name=
     diagnostic = ConnectionDiagnostic(database)
     from .application.inspect_selected_work import InspectSelectedWork
     inspect_selected_work = InspectSelectedWork(diagnostic)
+    from .application.execute_selected_work import ExecuteSelectedWork, SelectedWorkExecutionRequest
+    from .local_mcp_execution import LocalMcpExecution
+    local_execution = execution_port if execution_port is not None else LocalMcpExecution(
+        database, provider_name, model, configured=configuration is None)
+    execute_selected_work = ExecuteSelectedWork(local_execution)
 
     @asynccontextmanager
     async def lifespan(app):
@@ -78,6 +83,8 @@ def create_app(database, model=None, *, port=8765, provider=None, provider_name=
             yield
         finally:
             await diagnostic.close()
+            if execution_port is None:
+                await local_execution.close()
             await loops.close()
 
     def response(value, status=200):
@@ -130,6 +137,18 @@ def create_app(database, model=None, *, port=8765, provider=None, provider_name=
             return response({"error": "Inspection request exceeds 120,000 bytes."}, 413)
         except (ValueError, TypeError, UnicodeError):
             return response({"error": "Send only task_id as a canonical Task UUID."}, 400)
+
+    async def connection_execute_work(request):
+        try:
+            data = await body(request)
+            if set(data) != {"task_id", "expected_runs", "resubmission_consent"}:
+                raise ValueError("Unexpected execution fields")
+            selected = SelectedWorkExecutionRequest(**data)
+        except RequestTooLarge:
+            return response({"error": "Execution request exceeds 120,000 bytes."}, 413)
+        except (ValueError, TypeError, UnicodeError):
+            return response({"error": "Send canonical task_id, nonnegative integer expected_runs and boolean resubmission_consent only."}, 400)
+        return response(await execute_selected_work.execute(selected))
 
     async def connection_shared_data(request):
         return await connection_diagnostic(request, shared_data=True)
@@ -362,6 +381,7 @@ def create_app(database, model=None, *, port=8765, provider=None, provider_name=
         Route("/api/loops/v1", loop_api, methods=["GET"]),
         Route("/api/loops/v1/{action}", loop_api, methods=["POST"]),
         Route("/api/connections/v1", connections, methods=["POST"]),
+        Route("/api/connections/v1/execute-work", connection_execute_work, methods=["POST"]),
         Route("/api/connections/v1/inspect-work", connection_inspect_work, methods=["POST"]),
         Route("/api/connections/v1/shared-data", connection_shared_data, methods=["POST"]),
         Route("/api/connections/v1/diagnostic", connection_diagnostic, methods=["POST"]),

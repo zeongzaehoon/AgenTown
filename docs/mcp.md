@@ -1177,3 +1177,10 @@ Frontend deterministic coverage: `npm exec -- vitest run src/WorkInspection.test
 from `frontend/` after dependency preparation. Supervisor checks and browser
 validation are pending implementation handoff. Live LLM validation is skipped,
 not passed.
+
+The local product API can explicitly call `execute_text_work_v1` through its own
+installed stdio server against the selected database. It declares
+`agentown-local-product`, uses server provider/model configuration and accepts no
+credentials or model overrides in execution requests. It does not establish an
+external-client connection. The separate read-only inspection port stays unchanged.
+See [request and recovery contract](text-execution.md#explicit-local-product-execution-api).

@@ -130,3 +130,11 @@ connection pools, transport and response behavior.
 Migration is incremental: a user-visible vertical slice moves to the target
 boundary when it is next changed, with compatibility tests at the old public
 entry point. Large mechanical moves without a product outcome are deferred.
+
+Selected ordinary-text execution uses `ExecuteSelectedWork` with immutable typed
+request/result values and `SelectedWorkExecutionPort`, separate from
+`InspectSelectedWork` and its read-only port. The web composition root supplies
+`LocalMcpExecution`, which invokes the installed stdio MCP execution tool against
+the selected database using server configuration. Rust remains the sole admission
+and persistence authority. Transport uncertainty produces no replay. See
+[text execution](text-execution.md#explicit-local-product-execution-api) for the API.

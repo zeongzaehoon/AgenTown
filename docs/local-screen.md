@@ -2761,3 +2761,12 @@ This implementation invocation did not run these checks because frontend
 dependencies are absent in its isolated workspace. Supervisor-selected checks
 and browser validation are pending. Live provider validation remains skipped,
 not passed.
+
+The selected ordinary-text execution API is available independently of its
+forthcoming screen control. Launch `agentown-web --database
+/absolute/path/product.sqlite --port 8765` with the configured provider/model
+flags. Inspect saved work before POSTing `/api/connections/v1/execute-work` with
+canonical `task_id`, observed `expected_runs` and explicit boolean
+`resubmission_consent`. See the [exact contract and recovery steps](text-execution.md#explicit-local-product-execution-api).
+Inspection remains read-only; uncertain delivery requires inspection and fresh
+consent, never automatic replay. Live-provider validation remains skipped.

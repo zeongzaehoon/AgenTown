@@ -286,3 +286,85 @@ start/admission, interval refusal, stop before/during dispatch, failure and rest
 Rust's existing controlled-clock Loop fixtures cover advancing interval boundaries
 and concurrent writer ordering; Python fixtures require no minute-long waits.
 No public HTTP endpoint permits injecting a fixture provider or finalizing output.
+
+### Explicit local product execution API
+
+Launch the installed product against the selected database:
+
+```sh
+agentown-web --database /absolute/path/product.sqlite --port 8765 --provider anthropic --model YOUR_CONFIGURED_MODEL
+```
+
+Provider credentials stay in the server environment. Live provider validation is
+currently skipped by user policy; deterministic fixture results are not live evidence.
+The existing inspection action remains read-only. After selecting saved ordinary
+text, POST `/api/connections/v1/inspect-work` with `{"task_id":"<canonical UUID>"}`
+and display its saved input, attempts and readiness. Preflight is advisory and
+never grants execution authority.
+
+A separate action, POST `/api/connections/v1/execute-work`, accepts exactly:
+
+```json
+{"task_id":"11111111-1111-4111-8111-111111111111","expected_runs":0,"resubmission_consent":false}
+```
+
+`task_id` must be canonical lowercase UUID text, `expected_runs` a JSON integer
+(not boolean) at least zero observed in fresh inspection, and
+`resubmission_consent` an explicit JSON boolean. Resubmission requires fresh user
+consent (`true`); initial execution can use `false`. Extra fields, including
+credentials, provider, model and source overrides, are rejected with HTTP 400.
+The API requires same-origin JSON at `http://127.0.0.1:8765` (Origin header and
+matching Host); oversized requests return 413 and origin violations return 403.
+
+Valid requests return HTTP 200 with `schema_version: 1`, `requested_task_id`,
+`status`, `code`, `execution` and `recovery`. Status/code pairs are:
+
+| Status | Code | Meaning |
+| --- | --- | --- |
+| completed | execution_recorded | A finalized execution record was received; inspect its output/error. |
+| rejected | configuration_unavailable | Configure provider/model in the server environment/launch and restart. |
+| rejected | execution_busy | A local request is running or shutting down. |
+| rejected | admission_rejected | Rust rejected admission; refresh assignment, attempts and consent. |
+| unavailable | transport_unavailable | No execution dispatch was attempted. Check installation. |
+| uncertain | delivery_uncertain | Dispatch may have reached MCP. Never automatically replay. |
+
+`execution` is null except for completed responses, where it contains
+`schema_version`, `run_id`, `input`, `provider`, `model`, `deadline_unix_ms`,
+`output`, `error`, and `quality: "unverified"`. A recorded provider failure is a
+completed transport operation with an error, not a successful provider result or
+quality approval. Admission errors are deliberately grouped because existing MCP
+errors do not reliably distinguish stale count, active attempt and consent.
+
+The application uses a separate typed execution port and starts the installed
+local MCP server with the same absolute database. It calls only
+`execute_text_work_v1`, with configured provider/model and the fixed declared
+source `agentown-local-product`. This source is honest, untrusted caller metadata,
+not authentication or proof of an external client connection. Rust retains all
+admission, concurrency and Run/result/source persistence authority.
+
+For timeout, disconnect, malformed reply, cancellation or service interruption,
+keep the database and inspect selected work again. A missing HTTP reply is not
+proof of failed execution. Read-only inspection does not recover expired leases;
+an active/expired attempt must be reconciled before a fresh request. Wait for
+the active attempt to finish; for an expired lease explicitly invoke the existing
+MCP `get_work_history_v1` with `{"task_id":"<canonical UUID>","read_only":false}`
+to let Rust reconcile it, then refresh read-only inspection. Review the latest persisted result and
+attempt count, then obtain fresh explicit consent before resubmitting. Neither
+adapter nor API automatically retries or resumes the costly call. Frontend action
+integration is a separate delivery; this API can be exercised with a same-origin
+JSON client while that work is pending.
+
+Deterministic implementation evidence for this boundary: scoped execution plus
+inspection checks passed (129 cases), followed by execution plus web checks
+(55 cases, including additional request/timeout/configuration coverage). These
+used the available Python 3.13 environment/native extension and a temporary source
+overlay; web checks reused existing built assets, without a frontend/native
+rebuild. Persisted fixture inspection found two finalized attempts/results for
+initial execution plus consented resubmission, one attempt/result from racing MCP
+processes, one saved result after lost delivery, and zero attempts for missing
+server configuration. Saved execution sources were `agentown-local-product`.
+The CLI reached startup on port 8765 but binding failed because it was occupied;
+a separate temporary-database launch on port 18765 returned HTTP 200 for state
+and `configuration_unavailable` for execution without settings. No existing
+service was changed. Consolidated supervisor checks, fresh installed-package
+validation and browser validation are pending; live provider calls were skipped.
