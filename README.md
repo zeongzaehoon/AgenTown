@@ -77,3 +77,12 @@ a fresh GitHub runner and publishes its `SHA256SUMS.txt` alongside it. Intel
 users can build an architecture-matching image locally with the desktop
 instructions. Because the download is not yet
 Developer ID signed or notarized, macOS may require an explicit user override.
+
+Apply an enabled Skill to saved assigned work: launch `agentown-web --database /absolute/path/product.sqlite`
+(or open the packaged app), select saved work, then choose **Inspect through local MCP** →
+**Find Skills through local MCP** → choose an enabled Skill → **Preview local Skill**.
+Review the full exact effective input and prior attempts, check the explicit authorization,
+then choose **Execute local Skill once**. Preview makes no provider call. Inspect before
+another attempt, including after uncertain delivery. Recorded results and provider errors
+remain quality-unverified. See [local Skill steps](docs/mcp.md#apply-a-skill-from-selected-work).
+Live provider validation remains skipped; deterministic fixtures do not prove live execution.

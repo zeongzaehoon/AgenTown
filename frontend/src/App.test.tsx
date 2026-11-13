@@ -413,8 +413,10 @@ test.each([
   if (output) expect(detail.textContent).toContain('Unverified');
   expect(detail.textContent).toContain('Test response — not live validation');
   // Configuration loads independently of workspace history. Observe stable
-  // polling only after the Hook panel has announced its initial loaded state.
+  // polling only after all independently loaded execution panels are ready.
   await waitFor(() => expect(within(screen.getByRole('region', {name: 'Apply an employee Hook'})).getByRole('status').textContent).not.toContain('Waiting for configuration'));
+  await waitFor(() => expect(within(screen.getByRole('region', {name: 'Apply a Skill'})).getByRole('status').textContent).not.toContain('Waiting for configuration'));
+  await waitFor(() => expect(screen.getByRole('status', {name: 'Loop inspection'}).textContent).toBe('Configured Loops require preview and explicit start.'));
   const changes = vi.fn(); const observer = new MutationObserver(changes);
   document.querySelectorAll('[role=status], #connection, details').forEach(node => observer.observe(node, {subtree: true, childList: true, characterData: true}));
   const calls = f.calls.length;

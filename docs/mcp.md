@@ -1207,3 +1207,36 @@ At `http://127.0.0.1:8765`, send same-origin JSON POST requests (include `Origin
 Before dispatch, the API requires the complete consent tuple to match a confirmed preview returned by this running server. A mismatch or unknown preview returns `admission_rejected` without a provider call, Run admission or preview consumption. The server retains its most recent 128 confirmed previews in memory; after restart or eviction, obtain a fresh preview and consent again. Execution reuses Rust's atomic single-use preview consumption and attempt-count admission. Changed Skills, stale counts and consumed previews require refreshed inspection and a fresh preview. A completed response includes `data.execution` and `data.skill`; the adapter verifies the returned input and reads `get_work_history_v1(read_only=true)` to verify Task, Run, Skill, preview and source identities. The recorded Skill provenance includes the admitted instructions, effective input and preview ID. They remain observable in work history and `/api/state` after restart. Provider success remains quality-unverified.
 
 `configuration_unavailable` rejects execution without dispatch. `transport_unavailable` means dispatch was not reached; `delivery_uncertain` means delivery may have occurred, including timeout, lost results or failure to confirm provenance after execution. Inspect persisted history before any fresh explicit action. Never automatically replay an uncertain request. Busy admission stays occupied until child-process cleanup completes. Deterministic fixtures exercise these contracts; live provider calls remain skipped under the current policy. Installed command/wheel and browser verification belong to the supervisor gate.
+
+### Apply a Skill from selected work
+
+Prerequisites: installed product commands (including `agentown-mcp`), saved work assigned
+to one employee, and an enabled Skill in the same database. Launch
+`agentown-web --database /absolute/path/product.sqlite` or open the packaged desktop app.
+Use the normal server provider/model configuration for execution; discovery and preview
+need no provider credentials.
+
+1. Select saved work and choose **Inspect through local MCP**. Read prior attempts and
+   any recorded errors before considering a resubmission.
+2. Under **Apply a Skill through local MCP**, choose **Find Skills through local MCP**.
+   Choose an enabled Skill, then **Preview local Skill**. Neither action executes work.
+3. Review **Exact effective input**, preview ID and prior attempt count. The full input
+   shown is the input submitted; unsaved drafts are excluded. Keyboard focus moves to
+   the preview; Tab reaches its authorization checkbox and execution button.
+4. Explicitly check **I authorize one execution of this exact Skill preview**, then
+   choose **Execute local Skill once**. One consent permits one request. The provider
+   and model are selected by the server; the screen displays the recorded Run ID,
+   result or provider error, and **Quality unverified**.
+5. Choose **Inspect before another Skill execution** to read persisted history and
+   obtain a new preview and consent. Rejection, timeout, malformed receipt and uncertain
+   delivery never automatically resend. Uncertain delivery may already have executed.
+   Ordinary-text execution and expired-attempt recovery remain available in inspection.
+
+Changing the selected work, losing connection, changing the selected Skill, or requesting
+another preview discards the previous preview and consent. Late responses cannot restore
+it. After reconnecting, explicitly inspect again. Enabled Skill configuration alone does
+not mean a Skill ran. Local MCP evidence does not verify any external client's connection.
+Frontend interaction fixtures cover preview without execution, one-use consent, stale
+responses, failure recovery and keyboard focus. Supervisor checks for the current
+frontend profile remain the acceptance gate; unrelated installation evidence is not a
+prerequisite. Live provider calls are skipped, not passed.
