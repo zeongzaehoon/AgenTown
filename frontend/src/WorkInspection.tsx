@@ -48,6 +48,21 @@ export function WorkInspection({taskId}: {taskId: string | null}) {
         <p>{run.state} · {run.outcome ?? 'No outcome recorded'} · {run.stage}</p>
         <p>Participants: {run.participants.join(', ') || 'None recorded'}</p>
         <p>Recorded source: {run.reporting_source}{run.declared_source ? ` · ${run.declared_source}` : ''}</p>
+        {run.hook && <section aria-label="Saved Hook context">
+          <h5>Saved Hook: {run.hook.hook_name}</h5>
+          <p>Hook ID: {run.hook.hook_id}</p>
+          <p>Source Run ID: {run.hook.source_run_id} · {run.hook.event} · {run.hook.source_outcome}</p>
+          <p>Target employee ID: {run.hook.agent_id}</p>
+        </section>}
+        {(run.skill || run.hook) ? (() => {
+          const saved = (run.skill || run.hook)!;
+          return <section aria-label="Saved Skill context">
+            <h5>Saved Skill: {saved.skill_name}</h5>
+            <p>Skill ID: {saved.skill_id}</p><p>Preview ID: {saved.preview_id}</p>
+            <p>Saved instructions</p><pre>{saved.instructions}</pre>
+            <p>Effective saved input</p><pre>{saved.input}</pre>
+          </section>;
+        })() : <p>No saved Skill or Hook context recorded for this attempt.</p>}
         {run.execution ? <>
           <p>Provider: {run.execution.provider} · Model: {run.execution.model}</p>
           {run.execution.output !== null ? <><p>Recorded result · Quality unverified</p><pre>{run.execution.output}</pre></> : <p>No recorded result available.</p>}

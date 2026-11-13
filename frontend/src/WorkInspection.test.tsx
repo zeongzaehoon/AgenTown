@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, expect, test, vi } from 'vitest';
 import { WorkInspection } from './WorkInspection';
@@ -49,8 +49,9 @@ test('pending inspection is invalidated by selection and cannot replace a newer 
   expect(screen.queryByText(/Confirmed Task ID/)).toBeNull();
   await user.click(screen.getByRole('button'));
   await screen.findByText('Confirmed Task ID: task-b');
-  await act(async () => {complete(new Response(JSON.stringify(success())));});
+  await act(async () => {complete(new Response(JSON.stringify(savedContext())));});
   expect(screen.queryByText('Confirmed Task ID: task-a')).toBeNull();
+  expect(screen.queryByText('Saved Hook: Original follow-up')).toBeNull();
   expect(screen.getByText('Confirmed Task ID: task-b')).toBeTruthy();
   view.rerender(<WorkInspection taskId={null} />);
   expect(screen.queryByText(/Confirmed Task ID/)).toBeNull();
@@ -159,4 +160,83 @@ test.each([null, {}, [], {status: 'success'}, {
   ...success(), status: 'failure',
 }])('invalid envelope cannot be accepted (%#)', value => {
   expect(() => parseWorkInspection(value, 'task-a')).toThrow();
+});
+
+// Saved snapshots intentionally differ from current work text/configuration.
+function savedContext() {
+  const response = success();
+  const skill = {schema_version: 1, run_id: 'run-a', preview_id: 'preview-skill',
+    skill_id: '33333333-3333-4333-8333-333333333333', skill_name: 'Original manual', instructions: 'Saved instructions',
+    input: 'Recorded request', admitted_at: 1};
+  const source = response.inspection.attempts[0];
+  source.outcome = 'reported_success';
+  const hook = {...skill, run_id: 'run-hook', preview_id: 'preview-hook', admitted_at: 3,
+    task_id: 'task-a', hook_id: '44444444-4444-4444-8444-444444444444', hook_name: 'Original follow-up', hook_enabled: true,
+    target_kind: 'agent', agent_id: 'employee-a', event: 'run_completed', source_run_id: 'run-a',
+    source_outcome: 'reported_success', skill_enabled: true};
+  return {...response, inspection: {...response.inspection, attempts: [
+    {...source, skill, hook: null},
+    {...source, id: 'run-hook', started_at: 3, ended_at: 4, skill: null, hook,
+      execution: {...source.execution, run_id: 'run-hook'}},
+    {...source, id: 'run-ordinary', skill: null, hook: null,
+      execution: {...source.execution, run_id: 'run-ordinary'}},
+  ]}};
+}
+
+test('saved Skill and Hook context belongs to its attempt and inspection never executes', async () => {
+  const fetcher = vi.fn(async () => new Response(JSON.stringify(savedContext())));
+  vi.stubGlobal('fetch', fetcher);
+  const user = userEvent.setup(); const view = render(<WorkInspection taskId="task-a" />);
+  await user.click(screen.getByRole('button'));
+  const first = await screen.findByRole('article', {name: 'Inspected attempt 1'});
+  expect(within(first).getByText('Skill ID: 33333333-3333-4333-8333-333333333333')).toBeTruthy();
+  expect(within(first).getByText('Saved instructions', {selector: 'pre'})).toBeTruthy();
+  expect(within(first).getByText('Recorded request')).toBeTruthy();
+  expect(within(first).queryByText(/Hook ID/)).toBeNull();
+  const second = screen.getByRole('article', {name: 'Inspected attempt 2'});
+  expect(within(second).getByText('Saved Hook: Original follow-up')).toBeTruthy();
+  expect(within(second).getByText('Saved Skill: Original manual')).toBeTruthy();
+  expect(within(second).getByText(/Source Run ID: run-a/)).toBeTruthy();
+  expect(within(screen.getByRole('article', {name: 'Inspected attempt 3'}))
+    .getByText(/No saved Skill or Hook context/)).toBeTruthy();
+  view.rerender(<WorkInspection taskId="task-b" />);
+  expect(screen.queryByText('Saved Hook: Original follow-up')).toBeNull();
+  expect(fetcher.mock.calls).toEqual([['/api/connections/v1/inspect-work', expect.anything()]]);
+});
+
+test.each([
+  (r: any) => {r[0].skill.run_id = 'other';},
+  (r: any) => {r[0].skill.input = 'Different input';},
+  (r: any) => {r[0].skill.skill_name = '';},
+  (r: any) => {delete r[0].skill.instructions;},
+  (r: any) => {r[0].skill.admitted_at = -1;},
+  (r: any) => {r[0].skill.admitted_at = 99;},
+  (r: any) => {r[0].skill.skill_id = 'invalid';},
+  (r: any) => {r[1].hook.hook_id = 'invalid';},
+  (r: any) => {r[1].participants.push('other');},
+  (r: any) => {const {task_id, hook_id, ...saved} = r[1].hook; r[1].skill = saved;},
+  (r: any) => {r[0].execution = null;},
+  (r: any) => {r[1].hook.task_id = 'other';},
+  (r: any) => {r[1].hook.agent_id = 'other';},
+  (r: any) => {r[1].hook.hook_enabled = false;},
+  (r: any) => {r[1].hook.source_run_id = 'run-hook';},
+  (r: any) => {r[1].hook.source_run_id = 'missing';},
+  (r: any) => {r[1].hook.event = 'run_failed';},
+  (r: any) => {r[1].hook.skill_enabled = false;},
+  (r: any) => {r[1].skill = {...r[1].hook, skill_id: 'contradictory'};},
+])('invalid saved provenance prevents confirmation and permits explicit recovery (%#)', async mutate => {
+  const broken = savedContext(); mutate(broken.inspection.attempts);
+  expect(() => parseWorkInspection(broken, 'task-a')).toThrow();
+  const fetcher = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify(broken)))
+    .mockResolvedValueOnce(new Response(JSON.stringify(savedContext())));
+  vi.stubGlobal('fetch', fetcher);
+  const user = userEvent.setup(); render(<WorkInspection taskId="task-a" />);
+  await user.click(screen.getByRole('button')); await screen.findByRole('alert');
+  expect(screen.queryByText(/Confirmed local MCP inspection/)).toBeNull();
+  expect(screen.queryByText('Saved Hook: Original follow-up')).toBeNull();
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  await user.click(screen.getByRole('button'));
+  await screen.findByText('Saved Hook: Original follow-up');
+  expect(fetcher.mock.calls.every(([path]) => path === '/api/connections/v1/inspect-work')).toBe(true);
+  expect(fetcher).toHaveBeenCalledTimes(2);
 });

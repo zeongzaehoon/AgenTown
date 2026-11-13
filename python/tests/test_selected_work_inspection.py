@@ -12,6 +12,10 @@ from llm_engine.connection_diagnostic import ConnectionDiagnostic, validated_ins
 
 TASK = '11111111-1111-4111-8111-111111111111'
 RUN = '22222222-2222-4222-8222-222222222222'
+SKILL = '33333333-3333-4333-8333-333333333333'
+HOOK = '44444444-4444-4444-8444-444444444444'
+AGENT = '55555555-5555-4555-8555-555555555555'
+FOLLOW_UP = '66666666-6666-4666-8666-666666666666'
 
 
 def records():
@@ -27,6 +31,73 @@ def records():
 
 def envelope(data):
     return dict(structuredContent=data, content=[dict(type='text', text=json.dumps(data))], isError=False)
+
+
+def provenance_records(kind):
+    task, history = records()
+    run = history['attempts'][0]
+    saved = dict(schema_version=1, run_id=RUN, preview_id='saved-preview',
+                 skill_id=SKILL, skill_name='Saved Skill', instructions='Saved instructions',
+                 input='Saved effective input', admitted_at=1)
+    if kind == 'hook':
+        source = copy.deepcopy(run)
+        run.update(id=FOLLOW_UP, started_at=3, ended_at=4, participants=[AGENT])
+        run['execution']['run_id'] = FOLLOW_UP
+        saved.update(run_id=FOLLOW_UP, admitted_at=3, task_id=TASK,
+                     hook_id=HOOK, hook_name='Saved Hook', hook_enabled=True,
+                     target_kind='agent', agent_id=AGENT, event='run_completed',
+                     source_run_id=RUN, source_outcome='reported_success', skill_enabled=True)
+        history['attempts'].insert(0, source)
+    run[kind] = saved
+    run['execution']['input'] = saved['input']
+    return task, history
+
+
+@pytest.mark.parametrize('kind', ['skill', 'hook'])
+def test_saved_provenance_survives_application_mapping(kind):
+    from llm_engine.application.inspect_selected_work import InspectionResult
+    task, history = provenance_records(kind)
+    inspection = validated_inspection(envelope(task), envelope(history), TASK)
+    class Port:
+        async def inspect_work(self, task_id):
+            return InspectionResult('passed', 'inspection_passed', 'Inspected', '', inspection)
+    result = asyncio.run(InspectSelectedWork(Port()).execute(TASK))
+    assert result['status'] == 'success'
+    assert result['inspection']['attempts'] == history['attempts']
+
+
+@pytest.mark.parametrize('kind', ['skill', 'hook'])
+@pytest.mark.parametrize('field,value', [
+    ('run_id', TASK), ('skill_id', 'invalid'), ('preview_id', ''),
+    ('skill_name', ''), ('instructions', ''), ('input', 'Contradiction'),
+    ('admitted_at', 99), ('schema_version', 2),
+])
+def test_rejects_malformed_or_contradictory_saved_provenance(kind, field, value):
+    task, history = provenance_records(kind)
+    history['attempts'][-1][kind][field] = value
+    with pytest.raises(Exception):
+        validated_inspection(envelope(task), envelope(history), TASK)
+
+
+@pytest.mark.parametrize('field,value', [
+    ('task_id', RUN), ('source_run_id', FOLLOW_UP), ('source_run_id', SKILL),
+    ('source_outcome', 'failure'), ('event', 'run_failed'), ('agent_id', SKILL),
+    ('hook_id', 'invalid'), ('hook_name', ''), ('hook_enabled', False),
+    ('skill_enabled', False),
+])
+def test_rejects_contradictory_hook_relationships(field, value):
+    task, history = provenance_records('hook')
+    history['attempts'][-1]['hook'][field] = value
+    with pytest.raises(Exception):
+        validated_inspection(envelope(task), envelope(history), TASK)
+
+
+@pytest.mark.parametrize('kind', ['skill', 'hook'])
+def test_provenance_requires_recorded_execution(kind):
+    task, history = provenance_records(kind)
+    history['attempts'][-1]['execution'] = None
+    with pytest.raises(Exception):
+        validated_inspection(envelope(task), envelope(history), TASK)
 
 
 @pytest.mark.parametrize('change', [
@@ -59,6 +130,10 @@ def test_empty_and_nullable_execution():
 
 def command(tmp_path, mode):
     task, history = records()
+    if mode in ('skill', 'hook', 'contradictory_hook'):
+        task, history = provenance_records('skill' if mode == 'skill' else 'hook')
+        if mode == 'contradictory_hook':
+            history['attempts'][-1]['hook']['skill_id'] = 'invalid'
     trace = tmp_path / 'inspection.jsonl'
     script = '''
 import json, sys, time
@@ -80,6 +155,8 @@ for line in sys.stdin:
 
 
 @pytest.mark.parametrize('mode,status', [('success', 'passed'), ('error', 'failed'),
+                                         ('skill', 'passed'), ('hook', 'passed'),
+                                         ('contradictory_hook', 'failed'),
                                          ('mismatch', 'failed'), ('timeout', 'timeout')])
 def test_installed_transport_only_reads_and_reaps(tmp_path, monkeypatch, mode, status):
     async def exercise():
@@ -103,6 +180,8 @@ def test_installed_transport_only_reads_and_reaps(tmp_path, monkeypatch, mode, s
         if status == 'passed':
             assert result['inspection']['task']['id'] == TASK
             assert result['inspection']['attempts'][0]['execution']['output'] == 'Available result'
+            if mode in ('skill', 'hook'):
+                assert result['inspection']['attempts'] == provenance_records(mode)[1]['attempts']
             assert result['inspection']['evidence'] == dict(
                 source='installed_local_mcp', tools=['get_task', 'get_work_history_v1'],
                 read_only=True, external_client_verified=False)
@@ -165,6 +244,33 @@ def test_api_fixed_identity_input_and_failure_envelope(tmp_path, monkeypatch):
                                      code='inspection_failed', message='Unavailable',
                                      recovery='Inspect explicitly again.', inspection=None)
         assert calls == [TASK]
+
+
+@pytest.mark.parametrize('kind', ['skill', 'hook'])
+def test_api_returns_saved_provenance_without_execution(tmp_path, monkeypatch, kind):
+    from starlette.testclient import TestClient
+    from llm_engine.application.inspect_selected_work import InspectionResult
+    from llm_engine.web import create_app
+    task, history = provenance_records(kind)
+    inspection = validated_inspection(envelope(task), envelope(history), TASK)
+    calls = []
+    async def inspect(self, task_id):
+        calls.append(task_id)
+        return InspectionResult('passed', 'inspection_passed', 'Inspected', '', inspection)
+    monkeypatch.setattr(ConnectionDiagnostic, 'inspect_work', inspect)
+    class NoProvider:
+        async def complete(self, *args, **kwargs):
+            pytest.fail('provider called')
+    origin = 'http://127.0.0.1:8765'
+    with TestClient(create_app(str(tmp_path / 'api.db'), provider=NoProvider()), base_url=origin) as client:
+        response = client.post('/api/connections/v1/inspect-work',
+                               json={'task_id': TASK}, headers={'Origin': origin})
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload['status'] == 'success'
+        assert payload['inspection']['attempts'] == history['attempts']
+        assert payload['inspection']['evidence']['read_only'] is True
+    assert calls == [TASK]
 
 
 @pytest.mark.parametrize('change', [

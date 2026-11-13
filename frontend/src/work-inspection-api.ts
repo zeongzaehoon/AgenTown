@@ -7,10 +7,20 @@ export interface InspectedExecution {
   schema_version: 1; run_id: string; input: string; provider: string; model: string;
   deadline_unix_ms: number; output: string | null; error: string | null; quality: 'unverified';
 }
+export interface InspectedSkill {
+  schema_version: 1; run_id: string; preview_id: string; skill_id: string; skill_name: string;
+  instructions: string; input: string; admitted_at: number;
+}
+export interface InspectedHook extends InspectedSkill {
+  task_id: string; hook_id: string; hook_name: string; hook_enabled: true;
+  target_kind: 'agent'; agent_id: string; event: 'run_completed' | 'run_failed';
+  source_run_id: string; source_outcome: 'reported_success' | 'failure'; skill_enabled: true;
+}
 export interface InspectedRun {
   id: string; task_id: string; stage: string; reporting_source: string; declared_source?: string | null;
   started_at: number; ended_at: number | null; state: 'active' | 'finished'; outcome: string | null;
   participants: string[]; execution: InspectedExecution | null;
+  skill?: InspectedSkill | null; hook?: InspectedHook | null;
 }
 export interface WorkInspection {
   task: InspectedTask; attempts: InspectedRun[];
@@ -25,6 +35,7 @@ export interface InspectionResponse {
 }
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 const text = (value: unknown): value is string => typeof value === 'string' && !!value.trim();
+const stableId = (value: unknown): value is string => typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value);
 const nullableText = (value: unknown) => value === null || typeof value === 'string';
 const timestamp = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 && value <= 253402300799999;
 const ids = (value: unknown): value is string[] => Array.isArray(value) && value.every(text) && new Set(value).size === value.length;
@@ -61,6 +72,27 @@ export function parseWorkInspection(value: unknown, requested: string): Inspecti
         !timestamp(execution.deadline_unix_ms) || !nullableText(execution.output) || !nullableText(execution.error) ||
         execution.quality !== 'unverified' || (execution.output !== null && execution.error !== null) ||
         (run.state === 'active' && (execution.output !== null || execution.error !== null)))) throw invalid();
+  }
+  for (const run of attempts) {
+    const validSnapshot = (saved: unknown): saved is InspectedSkill => object(saved) &&
+      saved.schema_version === 1 && saved.run_id === run.id && text(saved.preview_id) &&
+      stableId(saved.skill_id) && text(saved.skill_name) && text(saved.instructions) &&
+      typeof saved.input === 'string' && timestamp(saved.admitted_at) && saved.admitted_at === run.started_at &&
+      object(run.execution) && saved.input === run.execution.input;
+    const {skill, hook} = run;
+    if (skill != null && (hook != null || !validSnapshot(skill))) throw invalid();
+    if (hook != null) {
+      if (!validSnapshot(hook) || !object(hook) || hook.task_id !== requested ||
+          !stableId(hook.hook_id) || !text(hook.hook_name) || hook.hook_enabled !== true ||
+          hook.skill_enabled !== true || hook.target_kind !== 'agent' || !text(hook.agent_id) ||
+          (run.participants.length !== 1 || run.participants[0] !== hook.agent_id) || !text(hook.source_run_id) ||
+          hook.source_run_id === run.id ||
+          !((hook.event === 'run_completed' && hook.source_outcome === 'reported_success') ||
+            (hook.event === 'run_failed' && hook.source_outcome === 'failure'))) throw invalid();
+      const source = attempts.find(candidate => candidate.id === hook.source_run_id);
+      if (!source || source.state !== 'finished' || source.outcome !== hook.source_outcome ||
+          source.ended_at > hook.admitted_at) throw invalid();
+    }
   }
   return value as unknown as InspectionResponse;
 }

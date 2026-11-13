@@ -28,6 +28,40 @@ class InspectedExecution:
 
 
 @dataclass(frozen=True)
+class InspectedSkill:
+    schema_version: int
+    run_id: str
+    preview_id: str
+    skill_id: str
+    skill_name: str
+    instructions: str
+    input: str
+    admitted_at: int
+
+
+@dataclass(frozen=True)
+class InspectedHook:
+    schema_version: int
+    run_id: str
+    preview_id: str
+    task_id: str
+    hook_id: str
+    hook_name: str
+    hook_enabled: bool
+    target_kind: str
+    agent_id: str
+    event: str
+    source_run_id: str
+    source_outcome: str
+    skill_id: str
+    skill_name: str
+    skill_enabled: bool
+    instructions: str
+    input: str
+    admitted_at: int
+
+
+@dataclass(frozen=True)
 class InspectedRun:
     id: str
     task_id: str
@@ -40,6 +74,8 @@ class InspectedRun:
     outcome: str | None
     participants: list[str]
     execution: InspectedExecution | None
+    skill: InspectedSkill | None = None
+    hook: InspectedHook | None = None
 
 
 @dataclass(frozen=True)

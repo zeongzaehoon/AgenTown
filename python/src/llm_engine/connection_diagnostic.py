@@ -247,7 +247,8 @@ def validated_inspection(first, second, task_id):
     # JSON validation prevents scalar coercion while accepting JSON UUID strings.
     from .mcp_server import Task, WorkHistory
     from .application.inspect_selected_work import (
-        LocalInspection, InspectedTask, InspectedRun, InspectedExecution)
+        LocalInspection, InspectedTask, InspectedRun, InspectedExecution,
+        InspectedSkill, InspectedHook)
     task_data, history_data = inspection_payload(first), inspection_payload(second)
     work = Task.model_validate_json(json.dumps(task_data), strict=True)
     history = WorkHistory.model_validate_json(json.dumps(history_data), strict=True)
@@ -260,6 +261,7 @@ def validated_inspection(first, second, task_id):
             raise DiagnosticFailure()
     unique(work.assignees)
     unique([run.id for run in history.attempts])
+    runs = {run.id: run for run in history.attempts}
     attempts = []
     for run in history.attempts:
         if run.task_id != work.id or (run.execution is not None and run.execution.run_id != run.id):
@@ -277,8 +279,34 @@ def validated_inspection(first, second, task_id):
                     or (run.state == 'active' and
                         (execution.output is not None or execution.error is not None))):
                 raise DiagnosticFailure()
-        row = run.model_dump(mode="json", exclude={"skill", "hook"})
+        # Validate immutable saved snapshots, never today's Skill/Hook settings.
+        for provenance in (run.skill, run.hook):
+            if provenance is not None and (
+                    run.execution is None or provenance.input != run.execution.input
+                    or provenance.admitted_at != run.started_at
+                    or not provenance.preview_id.strip()
+                    or not provenance.skill_name.strip()
+                    or not provenance.instructions.strip()):
+                raise DiagnosticFailure()
+        if run.skill is not None and run.hook is not None:
+            # These are distinct admission paths in the existing Rust store.
+            raise DiagnosticFailure()
+        if run.hook is not None:
+            hook = run.hook
+            source = runs.get(hook.source_run_id)
+            if (source is None or source.id == run.id or source.task_id != work.id
+                    or source.state != 'finished' or source.outcome != hook.source_outcome
+                    or source.ended_at is None or source.ended_at > hook.admitted_at
+                    or hook.event != ('run_completed' if hook.source_outcome == 'reported_success' else 'run_failed')
+                    or run.participants != [hook.agent_id]
+                    or not hook.hook_name.strip()):
+                raise DiagnosticFailure()
+        row = run.model_dump(mode="json")
         if row['execution'] is not None:
             row['execution'] = InspectedExecution(**row['execution'])
+        if row['skill'] is not None:
+            row['skill'] = InspectedSkill(**row['skill'])
+        if row['hook'] is not None:
+            row['hook'] = InspectedHook(**row['hook'])
         attempts.append(InspectedRun(**row))
     return LocalInspection(InspectedTask(**work.model_dump(mode="json")), attempts)

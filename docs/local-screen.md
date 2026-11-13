@@ -2587,3 +2587,52 @@ cd frontend
 The launch and browser exercise above were not executed in this invocation;
 supervisor browser validation remains pending. Live LLM calls are skipped, not
 passed. External clients remain unverified.
+
+
+### Saved Skill and Hook context in local inspection (C68-T1)
+
+In a prepared development checkout with frontend assets built, run the credential-free
+provider fixture using a new disposable database (stop an existing server on port 8766 first):
+
+```sh
+printf 'success' > /tmp/c68-response-gate
+uv run --directory python --locked python tests/web_browser_server.py /tmp/c68-work.sqlite3 8766 /tmp/c68-response-gate
+```
+
+Open <http://127.0.0.1:8766>. Create an employee and save assigned work. In configuration,
+create and enable a Skill with recognizable instructions, and an employee Hook for
+**run completed** using that Skill. Explicitly execute ordinary work once, then preview
+and confirm Skill execution, and preview and confirm the matching Hook. Each execution
+is a deliberate setup action against the deterministic provider; inspection requires
+no execution consent and never executes or retries work.
+
+Select that saved work and keyboard-activate **Inspect through local MCP**. Verify the
+confirmed Task and per-attempt Run IDs. The ordinary attempt says no saved Skill or Hook
+context was recorded. The Skill attempt displays its saved name, Skill ID, preview ID,
+instructions and effective input. The Hook attempt additionally displays its saved Hook
+name and ID, source Run ID/event/outcome and target employee ID, alongside its saved
+Skill context. Compare the effective input with the recorded execution. Editing current
+configuration must not change these saved snapshots on a later inspection.
+
+The observable artifact is the confirmed inspection with each snapshot attached to its
+own Run. Monitor the network and `/tmp/c68-response-gate.calls`: pressing inspection must
+only POST `/api/connections/v1/inspect-work`, with no execute/retry request and no increase
+in provider submissions. Repeat inspection after switching selection and during a held
+response, including A → B → A; late results must not restore old context. Simulate a
+failed response or contradictory saved input/source identity using network interception:
+confirmation and saved context must disappear, with explicit inspection available for
+recovery. Restore the genuine response and inspect again; nothing is replayed.
+
+Focused deterministic interaction coverage, with dependencies available:
+
+```sh
+cd frontend
+./node_modules/.bin/vitest run src/WorkInspection.test.tsx
+./node_modules/.bin/tsc --noEmit
+```
+
+This invocation added response validation, per-attempt display and interaction tests.
+Frontend dependencies are absent in the isolated workspace, so these commands and the
+browser exercise were not executed here. Integration with the Python mapping and
+supervisor checks/browser validation remain pending. Live LLM calls are skipped, not
+passed; external-client connection remains unverified.
