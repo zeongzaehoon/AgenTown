@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, expect, test, vi } from 'vitest';
 import { LoopDevices } from './LoopDevices';
 import { App } from './App';
+import type { Workspace } from './api';
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 const loops = [{id: 'one', name: 'Manual', task_id: 'w', max_iterations: 2, interval_seconds: 60, enabled: true}, {id: 'two', name: 'Manual', task_id: 'other', max_iterations: 5, interval_seconds: 120, enabled: false}];
@@ -29,7 +30,7 @@ test('devices show loading, duplicate identities, keyboard controls and stale sn
   expect(open.mock.calls).toEqual([['one'], ['two']]);
   fetcher.mockRejectedValueOnce(new Error('Offline'));
   fireEvent.click(screen.getByRole('button', {name: 'Refresh Loop devices'}));
-  expect(await screen.findByText(/Loop devices are stale/)).toBeTruthy();
+  expect(await screen.findByText('Loop devices are stale — showing the last successful snapshot.')).toBeTruthy();
   expect(screen.getAllByText('Stale snapshot')).toHaveLength(2);
   fetcher.mockResolvedValueOnce(new Response(JSON.stringify({loops: [loops[0]]})));
   fireEvent.click(screen.getByRole('button', {name: 'Refresh Loop devices'}));
@@ -51,7 +52,7 @@ test('App opens exact IDs repeatedly, retains configuration and work drafts and 
   let offline = false;
   let malformed = false;
   const fetcher = vi.fn(async (path: string) => {
-    if (path === '/api/state') return new Response(JSON.stringify({employees: [{id: 'a', name: 'Alex'}], work: [{id: 'w', input: 'Saved work', assignees: ['a'], status: 'pending', attempts: []}], configuration: null, provider: 'deterministic-test', model: 'test'}));
+    if (path === '/api/state') return new Response(JSON.stringify({employees: [{id: 'a', name: 'Alex'}], work: [{id: 'w', input: 'Saved work', assignees: ['a'], status: 'pending', attempts: []}, {id: 'retargeted-task', input: 'Other saved work', assignees: ['a'], status: 'pending', attempts: []}], configuration: null, provider: 'deterministic-test', model: 'test'}));
     if (path === '/api/config/v1/loops') { if (offline) throw new Error('Offline'); return new Response(JSON.stringify(malformed ? {loops: [{}]} : {loops: saved})); }
     if (path === '/api/config/v1/skills') return new Response('{"skills":[]}');
     if (path === '/api/config/v1/hooks') return new Response('{"hooks":[]}');
@@ -91,6 +92,25 @@ test('App opens exact IDs repeatedly, retains configuration and work drafts and 
   expect((screen.getByLabelText('What would you like help with?') as HTMLTextAreaElement).value).toBe('Work draft');
   expect((screen.getByRole('button', {name: 'Open linked work for Loop: Manual · Policy ID: two · Task ID: other'}) as HTMLButtonElement).disabled).toBe(true);
   expect(screen.getByText(/Linked work unavailable/)).toBeTruthy();
+  // A malformed device refresh retains the card but must revoke navigation.
+  malformed = true;
+  fireEvent.click(screen.getByRole('button', {name: 'Refresh Loop devices'}));
+  expect((linked as HTMLButtonElement).disabled).toBe(true);
+  await screen.findByText('Loop devices are stale — showing the last successful snapshot.');
+  fireEvent.click(linked);
+  expect((linked as HTMLButtonElement).disabled).toBe(true);
+  malformed = false;
+  saved = [{...loops[0], id: 'retargeted-policy', task_id: 'retargeted-task'}];
+  fireEvent.click(screen.getByRole('button', {name: 'Refresh Loop devices'}));
+  const retargeted = await screen.findByRole('button', {name: 'Open linked work for Loop: Manual · Policy ID: retargeted-policy · Task ID: retargeted-task'});
+  retargeted.focus(); await userEvent.keyboard(' ');
+  expect(document.activeElement).toBe(screen.getByRole('region', {name: 'Requested Loop inspection'}));
+  expect(screen.getByText(/Requested Task: retargeted-task · Policy: retargeted-policy/)).toBeTruthy();
+  expect(screen.queryByRole('checkbox', {name: /I authorize/})).toBeNull();
+  expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('Unsaved policy');
+  expect((screen.getByLabelText('What would you like help with?') as HTMLTextAreaElement).value).toBe('Work draft');
+  saved = loops;
+
   malformed = true;
   fireEvent.click(screen.getByRole('button', {name: 'Refresh configuration'}));
   expect(await screen.findByText(/Saved Loop data unavailable/)).toBeTruthy();
@@ -128,4 +148,41 @@ test.each([null, {}, {loops: null}, {loops: [{}]}, {loops: [{...loops[0], max_it
   expect(screen.queryByRole('button', {name: /Open Loop device/})).toBeNull();
   fireEvent.click(screen.getByRole('button', {name: 'Refresh Loop devices'}));
   expect(await screen.findByRole('button', {name: 'Open Loop device: Manual · ID: one'})).toBeTruthy();
+});
+
+
+test.each(['failed', 'malformed'])('linked work requires a successful current snapshot after %s refresh', async failure => {
+  let finish!: (response: Response) => void;
+  const fetcher = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({loops: [loops[0]]})));
+  vi.stubGlobal('fetch', fetcher);
+  const open = vi.fn();
+  const workspace: Workspace = {employees: [], work: ['w', 'other'].map(id => ({id, input: id, status: 'pending', assignees: [], attempts: []})), configuration: null, provider: 'test', model: 'test'};
+  const view = render(<LoopDevices workspace={workspace} onOpenPolicy={open} />);
+  const linked = () => screen.getByRole('button', {name: /Open linked work for Loop/}) as HTMLButtonElement;
+  await waitFor(() => expect(linked().disabled).toBe(false));
+  fetcher.mockImplementationOnce(() => new Promise<Response>(resolve => { finish = resolve; }));
+  fireEvent.click(screen.getByRole('button', {name: 'Refresh Loop devices'}));
+  expect(linked().disabled).toBe(true);
+  expect(document.getElementById(linked().getAttribute('aria-describedby')!)!.textContent).toContain('Refreshing');
+  fireEvent.click(linked());
+  finish(failure === 'failed' ? new Response('Offline', {status: 503}) : new Response('{"loops":[{}]}'));
+  await screen.findByText('Loop devices are stale — showing the last successful snapshot.');
+  expect(linked().disabled).toBe(true);
+  expect(document.getElementById(linked().getAttribute('aria-describedby')!)!.textContent).toContain('stale');
+  fireEvent.click(linked());
+  expect(open).not.toHaveBeenCalled();
+  fetcher.mockResolvedValueOnce(new Response(JSON.stringify({loops: [{...loops[0], id: 'new-policy', task_id: 'other'}]})));
+  fireEvent.click(screen.getByRole('button', {name: 'Refresh Loop devices'}));
+  await waitFor(() => expect(linked().disabled).toBe(false));
+  linked().focus(); await userEvent.keyboard(' ');
+  expect(open.mock.calls).toEqual([[{taskId: 'other', policyId: 'new-policy'}]]);
+  view.rerender(<LoopDevices workspace={workspace} connected={false} onOpenPolicy={open} />);
+  expect(linked().disabled).toBe(true);
+  expect(document.getElementById(linked().getAttribute('aria-describedby')!)!.textContent).toContain('Disconnected');
+  view.rerender(<LoopDevices workspace={{...workspace, work: []}} onOpenPolicy={open} />);
+  expect(linked().disabled).toBe(true);
+  expect(document.getElementById(linked().getAttribute('aria-describedby')!)!.textContent).toContain('Linked work unavailable');
+  fireEvent.click(linked());
+  expect(open).toHaveBeenCalledTimes(1);
+  expect(fetcher.mock.calls.map(call => call[0])).toEqual(Array(3).fill('/api/config/v1/loops'));
 });

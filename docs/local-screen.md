@@ -3103,3 +3103,37 @@ Scoped deterministic checks: `cd frontend && npx tsc --noEmit` and
 The supervisor frontend profile passed consolidated frontend and Python checks;
 it intentionally deferred a fresh installed-browser gate. Live provider
 validation is skipped under the user policy, not passed.
+
+
+### Current-snapshot linked Loop navigation (C87-T1)
+
+Run `agentown-web --database PATH`, then open <http://127.0.0.1:8765> and
+Company overview → Saved Loop policy devices. Prerequisite: existing saved work
+and a Loop policy linked to that work; no credentials or provider calls are needed.
+
+1. Enter an unsaved work draft and a configuration draft. Tab to **Open linked
+   work · local MCP**, press Enter or Space, and confirm focus moves to Requested
+   Loop inspection with the exact Task and policy IDs. Both drafts remain intact.
+2. Click **Refresh Loop devices**. Existing cards remain visible, but linked-work
+   actions are disabled while loading. Each disabled action has an associated
+   explanation. A failed or malformed refresh keeps navigation disabled until a
+   successful refresh; the retained card is explicitly stale.
+3. Save a policy retargeting through another product window, then refresh devices
+   here. Only the latest snapshot's exact Task and policy IDs are used. If the new
+   Task is absent from loaded saved work, refresh saved history first.
+4. Disconnect the local server and refresh the connection: linked-work navigation
+   is disabled with a reconnect explanation. Restore the server and refresh the
+   connection and devices. Successful current data restores the action when its
+   exact linked Task is available.
+5. Opening linked work grants no consent and sends no MCP inspection, discovery,
+   preview or mutation request. Those steps still require separate explicit actions.
+
+Deterministic scoped checks, when frontend dependencies are available:
+`cd frontend && npx tsc --noEmit && npx vitest run src/LoopDevices.test.tsx src/App.test.tsx`.
+The LoopDevices tests cover deferred refresh, failed/malformed refresh, recovery,
+retargeting, disconnection and missing work. The App interaction in that test file
+checks keyboard focus, exact retargeted identities, draft preservation and a strict
+read-only endpoint allowlist. Supervisor verification passed 1,021 frontend tests,
+the production build and 505 Python tests, with 2 Python tests skipped. A fresh
+installed-browser gate was deferred by the verification profile. Live provider
+tests are skipped, never passed.

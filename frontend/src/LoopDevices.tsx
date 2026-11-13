@@ -31,7 +31,14 @@ export function LoopDevices({onOpenLoop, onOpenPolicy, workspace, connected = tr
     <p role="status">{!connected ? 'Disconnected. Loaded Loop devices may be stale.' : busy ? 'Loading Loop devices…' : error ? devices ? 'Loop devices are stale — showing the last successful snapshot.' : 'Loop devices unavailable.' : devices?.length ? 'Showing saved Loop devices.' : 'No saved Loops yet. Create a Loop in Configuration.'}</p>
     {error && <p role="alert">{error}</p>}
     <button type="button" disabled={busy} onClick={() => void refresh()}>Refresh Loop devices</button>
-    <div className="loop-policy-device-grid">{devices?.map(device => <article key={device.id}><button type="button" className="loop-policy-device" key={device.id}
+    <div className="loop-policy-device-grid">{devices?.map((device, index) => {
+      const unavailable = !connected ? 'Disconnected. Reconnect before opening linked work.'
+        : busy ? 'Refreshing Loop devices. Wait for a successful snapshot before opening linked work.'
+        : error ? 'Loop devices are stale. Refresh successfully before opening linked work.'
+        : !workspace?.work.some(w => w.id === device.task_id) ? 'Linked work unavailable in loaded saved work. Refresh saved history before opening.'
+        : !onOpenPolicy ? 'Linked work navigation unavailable.' : '';
+      const explanationId = `loop-linked-work-unavailable-${index}`;
+      return <article key={device.id}><button type="button" className="loop-policy-device" key={device.id}
       disabled={!onOpenLoop} aria-controls="configuration-panel"
       aria-label={`Open Loop device: ${device.name} · ID: ${device.id}`} onClick={() => onOpenLoop?.(device.id)}>
       <span aria-hidden="true">⚑</span><strong>{device.name}</strong><span>Saved repeating-work policy</span><span>ID: {device.id}</span><span>Linked Task ID: {device.task_id}</span>
@@ -39,10 +46,10 @@ export function LoopDevices({onOpenLoop, onOpenPolicy, workspace, connected = tr
       <span>Open Configuration</span><span>Configuration {device.enabled ? 'enabled' : 'disabled'}</span>
       {(busy || error) && <span>{busy ? 'Refreshing snapshot' : 'Stale snapshot'}</span>}
     </button>
-      <button type="button" aria-controls="selected-work-inspection" disabled={!onOpenPolicy || !connected || !workspace?.work.some(w => w.id === device.task_id)}
+      <button type="button" aria-controls="selected-work-inspection" disabled={Boolean(unavailable)} aria-describedby={unavailable ? explanationId : undefined}
         aria-label={`Open linked work for Loop: ${device.name} · Policy ID: ${device.id} · Task ID: ${device.task_id}`}
-        onClick={() => onOpenPolicy?.({taskId: device.task_id, policyId: device.id})}>Open linked work · local MCP</button>
-      {!workspace?.work.some(w => w.id === device.task_id) && <p>Linked work unavailable in loaded saved work. Refresh saved history before opening.</p>}
-    </article>)}</div>
+        onClick={() => { if (!unavailable) onOpenPolicy?.({taskId: device.task_id, policyId: device.id}); }}>Open linked work · local MCP</button>
+      {unavailable && <p id={explanationId}>{unavailable}</p>}
+    </article>; })}</div>
   </section>;
 }
