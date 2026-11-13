@@ -2668,3 +2668,50 @@ Deterministic frontend coverage is in `frontend/src/WorkInspection.test.tsx`:
 `npm exec -- vitest run src/WorkInspection.test.tsx` from `frontend/` with dependencies
 prepared. The supervisor-selected checks and browser validation remain pending.
 Live provider validation remains skipped, not passed.
+
+### Copy a selected-work MCP handoff (C70-T1)
+
+Use an existing product database with saved work; no external client installation,
+credentials or provider calls are needed. Run:
+
+```sh
+agentown-web --database /absolute/path/product.sqlite --port 8765
+```
+
+Open <http://127.0.0.1:8765>, or open the packaged desktop app with its existing
+product database. Select **Saved work**, note its Work ID, and keyboard-activate
+**Copy read-only MCP handoff**. The accessible status identifies the copied Task.
+Paste into a plain text editor to verify the canonical Task ID and exact calls:
+`get_task({"task_id":"ID"})`,
+`get_work_history_v1({"task_id":"ID","read_only":true})`, and
+`inspect_loop_sessions_v1({})`. The instructions require filtering Loop context
+to that Task and separate explicit consent for execution or retry. They include
+no saved result bodies or credentials. Copying itself sends no requests, changes
+no records or client settings, and does not establish external connectivity.
+
+If clipboard access is denied or unavailable, the status explains recovery and
+reveals **Manual read-only MCP handoff**. Focus its read-only text field to select
+all, then use your device's copy command. **Show manual handoff** also makes this
+available directly. Manual copying is not reported as confirmed clipboard success.
+Retry the Copy button explicitly after restoring clipboard access.
+
+Switch between two saved Tasks and verify pasted IDs follow selection. During a
+held clipboard operation, the Copy button is disabled. Change selection (including
+A → B → A), remove selected work from refreshed history, or disconnect the server
+and wait for the connection status to change: old manual text and copy confirmation
+must disappear, and late clipboard completion must not restore them. A clipboard
+write already submitted to the device cannot be recalled; paste and check the ID
+before using it. Refresh the connection and select available saved work before
+copying again. Observe the network: handoff controls send zero MCP, execution,
+provider or settings requests. Local MCP inspection remains a separate action.
+
+With frontend dependencies prepared, run the deterministic interaction checks:
+
+```sh
+cd frontend
+./node_modules/.bin/vitest run src/WorkHandoff.test.tsx
+./node_modules/.bin/tsc --noEmit
+```
+
+Supervisor-selected consolidated checks and browser validation remain pending.
+Live provider validation is skipped, not passed; external connectivity is unverified.

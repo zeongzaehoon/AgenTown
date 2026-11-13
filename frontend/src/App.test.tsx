@@ -1089,3 +1089,31 @@ test.each(['__proto__', 'constructor', 'toString'])('prototype-named workspace l
   expect(screen.getByText('Refresh history before retrying.')).toBeTruthy();
   expect(f.calls.every(call => call.path === '/api/state')).toBe(true);
 });
+
+test('handoff follows canonical saved selection and loses validity on disconnect or missing work', async () => {
+  const state = initial();
+  state.work = ['task-a', 'task-b'].map(id => ({id, input: `Saved ${id}`, status: 'pending', assignees: [], attempts: []}));
+  const f = fixture(state);
+  const user = userEvent.setup();
+  const write = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue();
+  render(<App />); await connected();
+  const handoff = () => screen.getByRole('region', {name: 'External MCP handoff'});
+  const copy = () => within(handoff()).getByRole('button', {name: 'Copy read-only MCP handoff'});
+  const before = f.calls.length;
+  await user.click(copy());
+  expect(write.mock.calls[0][0]).toContain('get_task({"task_id":"task-a"})');
+  expect(f.calls).toHaveLength(before);
+  await user.selectOptions(screen.getByLabelText('Saved work'), 'task-b');
+  expect(within(handoff()).queryByText(/Handoff copied/)).toBeNull();
+  await user.click(copy());
+  expect(write.mock.calls[1][0]).toContain('get_work_history_v1({"task_id":"task-b","read_only":true})');
+  f.disconnect(); refresh();
+  await waitFor(() => expect((copy() as HTMLButtonElement).disabled).toBe(true));
+  expect(within(handoff()).queryByText(/Handoff copied/)).toBeNull();
+  f.reconnect(); refresh(); await connected();
+  expect(within(handoff()).queryByText(/Handoff copied/)).toBeNull();
+  state.work = state.work.filter(work => work.id !== 'task-b'); refresh(); await connected();
+  await waitFor(() => expect((copy() as HTMLButtonElement).disabled).toBe(true));
+  expect(within(handoff()).getByText(/Select available saved work/)).toBeTruthy();
+  expect(f.calls.every(call => call.path === '/api/state')).toBe(true);
+});
