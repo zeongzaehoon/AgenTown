@@ -2636,3 +2636,35 @@ Frontend dependencies are absent in the isolated workspace, so these commands an
 browser exercise were not executed here. Integration with the Python mapping and
 supervisor checks/browser validation remain pending. Live LLM calls are skipped, not
 passed; external-client connection remains unverified.
+
+
+### Inspect recorded Loop context through local MCP (C69-T1)
+
+Prerequisites: the delivered Loop inspection and saved-context flow, an installed
+`agentown-mcp` command and an existing product database containing recorded work.
+Launch `agentown-web --database /absolute/path/product.sqlite --port 8765`, then
+open <http://127.0.0.1:8765>, or launch the packaged app against that database.
+Select saved work and keyboard-activate **Inspect through local MCP**. No
+credentials or external-client connection are needed.
+
+For a recorded Loop attempt, inspect its **Saved Loop context** region: session
+ID, ordinal, original policy name, original input, maximum attempts and interval
+are recorded admission context. Compare with an edited current policy: the saved
+context retains the original values. **Observed session state**, admitted count
+and next time are separate observations; history and session progress may advance
+between reads. Ordinary and Skill/Hook attempts retain their existing display.
+Confirmed absent linkage displays an explicit absence message; uncertain linkage
+says absence is not confirmed and offers explicit reinspection.
+
+The evidence names every tool in order: `get_task`,
+`get_work_history_v1` with `read_only=true`, and `inspect_loop_sessions_v1`.
+Inspection invokes no execution, stop, recovery or provider operation. It does not
+change product records. Switch selected work during a held inspection: the old
+response must never appear on the new selection. Malformed data or transport
+failure clears previous confirmation and leaves the same inspection button
+available for explicit retry, without automatic retries.
+
+Deterministic frontend coverage is in `frontend/src/WorkInspection.test.tsx`:
+`npm exec -- vitest run src/WorkInspection.test.tsx` from `frontend/` with dependencies
+prepared. The supervisor-selected checks and browser validation remain pending.
+Live provider validation remains skipped, not passed.

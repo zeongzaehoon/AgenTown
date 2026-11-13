@@ -1010,13 +1010,14 @@ The UI calls `POST /api/connections/v1/inspect-work` with only
 `schema_version`, `requested_task_id`, `status`, `code`, `message`, `recovery`,
 and `inspection`. Only `status: "success"` includes inspection data; all unavailable outcomes use
 `status: "failure"` with a specific recovery code. Inspection
-contains `task` (the existing MCP Task fields), `attempts` (MCP Run fields excluding
-Skill/Hook provenance, with nullable existing Execution records), and `evidence`:
-`source: "installed_local_mcp"`, `tools: ["get_task", "get_work_history_v1"]`,
+contains `task` (the existing MCP Task fields), `attempts` (MCP Run fields with
+saved Skill/Hook/Loop context and nullable existing Execution records), and `evidence`:
+`source: "installed_local_mcp"`, `tools: ["get_task", "get_work_history_v1", "inspect_loop_sessions_v1"]`,
 `read_only: true`, `external_client_verified: false`.
 
 The installed local stdio session initializes MCP, then calls exactly
-`get_task(task_id)` and `get_work_history_v1(task_id, read_only=true)`.
+`get_task(task_id)`, `get_work_history_v1(task_id, read_only=true)`, then
+`inspect_loop_sessions_v1({})`.
 Task identities must agree with the request and with each other; every attempt
 must belong to that Task and every execution must belong to its attempt.
 Malformed envelopes, tool errors, conflicting identities and malformed records
@@ -1069,3 +1070,35 @@ checks passed: both previously failing cases (2 tests), `WorkInspection.test.tsx
 not establish a fresh native build. Installed-product and browser verification
 remain pending supervisor checks. Live LLM calls remain skipped and external
 client connection remains unverified.
+
+### Selected-work Loop context (C69-T1)
+
+Launch `agentown-web --database /absolute/path/product.sqlite` with the installed
+`agentown-mcp` command available, or open the packaged app on that same database.
+Select saved work, then choose **Inspect through local MCP**. Inspection needs no
+provider credentials or external-client connection. Each linked attempt shows its
+recorded session ID and ordinal, saved policy name, input and limits, followed by
+**Observed session state**. Editing today's policy does not change the saved
+preview. Ordinary and saved Skill/Hook attempts remain inspectable.
+
+The additive per-attempt frontend contract is `loop`, with `linkage` equal to
+`confirmed`, `absent` or `uncertain`. A confirmed value contains `session` (the
+existing version-1 LoopSession including its immutable `preview`), `ordinal` and
+`admitted_at`. For absent/uncertain linkage those three fields are null. The
+adapter must classify absence conservatively: separately read missing or
+inconsistent concurrent links are uncertain, never confirmed absent. Uncertain
+linkage remains visible with an explicit inspection-again instruction.
+
+Task, Run, employee, input, provider/model and admission identities must agree.
+Duplicate session ordinals and conflicting immutable session previews invalidate
+the response. Session `state`, `admitted` and `next_at` are separately observed
+progress; a session observation can lag its linked attempt ordinal or disagree
+with later Run progress. They are labeled observations, not atomic completion
+proof. Changing selection aborts and discards pending/displayed inspection;
+failures require explicit retry. The three tools above perform no execution,
+stop, recovery or provider calls and leave product records unchanged.
+
+Frontend deterministic coverage: `npm exec -- vitest run src/WorkInspection.test.tsx`
+from `frontend/` after dependency preparation. Supervisor checks and browser
+validation are pending implementation handoff. Live LLM validation is skipped,
+not passed.

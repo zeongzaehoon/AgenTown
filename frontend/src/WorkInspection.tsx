@@ -38,7 +38,7 @@ export function WorkInspection({taskId}: {taskId: string | null}) {
     {response?.status === 'failure' && <div role="alert"><p>{response.message}</p><p>{response.recovery}</p><p>Inspection unavailable ({response.code}). Nothing is automatically retried.</p></div>}
     {inspection && <div>
       <p role="status">Confirmed local MCP inspection. External-client connection remains unverified.</p>
-      <p>Evidence: installed local MCP · get_task · get_work_history_v1 (read_only=true).</p>
+      <p>Evidence: installed local MCP · get_task · get_work_history_v1 (read_only=true) · inspect_loop_sessions_v1.</p>
       <p>Confirmed Task ID: {inspection.task.id}</p>
       <p>Recorded status: {inspection.task.status}</p><pre>{inspection.task.title}</pre>
       <p>Recorded assignment: {inspection.task.assignees.join(', ') || 'No employee assigned'}</p>
@@ -48,6 +48,18 @@ export function WorkInspection({taskId}: {taskId: string | null}) {
         <p>{run.state} · {run.outcome ?? 'No outcome recorded'} · {run.stage}</p>
         <p>Participants: {run.participants.join(', ') || 'None recorded'}</p>
         <p>Recorded source: {run.reporting_source}{run.declared_source ? ` · ${run.declared_source}` : ''}</p>
+        {run.loop.linkage === 'confirmed' ? <section aria-label="Saved Loop context">
+          <h5>Saved Loop policy: {run.loop.session.preview.policy_name}</h5>
+          <p>Loop session ID: {run.loop.session.session_id} · Ordinal: {run.loop.ordinal}</p>
+          <p>Policy ID: {run.loop.session.preview.policy_id} · Preview ID: {run.loop.session.preview.preview_id}</p>
+          <p>Saved Loop input</p><pre>{run.loop.session.preview.input}</pre>
+          <p>Saved limits: {run.loop.session.preview.max_iterations} attempts · {run.loop.session.preview.interval_seconds} seconds between attempts</p>
+          <p>Saved expected prior runs: {run.loop.session.preview.expected_runs}</p>
+          <p>Observed session state: {run.loop.session.state} · Observed admitted attempts: {run.loop.session.admitted} · Observed next time (Unix ms): {run.loop.session.next_at}</p>
+          <p>Session progress was read separately from work history and may differ as work advances. Inspect again explicitly for newer observations.</p>
+        </section> : run.loop.linkage === 'absent'
+          ? <p>No recorded Loop linkage for this attempt.</p>
+          : <p>Loop linkage is uncertain for this attempt. Separate reads may miss concurrent admission; inspect again explicitly. Absence is not confirmed.</p>}
         {run.hook && <section aria-label="Saved Hook context">
           <h5>Saved Hook: {run.hook.hook_name}</h5>
           <p>Hook ID: {run.hook.hook_id}</p>

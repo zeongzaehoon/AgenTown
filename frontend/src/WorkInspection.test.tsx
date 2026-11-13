@@ -10,10 +10,11 @@ const success = (id = 'task-a') => ({
   inspection: {
     task: {id, title: 'Recorded request', status: 'pending', assignees: ['employee-a']},
     attempts: [{id: 'run-a', task_id: id, stage: 'execution', reporting_source: 'product',
+      loop: {linkage: 'absent', session: null, ordinal: null, admitted_at: null},
       started_at: 1, ended_at: 2, state: 'finished', outcome: 'success', participants: ['employee-a'],
       execution: {schema_version: 1, run_id: 'run-a', input: 'Recorded request', provider: 'fixture',
         model: 'deterministic', deadline_unix_ms: 3, output: 'Saved result', error: null, quality: 'unverified'}}],
-    evidence: {source: 'installed_local_mcp', tools: ['get_task', 'get_work_history_v1'],
+    evidence: {source: 'installed_local_mcp', tools: ['get_task', 'get_work_history_v1', 'inspect_loop_sessions_v1'],
       read_only: true, external_client_verified: false},
   },
 });
@@ -29,6 +30,7 @@ test('explicit keyboard inspection reads only the selected Task and renders reco
   await screen.findByText('Confirmed Task ID: task-a');
   expect(screen.getByText('Recorded assignment: employee-a')).toBeTruthy();
   expect(screen.getByText('Saved result')).toBeTruthy();
+  expect(screen.getByText('No recorded Loop linkage for this attempt.')).toBeTruthy();
   expect(screen.getByText(/Confirmed local MCP inspection. External-client/)).toBeTruthy();
   expect(fetcher).toHaveBeenCalledTimes(1);
   expect(fetcher.mock.calls[0]).toEqual(['/api/connections/v1/inspect-work', expect.objectContaining({
@@ -239,4 +241,112 @@ test.each([
   await screen.findByText('Saved Hook: Original follow-up');
   expect(fetcher.mock.calls.every(([path]) => path === '/api/connections/v1/inspect-work')).toBe(true);
   expect(fetcher).toHaveBeenCalledTimes(2);
+});
+
+function loopContext(): any {
+  const response = success();
+  response.inspection.task.title = 'Edited work input';
+  const run: any = response.inspection.attempts[0];
+  run.loop = {linkage: 'confirmed', ordinal: 1, admitted_at: 1, session: {
+    schema_version: 1, session_id: '55555555-5555-4555-8555-555555555555',
+    preview: {schema_version: 1, preview_id: 'saved-preview',
+      policy_id: '66666666-6666-4666-8666-666666666666', policy_name: 'Original bounded policy',
+      task_id: 'task-a', agent_id: 'employee-a', input: 'Recorded request', policy_enabled: true,
+      max_iterations: 2, interval_seconds: 60, expected_runs: 0, created_at: 0},
+    state: 'active', provider: 'fixture', model: 'deterministic',
+    started_at: 1, expires_at: 1000, admitted: 0, next_at: 1,
+  }};
+  return response;
+}
+
+test('Loop display retains saved policy/input/limits and labels separately observed progress', async () => {
+  const response = loopContext();
+  // The separately read session predates attempt admission; it need not agree with finished history.
+  expect(() => parseWorkInspection(response, 'task-a')).not.toThrow();
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(response))));
+  const user = userEvent.setup(); render(<WorkInspection taskId="task-a" />);
+  await user.click(screen.getByRole('button'));
+  const saved = await screen.findByRole('region', {name: 'Saved Loop context'});
+  expect(within(saved).getByText('Saved Loop policy: Original bounded policy')).toBeTruthy();
+  expect(within(saved).getByText('Recorded request')).toBeTruthy();
+  expect(within(saved).queryByText('Edited work input')).toBeNull();
+  expect(within(saved).getByText(/55555555-5555-4555-8555-555555555555 · Ordinal: 1/)).toBeTruthy();
+  expect(within(saved).getByText('Saved limits: 2 attempts · 60 seconds between attempts')).toBeTruthy();
+  expect(within(saved).getByText(/Observed session state: active · Observed admitted attempts: 0/)).toBeTruthy();
+  expect(screen.getByText(/Evidence:.*inspect_loop_sessions_v1/)).toBeTruthy();
+});
+
+test('uncertain Loop linkage never claims absence and explicit inspection can resolve it', async () => {
+  const uncertain = success(); uncertain.inspection.attempts[0].loop.linkage = 'uncertain';
+  const fetcher = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify(uncertain)))
+    .mockResolvedValueOnce(new Response(JSON.stringify(loopContext())));
+  vi.stubGlobal('fetch', fetcher);
+  const user = userEvent.setup(); render(<WorkInspection taskId="task-a" />);
+  await user.click(screen.getByRole('button'));
+  await screen.findByText(/Loop linkage is uncertain/);
+  expect(screen.queryByText('No recorded Loop linkage for this attempt.')).toBeNull();
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  await user.click(screen.getByRole('button'));
+  await screen.findByText('Saved Loop policy: Original bounded policy');
+  expect(fetcher).toHaveBeenCalledTimes(2);
+});
+
+test.each([
+  (r: any) => {delete r.loop;},
+  (r: any) => {r.loop.linkage = 'unknown';},
+  (r: any) => {r.loop.linkage = 'absent';},
+  (r: any) => {r.loop.ordinal = 0;},
+  (r: any) => {r.loop.ordinal = 3;},
+  (r: any) => {r.loop.admitted_at = 2;},
+  (r: any) => {r.loop.session.session_id = 'invalid';},
+  (r: any) => {r.loop.session.preview.task_id = 'other';},
+  (r: any) => {r.loop.session.preview.agent_id = 'other';},
+  (r: any) => {r.loop.session.preview.input = 'Edited policy input';},
+  (r: any) => {r.loop.session.preview.policy_enabled = false;},
+  (r: any) => {r.loop.session.preview.interval_seconds = 1;},
+  (r: any) => {r.loop.session.preview.created_at = 2;},
+  (r: any) => {r.loop.session.provider = 'other';},
+  (r: any) => {r.loop.session.model = 'other';},
+  (r: any) => {r.loop.session.admitted = 3;},
+  (r: any) => {r.loop.session.state = 'invented';},
+  (r: any) => {r.loop.session.expires_at = 0;},
+])('malformed Loop context is rejected (%#)', mutate => {
+  const response = loopContext(); mutate(response.inspection.attempts[0]);
+  expect(() => parseWorkInspection(response, 'task-a')).toThrow();
+});
+
+test('duplicate session ordinals and conflicting immutable session snapshots are rejected', () => {
+  const response = loopContext();
+  const second = structuredClone(response.inspection.attempts[0]);
+  second.id = 'run-b'; second.execution.run_id = 'run-b';
+  response.inspection.attempts.push(second);
+  expect(() => parseWorkInspection(response, 'task-a')).toThrow();
+  second.loop.ordinal = 2;
+  expect(() => parseWorkInspection(response, 'task-a')).not.toThrow();
+  second.loop.session.preview.policy_name = 'Edited policy';
+  expect(() => parseWorkInspection(response, 'task-a')).toThrow();
+});
+
+test('a late Loop inspection is discarded after selected work changes', async () => {
+  let finish!: (r: Response) => void;
+  const fetcher = vi.fn().mockImplementationOnce(() => new Promise<Response>(resolve => {finish = resolve;}))
+    .mockResolvedValue(new Response(JSON.stringify(success('task-b'))));
+  vi.stubGlobal('fetch', fetcher);
+  const user = userEvent.setup(); const view = render(<WorkInspection taskId="task-a" />);
+  await user.click(screen.getByRole('button'));
+  view.rerender(<WorkInspection taskId="task-b" />);
+  await user.click(screen.getByRole('button'));
+  await screen.findByText('Confirmed Task ID: task-b');
+  await act(async () => {finish(new Response(JSON.stringify(loopContext())));});
+  expect(screen.queryByRole('region', {name: 'Saved Loop context'})).toBeNull();
+  expect(screen.getByText('Confirmed Task ID: task-b')).toBeTruthy();
+});
+
+
+test('two-tool or reordered evidence cannot confirm Loop inspection', () => {
+  const response = loopContext();
+  response.inspection.evidence.tools.pop();
+  expect(() => parseWorkInspection(response, 'task-a')).toThrow();
+  response.inspection.evidence.tools = ['get_task', 'inspect_loop_sessions_v1', 'get_work_history_v1'];
+  expect(() => parseWorkInspection(response, 'task-a')).toThrow();
 });

@@ -121,7 +121,8 @@ class ConnectionDiagnostic:
                     first = await request(2, "tools/call", {"name": "get_task", "arguments": {"task_id": task_id}})
                     second = await request(3, "tools/call", {"name": "get_work_history_v1",
                         "arguments": {"task_id": task_id, "read_only": True}})
-                    inspection = validated_inspection(first, second, task_id)
+                    third = await request(4, "tools/call", {"name": "inspect_loop_sessions_v1", "arguments": {}})
+                    inspection = validated_inspection(first, second, task_id, third)
                     return dict(status="passed", code="inspection_passed",
                         message="Selected work inspected through the installed local MCP server.",
                         recovery="External-client connection remains unverified. Inspect again explicitly to refresh.",
@@ -242,13 +243,13 @@ def inspection_payload(result):
     return data
 
 
-def validated_inspection(first, second, task_id):
+def validated_inspection(first, second, task_id, third=None):
     # Existing MCP models reject extra fields and malformed nested records. Strict
     # JSON validation prevents scalar coercion while accepting JSON UUID strings.
     from .mcp_server import Task, WorkHistory
     from .application.inspect_selected_work import (
         LocalInspection, InspectedTask, InspectedRun, InspectedExecution,
-        InspectedSkill, InspectedHook)
+        InspectedSkill, InspectedHook, InspectedLoop)
     task_data, history_data = inspection_payload(first), inspection_payload(second)
     work = Task.model_validate_json(json.dumps(task_data), strict=True)
     history = WorkHistory.model_validate_json(json.dumps(history_data), strict=True)
@@ -262,6 +263,7 @@ def validated_inspection(first, second, task_id):
     unique(work.assignees)
     unique([run.id for run in history.attempts])
     runs = {run.id: run for run in history.attempts}
+    loop_links = validated_loop_links(third, history) if third is not None else {}
     attempts = []
     for run in history.attempts:
         if run.task_id != work.id or (run.execution is not None and run.execution.run_id != run.id):
@@ -308,5 +310,62 @@ def validated_inspection(first, second, task_id):
             row['skill'] = InspectedSkill(**row['skill'])
         if row['hook'] is not None:
             row['hook'] = InspectedHook(**row['hook'])
+        # Ordinary execution has no negative Loop marker. A later read may omit
+        # a concurrently created session, so a missing link is not proof of absence.
+        row['loop'] = loop_links.get(str(run.id), InspectedLoop(
+            'absent' if run.execution is None or run.skill is not None or run.hook is not None
+            else 'uncertain')) if third is not None else None
         attempts.append(InspectedRun(**row))
     return LocalInspection(InspectedTask(**work.model_dump(mode="json")), attempts)
+
+
+def validated_loop_links(result, history):
+    """Correlate immutable admission facts; progress reads are not a transaction."""
+    from .mcp_server import LoopInspection
+    from .application.inspect_selected_work import InspectedLoop
+    data = inspection_payload(result)
+    loops = LoopInspection.model_validate_json(json.dumps(data), strict=True)
+    if loops.model_dump(mode='json') != data or loops.control.state == 'storage_failure':
+        raise DiagnosticFailure()
+    sessions, run_links, ordinals = {}, {}, set()
+    for session in loops.sessions:
+        preview = session.preview
+        if (session.session_id in sessions or not preview.preview_id.strip()
+                or not preview.policy_name.strip() or not preview.input.strip()
+                or not 1 <= preview.max_iterations <= 100 or not 60 <= preview.interval_seconds <= 86400
+                or preview.expected_runs < 0 or session.admitted < 0
+                or session.admitted > preview.max_iterations
+                or session.expires_at <= session.started_at
+                or preview.created_at > session.started_at):
+            raise DiagnosticFailure()
+        sessions[session.session_id] = session
+    runs = {run.id: run for run in history.attempts}
+    for link in loops.attempts:
+        session = sessions.get(link.session_id)
+        if (session is None or link.run_id in run_links
+                or (link.session_id, link.ordinal) in ordinals
+                or link.ordinal < 1 or link.ordinal > session.preview.max_iterations
+                or link.execution.run_id != link.run_id
+                or link.admitted_at < session.started_at
+                or link.admitted_at >= session.expires_at):
+            raise DiagnosticFailure()
+        ordinals.add((link.session_id, link.ordinal))
+        run_links[link.run_id] = link
+        run = runs.get(link.run_id)
+        if run is None:
+            # A later Loop read can include attempts absent from earlier history.
+            continue
+        execution, preview = run.execution, session.preview
+        if (run.task_id != preview.task_id or execution is None
+                or run.participants != [preview.agent_id]
+                or run.skill is not None or run.hook is not None
+                or run.started_at != link.admitted_at
+                or execution.input != preview.input
+                or execution.provider != session.provider or execution.model != session.model
+                or any(getattr(execution, field) != getattr(link.execution, field)
+                       for field in ('schema_version', 'run_id', 'input', 'provider', 'model', 'deadline_unix_ms'))):
+            raise DiagnosticFailure()
+    return {str(run_id): InspectedLoop(
+        'confirmed', sessions[link.session_id].model_dump(mode='json'),
+        link.ordinal, link.admitted_at)
+        for run_id, link in run_links.items() if run_id in runs}

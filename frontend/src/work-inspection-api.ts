@@ -1,4 +1,5 @@
 import { api } from './api';
+import { loopInspection, type LoopSession } from './loop-response';
 
 export interface InspectedTask {
   id: string; title: string; status: 'pending' | 'in_progress' | 'blocked' | 'cancelled'; assignees: string[];
@@ -16,16 +17,21 @@ export interface InspectedHook extends InspectedSkill {
   target_kind: 'agent'; agent_id: string; event: 'run_completed' | 'run_failed';
   source_run_id: string; source_outcome: 'reported_success' | 'failure'; skill_enabled: true;
 }
+/** Session fields are observations from a separate read, not an atomic Run snapshot. */
+export type InspectedLoop = {
+  linkage: 'confirmed'; session: LoopSession & {schema_version: 1; started_at: number; expires_at: number};
+  ordinal: number; admitted_at: number;
+} | {linkage: 'absent' | 'uncertain'; session: null; ordinal: null; admitted_at: null};
 export interface InspectedRun {
   id: string; task_id: string; stage: string; reporting_source: string; declared_source?: string | null;
   started_at: number; ended_at: number | null; state: 'active' | 'finished'; outcome: string | null;
   participants: string[]; execution: InspectedExecution | null;
-  skill?: InspectedSkill | null; hook?: InspectedHook | null;
+  skill?: InspectedSkill | null; hook?: InspectedHook | null; loop: InspectedLoop;
 }
 export interface WorkInspection {
   task: InspectedTask; attempts: InspectedRun[];
   evidence: {
-    source: 'installed_local_mcp'; tools: ['get_task', 'get_work_history_v1'];
+    source: 'installed_local_mcp'; tools: ['get_task', 'get_work_history_v1', 'inspect_loop_sessions_v1'];
     read_only: true; external_client_verified: false;
   };
 }
@@ -54,8 +60,8 @@ export function parseWorkInspection(value: unknown, requested: string): Inspecti
       typeof task.status !== 'string' || !['pending', 'in_progress', 'blocked', 'cancelled'].includes(task.status) || !ids(task.assignees) ||
       !Array.isArray(attempts) || !object(evidence) || evidence.source !== 'installed_local_mcp' ||
       evidence.read_only !== true || evidence.external_client_verified !== false ||
-      !Array.isArray(evidence.tools) || evidence.tools.length !== 2 ||
-      evidence.tools[0] !== 'get_task' || evidence.tools[1] !== 'get_work_history_v1') throw invalid();
+      !Array.isArray(evidence.tools) || evidence.tools.length !== 3 ||
+      evidence.tools[0] !== 'get_task' || evidence.tools[1] !== 'get_work_history_v1' || evidence.tools[2] !== 'inspect_loop_sessions_v1') throw invalid();
   const seen = new Set<string>();
   for (const run of attempts) {
     if (!object(run) || !text(run.id) || seen.has(run.id) || run.task_id !== requested ||
@@ -73,7 +79,43 @@ export function parseWorkInspection(value: unknown, requested: string): Inspecti
         execution.quality !== 'unverified' || (execution.output !== null && execution.error !== null) ||
         (run.state === 'active' && (execution.output !== null || execution.error !== null)))) throw invalid();
   }
+  const sessions = new Map<string, string>();
+  const ordinals = new Set<string>();
   for (const run of attempts) {
+    const loop = run.loop;
+    if (!object(loop) || !['confirmed', 'absent', 'uncertain'].includes(String(loop.linkage))) throw invalid();
+    if (loop.linkage !== 'confirmed') {
+      if (loop.session !== null || loop.ordinal !== null || loop.admitted_at !== null) throw invalid();
+    } else {
+      if (!object(loop.session)) throw invalid();
+      const session = loop.session;
+      // Reuse the existing Loop wire parser, then check the immutable admission links.
+      try { loopInspection({schema_version: 1, sessions: [session], attempts: [], cancellation: ''}); }
+      catch { throw invalid(); }
+      const preview = session.preview as Record<string, unknown>;
+      if (session.schema_version !== 1 || !stableId(session.session_id) ||
+          !timestamp(session.started_at) || !timestamp(session.expires_at) || session.expires_at < session.started_at ||
+          !timestamp(preview.created_at) || preview.created_at > session.started_at ||
+          !stableId(preview.policy_id) || !text(preview.policy_name) || !text(preview.preview_id) ||
+          preview.policy_enabled !== true || preview.task_id !== requested ||
+          !Number.isSafeInteger(loop.ordinal) || (loop.ordinal as number) < 1 ||
+          (loop.ordinal as number) > (preview.max_iterations as number) ||
+          !timestamp(loop.admitted_at) || loop.admitted_at !== run.started_at ||
+          loop.admitted_at < session.started_at || loop.admitted_at >= session.expires_at ||
+          run.participants.length !== 1 || run.participants[0] !== preview.agent_id ||
+          !object(run.execution) || run.execution.input !== preview.input ||
+          run.execution.provider !== session.provider || run.execution.model !== session.model ||
+          run.skill != null || run.hook != null ||
+          !['active', 'complete', 'stopped', 'failed', 'expired', 'stale', 'restarted'].includes(String(session.state)) ||
+          (session.admitted as number) > (preview.max_iterations as number)) throw invalid();
+      const key = `${session.session_id}:${loop.ordinal}`;
+      if (ordinals.has(key)) throw invalid();
+      ordinals.add(key);
+      // A session observation may lag this attempt's ordinal. Never compare mutable progress.
+      const identity = JSON.stringify([['schema_version', 'preview_id', 'policy_id', 'policy_name', 'policy_enabled', 'task_id', 'agent_id', 'input', 'max_iterations', 'interval_seconds', 'expected_runs', 'created_at'].map(key => preview[key]), session.provider, session.model, session.started_at, session.expires_at]);
+      if (sessions.has(session.session_id) && sessions.get(session.session_id) !== identity) throw invalid();
+      sessions.set(session.session_id, identity);
+    }
     const validSnapshot = (saved: unknown): saved is InspectedSkill => object(saved) &&
       saved.schema_version === 1 && saved.run_id === run.id && text(saved.preview_id) &&
       stableId(saved.skill_id) && text(saved.skill_name) && text(saved.instructions) &&

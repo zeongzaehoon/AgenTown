@@ -63,7 +63,7 @@ def test_saved_provenance_survives_application_mapping(kind):
             return InspectionResult('passed', 'inspection_passed', 'Inspected', '', inspection)
     result = asyncio.run(InspectSelectedWork(Port()).execute(TASK))
     assert result['status'] == 'success'
-    assert result['inspection']['attempts'] == history['attempts']
+    assert [{k: v for k, v in row.items() if k != 'loop'} for row in result['inspection']['attempts']] == history['attempts']
 
 
 @pytest.mark.parametrize('kind', ['skill', 'hook'])
@@ -146,6 +146,7 @@ for line in sys.stdin:
         result = {'protocolVersion': '2025-03-26', 'capabilities': {'tools': {}}}
     elif msg['method'] == 'tools/call':
         data = json.loads(task if msg['params']['name'] == 'get_task' else history)
+        if msg['params']['name'] == 'inspect_loop_sessions_v1': data = {'schema_version': 1, 'control': {'state': 'available', 'can_control': True, 'message': 'Available'}, 'sessions': [], 'attempts': []}
         if mode == 'mismatch': data['id' if 'id' in data else 'schema_version'] = 'invalid'
         result = {'structuredContent': data, 'content': [{'type': 'text', 'text': json.dumps(data)}], 'isError': mode == 'error'}
     else: continue
@@ -181,9 +182,9 @@ def test_installed_transport_only_reads_and_reaps(tmp_path, monkeypatch, mode, s
             assert result['inspection']['task']['id'] == TASK
             assert result['inspection']['attempts'][0]['execution']['output'] == 'Available result'
             if mode in ('skill', 'hook'):
-                assert result['inspection']['attempts'] == provenance_records(mode)[1]['attempts']
+                assert [{k: v for k, v in row.items() if k != 'loop'} for row in result['inspection']['attempts']] == provenance_records(mode)[1]['attempts']
             assert result['inspection']['evidence'] == dict(
-                source='installed_local_mcp', tools=['get_task', 'get_work_history_v1'],
+                source='installed_local_mcp', tools=['get_task', 'get_work_history_v1', 'inspect_loop_sessions_v1'],
                 read_only=True, external_client_verified=False)
         else:
             assert result['inspection'] is None
@@ -191,7 +192,8 @@ def test_installed_transport_only_reads_and_reaps(tmp_path, monkeypatch, mode, s
                  if json.loads(line)['method'] == 'tools/call']
         if mode != 'timeout':
             assert calls == [dict(name='get_task', arguments=dict(task_id=TASK)),
-                             dict(name='get_work_history_v1', arguments=dict(task_id=TASK, read_only=True))]
+                             dict(name='get_work_history_v1', arguments=dict(task_id=TASK, read_only=True)),
+                             dict(name='inspect_loop_sessions_v1', arguments={})]
         assert database.read_bytes() == b'unchanged'
         assert service.active is None and processes[0].returncode is not None
         await service.close()
@@ -268,7 +270,7 @@ def test_api_returns_saved_provenance_without_execution(tmp_path, monkeypatch, k
         assert response.status_code == 200
         payload = response.json()
         assert payload['status'] == 'success'
-        assert payload['inspection']['attempts'] == history['attempts']
+        assert [{k: v for k, v in row.items() if k != 'loop'} for row in payload['inspection']['attempts']] == history['attempts']
         assert payload['inspection']['evidence']['read_only'] is True
     assert calls == [TASK]
 
@@ -301,3 +303,73 @@ def test_unconfirmed_port_result_never_exposes_inspection(status):
     result = asyncio.run(InspectSelectedWork(Port()).execute(TASK))
     assert result['status'] == 'failure'
     assert result['inspection'] is None
+
+
+SESSION = '77777777-7777-4777-8777-777777777777'
+
+
+def loop_records():
+    task, history = records()
+    history['attempts'][0]['participants'] = [AGENT]
+    preview = dict(schema_version=1, preview_id='saved-loop-preview', policy_id=SKILL,
+                   policy_name='Saved policy before editing', policy_enabled=True,
+                   task_id=TASK, agent_id=AGENT, input='Work', max_iterations=3,
+                   interval_seconds=60, expected_runs=0, created_at=0)
+    session = dict(schema_version=1, session_id=SESSION, preview=preview, state='active',
+                   provider='fixture', model='fixture', started_at=1, expires_at=100,
+                   admitted=0, next_at=1, declared_source=None)
+    link = dict(schema_version=1, session_id=SESSION, run_id=RUN, ordinal=1,
+                admitted_at=1, execution=copy.deepcopy(history['attempts'][0]['execution']))
+    loops = dict(schema_version=1, control=dict(state='available', can_control=True,
+                 message='Available'), sessions=[session], attempts=[link])
+    return task, history, loops
+
+
+def test_loop_saved_snapshot_and_separate_progress_observations():
+    task, history, loops = loop_records()
+    before = copy.deepcopy((task, history, loops))
+    # Session admitted count predates the link read. Execution was read later
+    # than history; its mutable output may also differ without invalidating identity.
+    loops['attempts'][0]['execution']['output'] = 'Later observation'
+    result = validated_inspection(envelope(task), envelope(history), TASK, envelope(loops))
+    loop = result.attempts[0].loop
+    assert loop.linkage == 'confirmed' and loop.session['session_id'] == SESSION and loop.ordinal == 1
+    assert loop.session['preview']['policy_name'] == 'Saved policy before editing'
+    assert loop.session['preview']['input'] == 'Work' and loop.session['preview']['max_iterations'] == 3
+    assert loop.session['admitted'] == 0
+    assert loop.admitted_at == history['attempts'][0]['started_at']
+    from dataclasses import asdict
+    assert set(asdict(loop)) == {'linkage', 'session', 'ordinal', 'admitted_at'}
+    assert result.attempts[0].execution.output == 'Available result'
+    assert (task, history) == before[:2]
+
+
+@pytest.mark.parametrize('change', [
+    lambda l: l['attempts'].append(copy.deepcopy(l['attempts'][0])),
+    lambda l: l['sessions'].append(copy.deepcopy(l['sessions'][0])),
+    lambda l: l['attempts'][0].update(session_id=TASK),
+    lambda l: l['attempts'][0].update(ordinal=0),
+    lambda l: l['attempts'][0].update(admitted_at=2),
+    lambda l: l['attempts'][0]['execution'].update(input='Changed input'),
+    lambda l: l['sessions'][0]['preview'].update(agent_id=HOOK),
+    lambda l: l['sessions'][0]['preview'].update(task_id=RUN),
+    lambda l: l['sessions'][0].update(provider='different'),
+    lambda l: l['sessions'][0]['preview'].update(policy_name=''),
+    lambda l: l.update(extra=True),
+])
+def test_loop_rejects_malformed_or_mismatched_admission(change):
+    task, history, loops = loop_records()
+    change(loops)
+    with pytest.raises(Exception):
+        validated_inspection(envelope(task), envelope(history), TASK, envelope(loops))
+
+
+def test_missing_link_is_uncertain_and_later_attempt_is_allowed():
+    task, history, loops = loop_records()
+    loops['attempts'][0]['run_id'] = FOLLOW_UP
+    loops['attempts'][0]['execution']['run_id'] = FOLLOW_UP
+    result = validated_inspection(envelope(task), envelope(history), TASK, envelope(loops))
+    assert result.attempts[0].loop.linkage == 'uncertain'
+    history['attempts'][0]['execution'] = None
+    result = validated_inspection(envelope(task), envelope(history), TASK, envelope(loops))
+    assert result.attempts[0].loop.linkage == 'absent'

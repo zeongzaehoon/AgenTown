@@ -62,6 +62,14 @@ class InspectedHook:
 
 
 @dataclass(frozen=True)
+class InspectedLoop:
+    linkage: Literal['confirmed', 'absent', 'uncertain']
+    session: dict | None = None
+    ordinal: int | None = None
+    admitted_at: int | None = None
+
+
+@dataclass(frozen=True)
 class InspectedRun:
     id: str
     task_id: str
@@ -76,6 +84,7 @@ class InspectedRun:
     execution: InspectedExecution | None
     skill: InspectedSkill | None = None
     hook: InspectedHook | None = None
+    loop: InspectedLoop | None = None
 
 
 @dataclass(frozen=True)
@@ -110,7 +119,7 @@ class InspectSelectedWork:
         if confirmed:
             payload['inspection']['evidence'] = {
                 'source': 'installed_local_mcp',
-                'tools': ['get_task', 'get_work_history_v1'],
+                'tools': ['get_task', 'get_work_history_v1', 'inspect_loop_sessions_v1'],
                 'read_only': True,
                 'external_client_verified': False,
             }
