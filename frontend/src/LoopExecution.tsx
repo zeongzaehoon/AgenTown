@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { ApiError, api, type Work, type Workspace } from './api';
 import { configurationRequest, savedLoopPolicies, type LoopRecord } from './configuration-api';
 
-import { loopInspection, loopPreview, type LoopAttempt, type LoopInspection, type LoopPreview, type LoopSession } from './loop-response';
+import { loopInspection, loopPreview, loopReceipt, type LoopAttempt, type LoopInspection, type LoopPreview, type LoopSession } from './loop-response';
 export type { LoopInspection, LoopPreview, LoopSession } from './loop-response';
 type Policy = LoopRecord;
 function attemptState(a: LoopAttempt): string {
@@ -29,7 +29,7 @@ export function loopLabel(session: LoopSession, attempts: LoopAttempt[]): string
 export function LoopExecution({work, workspace, connected, draft, disabled, availability, submit}: {
   work: Work; workspace: Workspace; connected: boolean; draft: string; disabled: boolean;
   availability: (blocked: boolean) => void;
-  submit: (path: string, payload: object, emergency?: boolean) => Promise<void>;
+  submit: (path: string, payload: object, emergency?: boolean) => Promise<unknown>;
 }) {
   const [policies, setPolicies] = useState<Policy[]>([]);
   const [inspection, setInspection] = useState<LoopInspection | null>(null);
@@ -99,14 +99,18 @@ export function LoopExecution({work, workspace, connected, draft, disabled, avai
     } catch (error) { if (current.current === captured && revision.current === capturedRevision) { setMessage((error as Error).message); if (error instanceof ApiError && error.control) setControl(error.control); } }
     finally { lock.current = false; setBusy(false); }
   }
-  async function send(path: string, payload: object, emergency = false) {
+  async function send(path: string, payload: object, expected: LoopPreview | LoopSession, emergency = false) {
     if (lock.current || !connected || !authority) return;
     lock.current = true; ++epoch.current; setBusy(true); setPreview(null); setAvailable(false);
     setMessage('Request submitted. Inspect session and attempt records before retrying.');
     region.current?.focus();
-    try { await submit(path, payload, emergency); }
+    try {
+      loopReceipt(await submit(path, payload, emergency), expected, emergency ? 'stop' : 'start',
+        'session_id' in expected ? expected.provider : workspace.provider, 'session_id' in expected ? expected.model : workspace.model);
+      setMessage(emergency ? 'Local stop acknowledged. Remote completion may remain unknown. Inspect session and attempt records.' : 'Loop admission acknowledged. Inspect session and attempt records for progress.');
+    }
     catch (error) {
-      setMessage((error as Error).message);
+      setMessage(`Loop outcome is not confirmed. ${(error as Error).message} Inspect session and attempt records before another explicit attempt. Nothing is resent automatically.`);
       setControl(error instanceof ApiError ? error.control ?? null : null);
     }
     finally { ++epoch.current; lock.current = false; setBusy(false); }
@@ -120,7 +124,8 @@ export function LoopExecution({work, workspace, connected, draft, disabled, avai
       {policies.map(p => <option key={p.id} value={p.id} disabled={!eligible(p)}>{p.name} · {p.id} · {!p.enabled ? 'Disabled' : p.task_id !== work.id ? 'Different work' : 'Configured'}</option>)}
     </select>
     <button ref={inspectButton} type="button" disabled={busy || disabled || active || !connected || !authority || !policies.some(p => p.id === selected && eligible(p))} onClick={() => void inspect()}>Preview Loop with saved work</button>
-    <p role="status" aria-label="Loop inspection" aria-live="polite">{!connected || !available ? 'Disconnected or Loop data unavailable. Loaded sessions may be stale; reconnect to inspect before submitting.' : message || 'Configured Loops require preview and explicit start.'}</p>
+    <p role="status" aria-label="Loop inspection" aria-live="polite">{!connected || !available ? 'Disconnected or Loop data unavailable. Loaded sessions may be stale; reconnect to inspect before submitting.' : 'Configured Loops require preview and explicit start.'}</p>
+    <p role="status" aria-label="Loop request outcome">{message}</p>
     <p role="status">{controlText(control)}</p>
     <p>Inspection and availability never claim ownership or resume work. Availability is advisory; the server checks ownership again for every action.</p>
     {preview && valid && <section aria-label="Loop execution preview" onFocusCapture={() => { focused.current = true; }} onBlurCapture={e => { if (!e.currentTarget.contains(e.relatedTarget)) focused.current = false; }} onKeyDown={e => { if (e.key === 'Escape') { e.preventDefault(); setPreview(null); focusBack(); } }}>
@@ -130,7 +135,7 @@ export function LoopExecution({work, workspace, connected, draft, disabled, avai
       <button type="button" onClick={() => { setPreview(null); focusBack(); }}>Cancel Loop preview</button>
       <button ref={startButton} type="button" disabled={busy || disabled || !authority} onClick={() => {
         if (lock.current || disabled || current.current !== preview.snapshot) return;
-        void send('/api/loops/v1/start', {preview_id: preview.value.preview_id, expected_runs: preview.value.expected_runs});
+        void send('/api/loops/v1/start', {preview_id: preview.value.preview_id, expected_runs: preview.value.expected_runs}, preview.value);
       }}>Authorize and start bounded Loop</button>
     </section>}
     <p>{inspection?.cancellation || 'Stop prevents new admissions and attempts local cancellation. Remote completion may remain unknown.'}</p>
@@ -138,7 +143,7 @@ export function LoopExecution({work, workspace, connected, draft, disabled, avai
       <h5>{s.preview.policy_name} · {s.session_id}</h5>
       <p>{sourceText(s.declared_source)}</p>
       <p>{loopLabel(s, inspection.attempts)} · Admitted: {s.admitted} / {s.preview.max_iterations} · {s.provider} / {s.model}</p>
-      {s.state === 'active' && <button type="button" disabled={busy || !connected || !authority} onClick={() => void send('/api/loops/v1/stop', {session_id: s.session_id}, true)}>Stop Loop {s.session_id}</button>}
+      {s.state === 'active' && <button type="button" disabled={busy || !connected || !authority} onClick={() => void send('/api/loops/v1/stop', {session_id: s.session_id}, s, true)}>Stop Loop {s.session_id}</button>}
       <ul>{inspection.attempts.filter(a => a.session_id === s.session_id).map(a => <li key={a.run_id}>Attempt {a.ordinal} · {a.run_id} · {a.execution ? `${attemptState(a)} · ${a.execution.outcome || (a.execution.error ? 'Failure or interruption' : a.execution.output != null ? 'Result available · Unverified' : 'No terminal outcome')}${a.execution.error ? ` · ${a.execution.error}` : ''}` : 'Execution record unavailable'}{a.execution?.output != null && <pre>{a.execution.output}</pre>}</li>)}</ul>
     </section>)}</div>
   </section>;

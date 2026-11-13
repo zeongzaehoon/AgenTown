@@ -2113,3 +2113,51 @@ and a stale in-flight refresh. These reproduction steps were not browser-execute
 in the implementation workspace. Frontend dependencies are absent; focused
 execution and supervisor-selected verification remain pending. Live provider
 validation is skipped, not passed.
+
+### Bounded Loop receipt uncertainty (C56-T1)
+
+Use the existing deterministic web fixture, with built frontend assets:
+
+```sh
+printf 'success' > /tmp/c56-response-gate
+uv run --directory python --locked python tests/web_browser_server.py /tmp/c56-work.sqlite3 8766 /tmp/c56-response-gate
+```
+
+Open http://127.0.0.1:8766, create an employee and save assigned work. In
+Configuration create and enable a Loop for that saved work, with maximum attempts
+2 and interval 60 seconds. Keep an unsaved draft in the work input.
+
+1. In saved-work **Run a bounded Loop**, select the policy, keyboard-activate
+   **Preview Loop with saved work**, then **Authorize and start bounded Loop**.
+   A valid version-1 session response shows admission acknowledged. This confirms
+   admission only; inspect persisted session and attempt records for execution.
+2. Stop the active session from saved work. A valid stopped-session receipt shows
+   **Local stop acknowledged**, with remote completion explicitly unknown.
+   Preview and explicitly start a new session, then stop it from company
+   **Bounded Loop activity**. Inspect records from both surfaces.
+3. Using a browser response override or local proxy, allow the next start or stop
+   POST to reach the fixture but replace its response with `null`, `{}`, an array,
+   unreadable JSON, or a real receipt with `schema_version: 2`. Also try a start
+   receipt whose nested `preview.preview_id` differs, and a stop receipt whose
+   `session_id` differs. Each must show an unconfirmed outcome, retain selected
+   policy, unsaved draft and earlier records, and consume start consent. Double
+   activation must send only one request. No receipt proves remote cancellation.
+4. Restore genuine GET inspection responses. Fresh authoritative inspection may
+   restore emergency stop even when ordinary execution is disabled. It must not
+   start or stop automatically. Inspect actual session/attempt records before
+   making another explicit request; a response override does not undo admission.
+   A poll started before submission must not restore authority after submission.
+
+Focused deterministic checks (from `frontend`, with dependencies available):
+
+```sh
+npx vitest run src/loop-response.test.tsx src/LoopExecution.test.tsx src/OverviewLoops.test.tsx src/App.test.tsx
+npx tsc --noEmit
+```
+
+The tests cover receipt validation, uncertainty, retained records/selection,
+consumed consent, duplicate activation, stale in-flight inspection, recovery and
+keyboard operation. The fixture's `.calls` file and the screen's retained session
+and attempt records provide observable evidence. This implementation workspace
+has no frontend dependencies; these tests and supervisor-selected browser checks
+remain pending. Live provider calls are skipped, not passed.

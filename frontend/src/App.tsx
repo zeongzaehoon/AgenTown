@@ -390,11 +390,13 @@ export function App() {
               draft={input} disabled={baseCannotExecute} availability={loopAvailability}
               submit={async (path, payload, emergency) => {
                 let failure: unknown;
+                let receipt: unknown;
                 await mutate(emergency ? `stop/${work.id}` : work.id, async signal => {
-                  try { await api(path, payload, signal); }
+                  try { receipt = await api<unknown>(path, payload, signal); }
                   catch (error) { failure = error; throw error; }
                 });
                 if (failure) throw failure;
+                return receipt;
               }} />
             <HookExecution key={`hook/${work.id}`} work={work} workspace={state!} connected={connected}
               draft={input} disabled={cannotExecute}

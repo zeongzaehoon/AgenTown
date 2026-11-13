@@ -216,3 +216,84 @@ test.each(['__proto__', 'constructor', 'toString'])('renders prototype-named ses
   expect(f.props.submit).not.toHaveBeenCalled();
   expect(f.fetcher.mock.calls.every(([path]) => path === '/api/loops/v1' || path === '/api/config/v1/loops')).toBe(true);
 });
+
+test.each(['valid', 'null', 'malformed', 'unsupported', 'wrong-preview'])('start receipt %s consumes consent, preserves selection and recovers without replay', async kind => {
+  let poll = () => {};
+  const realInterval = globalThis.setInterval;
+  const interval = vi.spyOn(globalThis, 'setInterval').mockImplementation((callback, delay, ...args) => {
+    if (delay === 800) { poll = callback as () => void; return 1 as unknown as ReturnType<typeof setInterval>; }
+    return realInterval(callback, delay, ...args);
+  });
+  try {
+    const f = setup();
+    const receipt = {...session, schema_version: 1, started_at: 0, expires_at: 1};
+    let resolve!: (value: unknown) => void;
+    const submit = vi.fn(() => new Promise<unknown>(r => { resolve = r; }));
+    render(<LoopExecution {...f.props} draft="Keep draft" submit={submit} />);
+    const start = await inspect();
+    act(() => { start.click(); start.click(); });
+    expect(submit).toHaveBeenCalledTimes(1);
+    await act(async () => resolve(kind === 'valid' ? receipt : kind === 'null' ? null : kind === 'malformed' ? {} : kind === 'unsupported' ? {...receipt, schema_version: 2} : {...receipt, preview: {...preview, preview_id: 'wrong'}}));
+    expect(screen.getByLabelText('Loop request outcome').textContent).toMatch(kind === 'valid' ? /admission acknowledged/ : /not confirmed/);
+    expect((screen.getByLabelText('Saved Loop') as HTMLSelectElement).value).toBe('l');
+    expect(screen.queryByRole('button', {name: 'Authorize and start bounded Loop'})).toBeNull();
+    f.data.sessions = [session];
+    await act(async () => poll());
+    const stop = screen.getByRole('button', {name: 'Stop Loop session'});
+    expect((stop as HTMLButtonElement).disabled).toBe(false);
+    expect(submit).toHaveBeenCalledTimes(1);
+    stop.focus(); await userEvent.setup().keyboard('{Enter}');
+    await act(async () => resolve({...receipt, state: 'stopped'}));
+    expect(submit).toHaveBeenCalledTimes(2);
+    expect(screen.getByLabelText('Loop request outcome').textContent).toMatch(/Local stop acknowledged.*Remote completion may remain unknown/);
+  } finally { interval.mockRestore(); }
+});
+
+test.each([null, {}, {schema_version: 2}, {session_id: 'wrong'}])('uncertain saved-work stop receipt %j retains records and requires fresh inspection', async broken => {
+  vi.useFakeTimers();
+  try {
+    const f = setup(); f.data.sessions = [session];
+    const submit = vi.fn(async () => ({...session, schema_version: 1, started_at: 0, expires_at: 1, state: 'stopped', ...broken}));
+    // null must remain null rather than becoming a valid merged record.
+    if (broken === null || Object.keys(broken).length === 0) submit.mockImplementation(async () => broken as never);
+    render(<LoopExecution {...f.props} disabled submit={submit} />);
+    await act(async () => {});
+    const stop = screen.getByRole('button', {name: 'Stop Loop session'});
+    await act(async () => { stop.click(); stop.click(); });
+    expect(screen.getByLabelText('Loop request outcome').textContent).toMatch(/not confirmed/);
+    expect(screen.getByRole('region', {name: 'Loop session session'})).toBeTruthy();
+    expect((stop as HTMLButtonElement).disabled).toBe(true);
+    await act(async () => { await vi.advanceTimersByTimeAsync(800); });
+    expect((stop as HTMLButtonElement).disabled).toBe(false);
+    expect(submit).toHaveBeenCalledTimes(1);
+  } finally { vi.useRealTimers(); }
+});
+
+test('saved-work stop rejects a stale in-flight inspection and restores emergency control after fresh inspection', async () => {
+  vi.useFakeTimers();
+  try {
+    const f = setup(); f.data.sessions = [session];
+    let reads = 0;
+    let resolvePoll!: (value: Response) => void;
+    let resolveStop!: (value: unknown) => void;
+    const original = globalThis.fetch;
+    vi.stubGlobal('fetch', (path: string, options: RequestInit) => {
+      if (path === '/api/loops/v1' && ++reads === 2) return new Promise<Response>(r => { resolvePoll = r; });
+      return original(path, options);
+    });
+    const submit = vi.fn(() => new Promise<unknown>(r => { resolveStop = r; }));
+    render(<LoopExecution {...f.props} disabled submit={submit} />);
+    await act(async () => {});
+    const stop = screen.getByRole('button', {name: 'Stop Loop session'});
+    await act(async () => { await vi.advanceTimersByTimeAsync(800); });
+    act(() => { stop.click(); stop.click(); });
+    await act(async () => resolvePoll(new Response(JSON.stringify(f.data))));
+    expect((stop as HTMLButtonElement).disabled).toBe(true);
+    await act(async () => resolveStop(null));
+    expect((stop as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByLabelText('Loop request outcome').textContent).toMatch(/not confirmed/);
+    await act(async () => { await vi.advanceTimersByTimeAsync(800); });
+    expect((stop as HTMLButtonElement).disabled).toBe(false);
+    expect(submit).toHaveBeenCalledTimes(1);
+  } finally { vi.useRealTimers(); }
+});

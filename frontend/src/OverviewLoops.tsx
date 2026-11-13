@@ -2,7 +2,7 @@ import { canControl, controlText, sourceText, type LoopControl } from './loop-co
 import { useEffect, useRef, useState } from 'react';
 import { ApiError, api, type Workspace } from './api';
 import { loopLabel } from './LoopExecution';
-import { loopInspection, type LoopInspection } from './loop-response';
+import { loopInspection, loopReceipt, type LoopInspection } from './loop-response';
 
 /** Polling and navigation inspect only; stopping requires explicit session consent. */
 export function OverviewLoops({workspace, onOpenWork}: {workspace: Workspace | null; onOpenWork: (id: string) => void}) {
@@ -26,8 +26,9 @@ export function OverviewLoops({workspace, onOpenWork}: {workspace: Workspace | n
     setBusy(true); setStatus('loading'); inspectedAt.current = 0;
     setMessage(`Stop request for Loop ${sessionId} submitted. Awaiting response; cancellation is not confirmed.`);
     try {
-      await api('/api/loops/v1/stop', {session_id: sessionId});
-      if (mounted.current) setMessage(`Local cancellation requested for Loop ${sessionId}. Remote completion may remain unknown. Inspect again before another explicit attempt.`);
+      const expected = inspection.sessions.find(s => s.session_id === sessionId)!;
+      loopReceipt(await api<unknown>('/api/loops/v1/stop', {session_id: sessionId}), expected, 'stop', expected.provider, expected.model);
+      if (mounted.current) setMessage(`Local stop acknowledged for Loop ${sessionId}. Remote completion may remain unknown. Inspect again before another explicit attempt.`);
     } catch (error) {
       if (mounted.current) {
         setControl(error instanceof ApiError ? error.control ?? null : null);

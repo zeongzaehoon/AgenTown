@@ -165,10 +165,10 @@ test('explicit stop without linked work ignores a pre-stop poll and requires pos
   expect(button.getAttribute('aria-disabled')).toBe('true');
   await act(async () => { await vi.advanceTimersByTimeAsync(1600); });
   expect(reads).toBe(2);
-  await act(async () => { resolveStop(new Response('{}')); });
+  await act(async () => { resolveStop(new Response(JSON.stringify({...session, schema_version: 1, started_at: 0, expires_at: 1, state: 'stopped'}))); });
   expect(document.activeElement).toBe(button);
   expect(button.getAttribute('aria-disabled')).toBe('true');
-  expect(screen.getByLabelText('Overview Loop stop outcome').textContent).toContain('Local cancellation requested');
+  expect(screen.getByLabelText('Overview Loop stop outcome').textContent).toContain('Local stop acknowledged');
   fireEvent.click(button);
   expect(fetcher.mock.calls.filter(([path]) => path.endsWith('/stop'))).toHaveLength(1);
   await act(async () => { fireEvent.click(screen.getByRole('button', {name: 'Inspect Loop sessions again'})); });
@@ -276,4 +276,26 @@ test.each(['__proto__', 'constructor', 'toString'])('renders prototype-named ses
   expect(stop.getAttribute('aria-disabled')).toBe('true');
   fireEvent.click(stop);
   expect(fetcher.mock.calls.every(([path, init]) => path === '/api/loops/v1' && init?.method === 'GET' && init.body === undefined)).toBe(true);
+});
+
+test.each(['valid', 'null', 'malformed', 'unsupported', 'wrong-session'])('overview stop receipt %s retains records and recovers only through inspection', async kind => {
+  vi.useFakeTimers();
+  try {
+    const receipt = {...session, schema_version: 1, started_at: 0, expires_at: 1, state: 'stopped'};
+    const value = kind === 'valid' ? receipt : kind === 'null' ? null : kind === 'malformed' ? {} : kind === 'unsupported' ? {...receipt, schema_version: 2} : {...receipt, session_id: 'wrong'};
+    const fetcher = vi.fn(async (path: string) => new Response(JSON.stringify(path.endsWith('/stop') ? value : initial())));
+    vi.stubGlobal('fetch', fetcher);
+    render(<OverviewLoops workspace={workspace} onOpenWork={vi.fn()} />);
+    await act(async () => {});
+    const stop = screen.getByRole('button', {name: 'Stop Loop s from overview'});
+    stop.focus();
+    await act(async () => { fireEvent.click(stop); fireEvent.click(stop); });
+    expect(document.activeElement).toBe(stop);
+    expect(screen.getByLabelText('Overview Loop stop outcome').textContent).toMatch(kind === 'valid' ? /Local stop acknowledged/ : /not confirmed/);
+    expect(stop.getAttribute('aria-disabled')).toBe('true');
+    expect(screen.getByText(/Admitted: 1 \/ 2/)).toBeTruthy();
+    await act(async () => { fireEvent.click(screen.getByRole('button', {name: 'Inspect Loop sessions again'})); });
+    expect(stop.getAttribute('aria-disabled')).toBe('false');
+    expect(fetcher.mock.calls.filter(([path]) => path.endsWith('/stop'))).toHaveLength(1);
+  } finally { vi.useRealTimers(); }
 });

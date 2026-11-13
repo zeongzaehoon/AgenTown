@@ -49,3 +49,18 @@ export function loopInspection(value: unknown): LoopInspection {
   }
   return value as unknown as LoopInspection;
 }
+
+/** Mutation receipts require the current wire version, unlike legacy inspection rows. */
+export function loopReceipt(value: unknown, expected: LoopPreview | LoopSession, action: 'start' | 'stop', provider: string, model: string | null): LoopSession {
+  const fail = () => new Error(`Loop ${action} outcome is not confirmed. Inspect session and attempt records before another explicit attempt. Nothing is resent automatically. Remote completion may remain unknown.`);
+  if (!record(value) || value.schema_version !== 1 || !integer(value.started_at) || !integer(value.expires_at)) throw fail();
+  let session: LoopSession;
+  try { session = loopInspection({schema_version: 1, sessions: [value], attempts: [], cancellation: ''}).sessions[0]; }
+  catch { throw fail(); }
+  const preview = 'session_id' in expected ? expected.preview : expected;
+  if ((Object.keys(preview) as (keyof LoopPreview)[]).some(key => session.preview[key] !== preview[key]) ||
+    session.provider !== provider || session.model !== model || session.admitted > preview.max_iterations ||
+    (value.expires_at as number) < (value.started_at as number) ||
+    (action === 'start' ? session.state !== 'active' : !('session_id' in expected) || session.session_id !== expected.session_id || session.state !== 'stopped' || session.admitted < expected.admitted)) throw fail();
+  return session;
+}
