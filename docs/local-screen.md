@@ -2457,3 +2457,53 @@ if needed; neither recovery action resends work. Skill and Hook need fresh previ
 Supervisor consolidated verification, disposable-server/browser exercises and
 visual validation remain pending for this snapshot. Real LLM calls are skipped,
 not passed.
+
+### Loop persisted confirmation and explicit recovery (C64-T1)
+
+Launch a disposable product database, using the existing saved configuration
+workflow (no credentials or live provider calls are needed):
+
+```sh
+uv run --directory python --locked agentown-web --database /tmp/agentown-loop-confirmation.sqlite3 --port 8765
+```
+
+Open http://127.0.0.1:8765. Create an employee, save assigned work and configure
+an enabled Loop with two iterations and a 60-second interval. Preserve an unsaved
+work draft while exercising the controls. Use browser network interception for
+`GET /api/loops/v1` after a mutation response, leaving POST responses intact:
+
+1. Keyboard-select the saved Loop, preview and authorize once. Hold the following
+   GET: the status says the response was received and saved confirmation is
+   pending. Repeated activation must send only one POST. Release a matching
+   session, including an increased admitted count or terminal state: confirmation
+   succeeds without requiring the original active snapshot.
+2. Repeat with a missing session, changed preview/provider/model, regressed or
+   excessive admission count, malformed JSON or failed GET. The status announces
+   uncertainty; loaded records, policy selection and draft remain. Permit normal
+   polling to recover: a new start must remain blocked.
+3. Tab to **Refresh Loop session records**, press Enter, inspect the displayed
+   sessions and attempts, then keyboard-activate **I inspected refreshed Loop
+   records**. These controls issue reads only. A new start requires a fresh preview
+   and consent; an active session continues to block duplicate starts.
+4. During start recovery, refresh a recorded active session with granted local
+   authority and explicitly **Stop Loop**. Local stop is confirmed only after the
+   following GET records that same stopped session. Remote completion remains
+   unknown. Repeat from company overview, including with linked work unavailable.
+   Hold/fail/corrupt the confirmation GET or return an active session: uncertainty
+   remains and previous records stay readable. Keyboard-activate **Inspect Loop
+   sessions again** to recover controls without replaying the stop.
+5. Delay a polling read across a mutation, then return it. Its earlier generation
+   cannot overwrite confirmation. Authority loss and stale inspection must prevent
+   stop; a fresh granted inspection restores explicit emergency stop.
+
+Focused deterministic interaction checks (from frontend, once dependencies exist):
+
+```sh
+npm exec -- tsc --noEmit
+npm exec -- vitest run src/loop-response.test.tsx src/LoopExecution.test.tsx src/OverviewLoops.test.tsx
+```
+
+This implementation invocation did not execute the launch or browser exercise.
+Frontend dependencies were unavailable in the isolated snapshot; focused checks
+and the supervisor browser gate are pending. Live provider calls are skipped,
+not passed. Earlier receipt-only instructions are superseded by this section.

@@ -64,3 +64,17 @@ export function loopReceipt(value: unknown, expected: LoopPreview | LoopSession,
     (action === 'start' ? session.state !== 'active' : !('session_id' in expected) || session.session_id !== expected.session_id || session.state !== 'stopped' || session.admitted < expected.admitted)) throw fail();
   return session;
 }
+
+/** A receipt is delivery evidence; only a correlated read establishes saved state. */
+export function confirmedLoop(value: unknown, receipt: LoopSession, action: 'start' | 'stop'): LoopInspection {
+  const inspection = loopInspection(value);
+  const saved = inspection.sessions.find(s => s.session_id === receipt.session_id);
+  const states = ['active', 'complete', 'stopped', 'failed', 'expired', 'restarted', 'stale'];
+  if (!saved || Object.keys(receipt.preview).some(key => saved.preview[key as keyof LoopPreview] !== receipt.preview[key as keyof LoopPreview]) ||
+    saved.provider !== receipt.provider || saved.model !== receipt.model ||
+    saved.admitted < receipt.admitted || saved.admitted > receipt.preview.max_iterations ||
+    !states.includes(saved.state) || (action === 'stop' && saved.state !== 'stopped')) {
+    throw new Error('Saved Loop state is not confirmed. Refresh and inspect records; nothing is resent automatically.');
+  }
+  return inspection;
+}

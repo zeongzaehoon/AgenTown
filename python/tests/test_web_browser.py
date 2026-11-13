@@ -169,7 +169,12 @@ def test_employee_to_result_browser(tmp_path, installed_package):
             page.reload()
             expect(page.locator('#detail pre').first).to_have_text(text)
             snapshot(page, '02-pending-reloaded')
-            page.get_by_role('button', name='Execute work').focus()
+            execute = page.get_by_role('button', name='Execute work')
+            # Reload starts a fresh Loop-authority inspection. Execution stays
+            # disabled until that saved server state has been read, so exercise
+            # the enabled control instead of racing the inspection request.
+            expect(execute).to_be_enabled()
+            execute.focus()
             page.keyboard.press('Enter')
             expect(page.locator('#detail .badge')).to_contain_text('Running')
             expect(page.get_by_role('button', name='Retry explicitly')).to_be_disabled()
@@ -185,6 +190,12 @@ def test_employee_to_result_browser(tmp_path, installed_package):
             page.get_by_role('button', name='Retry explicitly').evaluate('(b) => { b.click(); b.click(); }')
             expect(page.locator('#detail .badge')).to_contain_text('Result available')
             expect(page.locator('#detail')).to_contain_text('END OF FULL RESULT')
+            # Result rendering can precede the explicit persisted-history
+            # confirmation that releases the submission lock. Wait for that
+            # contract before testing graceful process shutdown, otherwise the
+            # in-flight confirmation request is correctly treated by Uvicorn as
+            # a background task and can outlive this test's shutdown deadline.
+            expect(page.get_by_role('button', name='Retry explicitly')).to_be_enabled()
             assert page.evaluate('window.injected') is None
             assert page.locator('#detail script, #employees img').count() == 0
             snapshot(page, '05-result')
@@ -600,6 +611,8 @@ def test_employee_to_result_browser(tmp_path, installed_package):
             expect(page.locator('#connection')).to_contain_text('Connected')
             page.get_by_role('button', name='Refresh teams', exact=True).click()
             expect(page.get_by_text('Showing persisted teams.', exact=True)).to_be_visible()
+            page.get_by_role('button', name='I inspected saved teams and membership', exact=True).click()
+            expect(member_checkbox).to_be_checked()
             page.get_by_role('button', name='Add members', exact=True).click()
             expect(page.get_by_text(f'Membership saved · Team ID: {team_ids[0]}', exact=True)).to_be_visible()
             expect(page.get_by_label('Saved team', exact=True)).to_be_focused()

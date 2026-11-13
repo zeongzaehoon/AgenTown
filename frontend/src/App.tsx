@@ -183,7 +183,12 @@ export function App() {
   }, []);
   useEffect(() => {
     void refresh();
-    const timer = setInterval(() => { if (!poll.current && locks.current.size === 0) void refresh(); }, 800);
+    const timer = setInterval(() => {
+      // Employee/work creation confirms against one stable pre-mutation
+      // snapshot. Executions persist an active attempt before provider I/O,
+      // so keep reading history while they run and expose that saved state.
+      if (!poll.current && !locks.current.has('employee') && !locks.current.has('work')) void refresh();
+    }, 800);
     return () => {
       clearInterval(timer); ++generation.current; poll.current?.abort(); poll.current = null;
       mutations.current.forEach(controller => controller.abort());

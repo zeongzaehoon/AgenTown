@@ -234,7 +234,7 @@ test.each(['valid', 'null', 'malformed', 'unsupported', 'wrong-preview'])('start
     act(() => { start.click(); start.click(); });
     expect(submit).toHaveBeenCalledTimes(1);
     await act(async () => resolve(kind === 'valid' ? receipt : kind === 'null' ? null : kind === 'malformed' ? {} : kind === 'unsupported' ? {...receipt, schema_version: 2} : {...receipt, preview: {...preview, preview_id: 'wrong'}}));
-    expect(screen.getByLabelText('Loop request outcome').textContent).toMatch(kind === 'valid' ? /admission acknowledged/ : /not confirmed/);
+    expect(screen.getByLabelText('Loop request outcome').textContent).toMatch(/not confirmed/);
     expect((screen.getByLabelText('Saved Loop') as HTMLSelectElement).value).toBe('l');
     expect(screen.queryByRole('button', {name: 'Authorize and start bounded Loop'})).toBeNull();
     f.data.sessions = [session];
@@ -243,6 +243,7 @@ test.each(['valid', 'null', 'malformed', 'unsupported', 'wrong-preview'])('start
     expect((stop as HTMLButtonElement).disabled).toBe(false);
     expect(submit).toHaveBeenCalledTimes(1);
     stop.focus(); await userEvent.setup().keyboard('{Enter}');
+    f.data.sessions = [{...session, state: 'stopped'}];
     await act(async () => resolve({...receipt, state: 'stopped'}));
     expect(submit).toHaveBeenCalledTimes(2);
     expect(screen.getByLabelText('Loop request outcome').textContent).toMatch(/Local stop acknowledged.*Remote completion may remain unknown/);
@@ -296,4 +297,49 @@ test('saved-work stop rejects a stale in-flight inspection and restores emergenc
     expect((stop as HTMLButtonElement).disabled).toBe(false);
     expect(submit).toHaveBeenCalledTimes(1);
   } finally { vi.useRealTimers(); }
+});
+
+ test('held confirmation blocks duplicate starts; polling cannot release recovery; keyboard inspection never replays', async () => {
+  const f = setup();
+  let poll = () => {};
+  const realInterval = globalThis.setInterval;
+  const timer = vi.spyOn(globalThis, 'setInterval').mockImplementation((callback, delay, ...args) => {
+    if (delay === 800) { poll = callback as () => void; return 1 as unknown as ReturnType<typeof setInterval>; }
+    return realInterval(callback, delay, ...args);
+  });
+  let resolve!: (value: Response) => void;
+  let hold = false;
+  const original = globalThis.fetch;
+  vi.stubGlobal('fetch', (path: string, options: RequestInit) => hold && path === '/api/loops/v1'
+    ? new Promise<Response>(r => { resolve = r; }) : original(path, options));
+  const submit = vi.fn(async () => ({...session, schema_version: 1, started_at: 0, expires_at: 1}));
+  try {
+    render(<LoopExecution {...f.props} submit={submit} />);
+    const start = await inspect(); hold = true;
+    await act(async () => { start.click(); start.click(); });
+    expect(screen.getByLabelText('Loop request outcome').textContent).toMatch(/response received/);
+    expect(submit).toHaveBeenCalledTimes(1);
+    await act(async () => resolve(new Response(JSON.stringify(f.data))));
+    expect(screen.getByLabelText('Loop request outcome').textContent).toMatch(/not confirmed/);
+    hold = false;
+    await act(async () => poll());
+    expect((screen.getByRole('button', {name: 'Preview Loop with saved work'}) as HTMLButtonElement).disabled).toBe(true);
+    const user = userEvent.setup();
+    screen.getByRole('button', {name: 'Refresh Loop session records'}).focus(); await user.keyboard('{Enter}');
+    screen.getByRole('button', {name: 'I inspected refreshed Loop records'}).focus(); await user.keyboard('{Enter}');
+    expect((screen.getByRole('button', {name: 'Preview Loop with saved work'}) as HTMLButtonElement).disabled).toBe(false);
+    expect(submit).toHaveBeenCalledTimes(1);
+    expect((screen.getByLabelText('Saved Loop') as HTMLSelectElement).value).toBe('l');
+  } finally { timer.mockRestore(); }
+});
+ test.each(['active', 'complete', 'failed', 'stopped'])('start confirms legitimate persisted progression to %s', async state => {
+  const f = setup();
+  const submit = vi.fn(async () => {
+    f.data.sessions = [{...session, state, admitted: 2}];
+    return {...session, schema_version: 1, started_at: 0, expires_at: 1};
+  });
+  render(<LoopExecution {...f.props} submit={submit} />);
+  await userEvent.setup().click(await inspect());
+  await waitFor(() => expect(screen.getByLabelText('Loop request outcome').textContent).toMatch(/saved session confirmed/));
+  expect(submit).toHaveBeenCalledTimes(1);
 });

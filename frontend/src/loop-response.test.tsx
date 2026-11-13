@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest';
 import type { LoopPreview, LoopSession } from './loop-response';
-import { loopInspection, loopPreview, loopReceipt } from './loop-response';
+import { confirmedLoop, loopInspection, loopPreview, loopReceipt } from './loop-response';
 const preview = {schema_version: 1, preview_id: 'p', policy_id: 'l', policy_name: 'Loop', task_id: 't', agent_id: 'a', input: 'Saved', max_iterations: 2, interval_seconds: 60, expected_runs: 0, policy_enabled: true};
 const session = {schema_version: 1, session_id: 's', preview, state: 'future', admitted: 1, next_at: 0, provider: 'fixture', model: 'fixture', started_at: 0, expires_at: 1};
 const attempt = {session_id: 's', run_id: 'r', ordinal: 1, admitted_at: 0, execution: {schema_version: 1, run_id: 'r', input: 'Saved', provider: 'fixture', model: 'fixture', deadline_unix_ms: 1, output: null, error: null, quality: 'unverified'}};
@@ -39,4 +39,18 @@ test.each([null, {}, {...receipt, schema_version: 2, state: 'stopped'}, {...rece
   {...receipt, session_id: 'wrong', state: 'stopped'}, {...receipt, state: 'stopped', preview: {...preview, task_id: 'other'}}
 ])('rejects uncertain stop receipt %j', value => {
   expect(() => loopReceipt(value, session as LoopSession, 'stop', 'fixture', 'fixture')).toThrow(/not confirmed/);
+});
+
+test.each(['active', 'complete', 'failed', 'expired', 'stopped', 'stale', 'restarted'])('saved confirmation accepts bounded progression to %s', state => {
+  const value = {...inspection, sessions: [{...receipt, state, admitted: 2}]};
+  expect(confirmedLoop(value, receipt as LoopSession, 'start')).toBe(value);
+});
+test.each([null, {...inspection, sessions: []}, {...inspection, sessions: [{...receipt, admitted: 0}]},
+  {...inspection, sessions: [{...receipt, admitted: 3}]}, {...inspection, sessions: [{...receipt, model: 'wrong'}]},
+  {...inspection, sessions: [{...receipt, preview: {...preview, preview_id: 'wrong'}}]},
+  {...inspection, sessions: [{...receipt, session_id: 'wrong'}]}])('rejects missing, stale or contradictory confirmation %j', value => {
+  expect(() => confirmedLoop(value, receipt as LoopSession, 'start')).toThrow();
+});
+test('stop receipt does not establish persisted stop while saved session remains active', () => {
+  expect(() => confirmedLoop({...inspection, sessions: [receipt]}, {...receipt, state: 'stopped'} as LoopSession, 'stop')).toThrow(/not confirmed/);
 });
