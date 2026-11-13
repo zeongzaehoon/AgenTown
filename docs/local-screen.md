@@ -2809,3 +2809,28 @@ same-origin `POST /api/connections/v1/reconcile-work` API with
 from inspection and execution; the screen recovery control is subsequent work.
 See [runnable recovery steps](text-execution.md#explicit-expired-attempt-recovery-through-local-mcp)
 for consent scope, response outcomes, and deterministic installed-process coverage.
+
+### Selected-work recovery consent (C75-T2)
+
+Launch `agentown-web --database /tmp/agentown-recovery.sqlite --port 8765`
+with the deterministic expired-attempt database described in
+[text execution recovery](text-execution.md#product-screen-recovery-demo).
+Select the seeded work and choose **Inspect through local MCP**, then **Review
+recovery scope**. The review explains that other expired leases in the database
+snapshot can change. Keyboard activation moves focus to the authorization
+checkbox; Space selects it, Tab reaches **Reconcile expired attempts once**, and
+Enter submits. Pending disables duplicate submission. Confirmation distinguishes
+observed interrupted attempts from attempts that remain active, without claiming
+that the receipt proves a transition. Focus then moves to **Inspect after recovery**.
+
+Recovery clears inspection and prior execution consent. Inspect explicitly again
+and authorize execution anew; recovery never executes. On timeout, malformed
+receipt or transport loss, delivery remains uncertain. Selection and recovery
+controls remain available even if refreshed saved history omits the selected
+work. Inspect read-only before deciding on another separately consented recovery.
+Mounting, polling, opening scope review and ordinary inspection never reconcile.
+
+Interaction coverage: `frontend/src/WorkRecovery.test.tsx` (keyboard/focus,
+consent, pending duplicate lock, stale selection, uncertain delivery and receipt
+validation). Supervisor browser and consolidated checks are pending for this
+snapshot; live provider calls are skipped under user policy.

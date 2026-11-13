@@ -51,7 +51,7 @@ const nullableText = (value: unknown) => value === null || typeof value === 'str
 const timestamp = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 && value <= 253402300799999;
 const ids = (value: unknown): value is string[] => Array.isArray(value) && value.every(text) && new Set(value).size === value.length;
 
-export function parseWorkInspection(value: unknown, requested: string): InspectionResponse {
+export function parseWorkInspection(value: unknown, requested: string, historyOnly = false): InspectionResponse {
   const invalid = () => new Error('Local inspection could not be confirmed: invalid or mismatched response. Choose Inspect through local MCP to try again.');
   if (!object(value) || value.schema_version !== 1 || value.requested_task_id !== requested ||
       !text(value.code) || !text(value.message) || !text(value.recovery)) throw invalid();
@@ -68,12 +68,14 @@ export function parseWorkInspection(value: unknown, requested: string): Inspecti
       !Array.isArray(evidence.tools) || evidence.tools.length !== 4 ||
       evidence.tools[0] !== 'get_task' || evidence.tools[1] !== 'get_work_history_v1' || evidence.tools[2] !== 'inspect_loop_sessions_v1' || evidence.tools[3] !== 'preflight_text_work_v1') throw invalid();
   // Validate this observation independently: other tools may have read earlier state.
-  if (!object(readiness) || readiness.schema_version !== 1 || readiness.task_id !== requested ||
+  if (!(historyOnly && readiness === null) && (!object(readiness) || readiness.schema_version !== 1 || readiness.task_id !== requested ||
       !nullableText(readiness.input) || !ids(readiness.employee_ids) || !readiness.employee_ids.every(stableId) ||
       !Number.isSafeInteger(readiness.expected_runs) || (readiness.expected_runs as number) < 0 ||
       typeof readiness.active_attempt !== 'boolean' || typeof readiness.resubmission_consent_required !== 'boolean' ||
       typeof readiness.eligibility !== 'string' ||
-      !['missing', 'ineligible', 'eligible'].includes(readiness.eligibility)) throw invalid();
+      !['missing', 'ineligible', 'eligible'].includes(readiness.eligibility))) throw invalid();
+  if (object(readiness)) {
+  if (!ids(readiness.employee_ids)) throw invalid();
   const count = readiness.expected_runs as number;
   if (readiness.resubmission_consent_required !== (count > 0) ||
       (readiness.active_attempt && count === 0) ||
@@ -81,6 +83,7 @@ export function parseWorkInspection(value: unknown, requested: string): Inspecti
         ? readiness.input !== null || readiness.employee_ids.length !== 0 || count !== 0 || readiness.active_attempt
         : typeof readiness.input !== 'string') ||
       (readiness.eligibility === 'eligible' && (readiness.active_attempt || readiness.employee_ids.length !== 1))) throw invalid();
+  }
   const seen = new Set<string>();
   for (const run of attempts) {
     if (!object(run) || !text(run.id) || seen.has(run.id) || run.task_id !== requested ||
@@ -101,7 +104,8 @@ export function parseWorkInspection(value: unknown, requested: string): Inspecti
   const sessions = new Map<string, string>();
   const ordinals = new Set<string>();
   for (const run of attempts) {
-    const loop = run.loop;
+    const loop = historyOnly && run.loop === null
+      ? {linkage: 'uncertain', session: null, ordinal: null, admitted_at: null} : run.loop;
     if (!object(loop) || !['confirmed', 'absent', 'uncertain'].includes(String(loop.linkage))) throw invalid();
     if (loop.linkage !== 'confirmed') {
       if (loop.session !== null || loop.ordinal !== null || loop.admitted_at !== null) throw invalid();

@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef, useState } from 'react';
+import { WorkRecovery } from './WorkRecovery';
 import { WorkExecution } from './WorkExecution';
 import { RequestTimeoutError } from './api';
 import { inspectSelectedWork, type InspectionResponse } from './work-inspection-api';
@@ -38,6 +39,7 @@ export function WorkInspection({taskId, connected = true}: {taskId: string | nul
     <p role="status" aria-live="polite">{pending ? 'Inspecting selected work through local MCP…' : ''}</p>
     {error && <p role="alert">{error}</p>}
     {response?.status === 'failure' && <div role="alert"><p>{response.message}</p><p>{response.recovery}</p><p>Inspection unavailable ({response.code}). Nothing is automatically retried.</p></div>}
+    {taskId && <WorkRecovery key={`${taskId}/${connected}`} taskId={taskId} connected={connected} onRequest={() => {request.current?.controller.abort(); request.current = null; setPending(false); setResponse(null); setError('');}} onInspect={() => void inspect()} />}
     {inspection && <div>
       <p role="status">Confirmed local MCP inspection. External-client connection remains unverified.</p>
       <p>Evidence: installed local MCP · get_task · get_work_history_v1 (read_only=true) · inspect_loop_sessions_v1 · preflight_text_work_v1.</p>

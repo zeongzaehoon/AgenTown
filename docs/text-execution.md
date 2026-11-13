@@ -435,3 +435,26 @@ receipt. Fixtures seed historical expired attempts without waiting for expiry;
 a live attempt stays active. Provider construction is forbidden by the
 stdio-fixture tests, and no real provider calls are used. Building the wheel
 requires the repository's normal native/frontend build prerequisites.
+
+### Product-screen recovery demo
+
+For a disposable deterministic database, reuse `seed` in
+`python/tests/test_selected_work_recovery.py`: it creates two expired attempts
+with historical timestamps (1000, deadline 121000) and one live attempt. Run this
+from a configured product development environment with native bindings available:
+
+```sh
+uv run --directory python --locked python -c 'import runpy; from pathlib import Path; seed = runpy.run_path("tests/test_selected_work_recovery.py")["seed"]; print(seed(Path("/tmp/agentown-recovery.sqlite")))'
+agentown-web --database /tmp/agentown-recovery.sqlite --port 8765
+```
+
+Use a fresh disposable filename each time. The printed IDs identify selected
+expired work, other expired work, and live work in that order. At
+`http://127.0.0.1:8765`, select the first work, inspect through local MCP, review
+recovery scope, check the explicit authorization and reconcile once. The receipt
+shows interrupted attempts; selecting and inspecting the live work shows its
+active lease until its actual deadline. No provider call is needed. Inspect again
+before giving fresh execution consent. For an uncertain-delivery demonstration,
+interrupt the local server after submitting; the screen retains selected-work
+recovery access and never automatically resends. A lost response alone cannot
+prove whether reconciliation persisted.
