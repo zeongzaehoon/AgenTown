@@ -27,6 +27,12 @@ export function HookExecution({work, workspace, connected, draft, disabled, subm
   const revision = useRef(0);
   if (current.current !== snapshot) { ++revision.current; current.current = snapshot; }
   const valid = preview?.snapshot === snapshot;
+  function dismissPreview() {
+    previewFocused.current = false;
+    setPreview(null);
+    setMessage('Hook preview dismissed. Consent cleared. No execution was requested. Preview again before executing.');
+    recoverFocus();
+  }
   useEffect(() => {
     let live = true;
     let pending = false;
@@ -80,11 +86,11 @@ export function HookExecution({work, workspace, connected, draft, disabled, subm
     </select>
     <button type="button" ref={button} disabled={busy || !connected || !available || !hooks.some(h => h.id === selected && eligible(h)) || disabled} onClick={() => void inspect()}>Preview Hook with saved work</button>
     <p role="status" aria-live="polite">{!connected ? 'Disconnected. Reconnect and refresh history.' : !available ? loaded ? 'Hooks stale. Retained configuration is unavailable for execution. Waiting to reconnect.' : 'Hooks unavailable. Waiting for configuration.' : disabled ? 'Execution unavailable. Inspect history and work configuration.' : message || (hooks.some(eligible) ? 'Eligible Hooks available. Choose one to preview.' : 'Unmatched: no enabled employee Hook matches the latest terminal event.')}</p>
-    {preview && valid && <section aria-label="Hook execution preview" onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); setPreview(null); recoverFocus(); } }} onFocusCapture={() => { previewFocused.current = true; }} onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget)) previewFocused.current = false; }}>
+    {preview && valid && <section aria-label="Hook execution preview" onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); dismissPreview(); } }} onFocusCapture={() => { previewFocused.current = true; }} onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget)) previewFocused.current = false; }}>
       <p>Source event: {preview.value.event} · Source Run: {preview.value.source_run_id} · Outcome: {preview.value.source_outcome}</p>
       <h4>Effective instructions and saved work</h4><pre>{preview.value.input}</pre>
       <p>This creates one new attempt, preserving earlier results. Unsaved draft text is not submitted.</p>
-      <button type="button" onClick={() => { setPreview(null); recoverFocus(); }}>Cancel Hook preview</button>
+      <button type="button" onClick={dismissPreview}>Cancel Hook preview</button>
       <button type="button" ref={executeButton} disabled={disabled || busy} onClick={() => {
         if (lock.current || disabled || current.current !== preview.snapshot) return;
         lock.current = true;

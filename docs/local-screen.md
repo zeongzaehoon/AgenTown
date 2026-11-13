@@ -3204,3 +3204,30 @@ and `npm run build`. Supervisor verification passed 1,041 frontend tests, the
 production build, and 505 Python tests, with 2 Python tests skipped. The selected
 frontend profile deferred installed-browser and process-recovery gates; those passed
 in the preceding C88 full profile. Live provider calls are skipped, not passed.
+
+### Dismiss saved-work execution previews (C90-T1)
+
+In the existing work screen, select an enabled Skill, matching employee Hook
+(requires a terminal attempt), or matching bounded Loop. Choose **Preview Skill
+with saved work**, **Preview Hook with saved work**, or **Preview Loop with saved
+work**. No provider credentials are required to preview or dismiss.
+
+For each preview, choose its **Cancel** button, then repeat with a fresh preview
+and press Escape while focus is on its execute/start control or Cancel button.
+The preview disappears, focus returns to its enabled Preview button (or the
+section if Preview is unavailable), and the status announces that consent was
+cleared and no execution/start was requested. Execution/start is unavailable
+until another explicit preview. Press Escape on a control outside the preview:
+the preview and consent remain unchanged. Draft text and saved selections remain.
+
+Dismissal sends no request, including execution, Loop start, or Loop stop.
+Existing active Loop sessions retain Stop access under the existing connection
+and authority rules, including when ordinary execution is disabled. Deterministic
+interaction tests isolate the 800 ms background polling when asserting zero
+requests. Existing invalidation and active-session tests cover section focus
+fallback and emergency Stop access.
+
+Supervisor verification passed 1,048 frontend tests, the production build, and
+505 Python tests, with 2 Python tests skipped. The selected frontend profile
+deferred installed-browser and process-recovery gates; those passed in the recent
+C88 full profile. Live provider calls remain skipped, not passed.

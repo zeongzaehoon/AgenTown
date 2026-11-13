@@ -375,3 +375,40 @@ test('saved-work stop rejects a stale in-flight inspection and restores emergenc
   await waitFor(() => expect(screen.getByLabelText('Loop request outcome').textContent).toMatch(/saved session confirmed/));
   expect(submit).toHaveBeenCalledTimes(1);
 });
+
+
+test.each(['cancel', 'escape'])('saved-work Loop %s clears consent locally and requires a fresh preview', async method => {
+  // Hold configuration/session polling so zero-request assertions concern dismissal only.
+  const interval = vi.spyOn(globalThis, 'setInterval').mockImplementation(() => 1 as unknown as ReturnType<typeof setInterval>);
+  try {
+    const f = setup(); const props = f.props;
+    const user = userEvent.setup();
+    render(<><button>Outside preview</button><LoopExecution {...props} /></>);
+    await inspect();
+    const previewButton = screen.getByRole('button', {name: 'Preview Loop with saved work'});
+    const consent = screen.getByRole('button', {name: 'Authorize and start bounded Loop'});
+    const fetcher = vi.mocked(globalThis.fetch);
+    const requests = fetcher.mock.calls.length;
+    await user.click(screen.getByRole('button', {name: 'Outside preview'}));
+    await user.keyboard('{Escape}');
+    expect(screen.getByRole('button', {name: 'Authorize and start bounded Loop'})).toBe(consent);
+    expect(screen.queryByText(/Consent cleared/)).toBeNull();
+    if (method === 'cancel') {
+      await user.click(screen.getByRole('button', {name: 'Cancel Loop preview'}));
+    } else {
+      consent.focus();
+      await user.keyboard('{Escape}');
+    }
+    expect(screen.queryByRole('region', {name: 'Loop execution preview'})).toBeNull();
+    expect(document.activeElement).toBe(previewButton);
+    expect(screen.getByText('Loop preview dismissed. Consent cleared. No start was requested. Preview again before starting.').getAttribute('role')).toBe('status');
+    await user.keyboard('{Escape}');
+    expect(fetcher.mock.calls).toHaveLength(requests);
+    expect(props.submit).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', {name: 'Authorize and start bounded Loop'})).toBeNull();
+    await user.click(previewButton);
+    await screen.findByRole('button', {name: 'Authorize and start bounded Loop'});
+    expect(fetcher.mock.calls).toHaveLength(requests + 1);
+    expect(props.submit).not.toHaveBeenCalled();
+  } finally { interval.mockRestore(); }
+});

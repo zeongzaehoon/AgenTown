@@ -25,6 +25,12 @@ export function SkillExecution({work, workspace, connected, draft, disabled, sub
   const revision = useRef(0);
   if (current.current !== snapshot) { ++revision.current; current.current = snapshot; }
   const valid = preview?.snapshot === snapshot;
+  function dismissPreview() {
+    previewFocused.current = false;
+    setPreview(null);
+    setMessage('Skill preview dismissed. Consent cleared. No execution was requested. Preview again before executing.');
+    recoverFocus();
+  }
   useEffect(() => {
     let live = true;
     let pending = false;
@@ -74,10 +80,10 @@ export function SkillExecution({work, workspace, connected, draft, disabled, sub
     </select>
     <button type="button" ref={button} disabled={busy || !connected || !available || !skills.some(s => s.id === selected && s.enabled) || disabled} onClick={() => void inspect()}>Preview Skill with saved work</button>
     <p role="status" aria-live="polite">{!available ? loaded ? 'Skills stale. Retained configuration is unavailable for execution. Waiting to reconnect.' : 'Skills unavailable. Waiting for configuration.' : message}</p>
-    {preview && valid && <section aria-label="Skill execution preview" onFocusCapture={() => { previewFocused.current = true; }} onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget)) previewFocused.current = false; }}>
+    {preview && valid && <section aria-label="Skill execution preview" onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); dismissPreview(); } }} onFocusCapture={() => { previewFocused.current = true; }} onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget)) previewFocused.current = false; }}>
       <h4>Effective instructions and saved work</h4><pre>{preview.value.input}</pre>
       <p>This creates one new attempt, preserving earlier results. Unsaved draft text is not submitted.</p>
-      <button type="button" onClick={() => { setPreview(null); recoverFocus(); }}>Cancel Skill preview</button>
+      <button type="button" onClick={dismissPreview}>Cancel Skill preview</button>
       <button type="button" ref={executeButton} disabled={disabled || busy} onClick={() => {
         if (lock.current || disabled || current.current !== preview.snapshot) return;
         lock.current = true;

@@ -108,3 +108,40 @@ test('admitted attempt displays persisted Hook, source Run and Skill provenance'
   expect(region.textContent).toContain('Skill ID: s');
   expect(region.textContent).toContain('SERVER COMPOSED INPUT');
 });
+
+
+test.each(['cancel', 'escape'])('saved-work Hook %s clears consent locally and requires a fresh preview', async method => {
+  // Hold configuration/session polling so zero-request assertions concern dismissal only.
+  const interval = vi.spyOn(globalThis, 'setInterval').mockImplementation(() => 1 as unknown as ReturnType<typeof setInterval>);
+  try {
+    const props = setup();
+    const user = userEvent.setup();
+    render(<><button>Outside preview</button><HookExecution {...props} /></>);
+    await inspect(user);
+    const previewButton = screen.getByRole('button', {name: 'Preview Hook with saved work'});
+    const consent = screen.getByRole('button', {name: 'Execute once with Hook'});
+    const fetcher = vi.mocked(globalThis.fetch);
+    const requests = fetcher.mock.calls.length;
+    await user.click(screen.getByRole('button', {name: 'Outside preview'}));
+    await user.keyboard('{Escape}');
+    expect(screen.getByRole('button', {name: 'Execute once with Hook'})).toBe(consent);
+    expect(screen.queryByText(/Consent cleared/)).toBeNull();
+    if (method === 'cancel') {
+      await user.click(screen.getByRole('button', {name: 'Cancel Hook preview'}));
+    } else {
+      consent.focus();
+      await user.keyboard('{Escape}');
+    }
+    expect(screen.queryByRole('region', {name: 'Hook execution preview'})).toBeNull();
+    expect(document.activeElement).toBe(previewButton);
+    expect(screen.getByText('Hook preview dismissed. Consent cleared. No execution was requested. Preview again before executing.').getAttribute('role')).toBe('status');
+    await user.keyboard('{Escape}');
+    expect(fetcher.mock.calls).toHaveLength(requests);
+    expect(props.submit).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', {name: 'Execute once with Hook'})).toBeNull();
+    await user.click(previewButton);
+    await screen.findByRole('button', {name: 'Execute once with Hook'});
+    expect(fetcher.mock.calls).toHaveLength(requests + 1);
+    expect(props.submit).not.toHaveBeenCalled();
+  } finally { interval.mockRestore(); }
+});

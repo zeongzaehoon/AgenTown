@@ -56,6 +56,12 @@ export function LoopExecution({work, workspace, connected, draft, disabled, avai
   const revision = useRef(0);
   if (current.current !== snapshot) { ++revision.current; current.current = snapshot; }
   const valid = preview?.snapshot === snapshot;
+  function dismissPreview() {
+    focused.current = false;
+    setPreview(null);
+    setMessage('Loop preview dismissed. Consent cleared. No start was requested. Preview again before starting.');
+    focusBack();
+  }
   function focusBack() { if (inspectButton.current && !inspectButton.current.disabled) inspectButton.current.focus(); else region.current?.focus(); }
   useEffect(() => {
     let live = true;
@@ -148,11 +154,11 @@ export function LoopExecution({work, workspace, connected, draft, disabled, avai
     {preview && valid && <section aria-label="Loop execution preview"
       onFocusCapture={() => { focused.current = true; }}
       onBlurCapture={e => { focused.current = e.currentTarget.contains(e.relatedTarget); }}
-      onKeyDown={e => { if (e.key === 'Escape') { e.preventDefault(); setPreview(null); focusBack(); } }}>
+      onKeyDown={e => { if (e.key === 'Escape') { e.preventDefault(); dismissPreview(); } }}>
       <p>Employee: {workspace.employees.find(e => e.id === preview.value.agent_id)?.name} · {preview.value.agent_id}</p>
       <pre>{preview.value.input}</pre>
       <p>Maximum attempts: {preview.value.max_iterations} · Interval: {preview.value.interval_seconds} seconds. Earlier attempts are preserved. Preview does not call a provider.</p>
-      <button type="button" onClick={() => { setPreview(null); focusBack(); }}>Cancel Loop preview</button>
+      <button type="button" onClick={dismissPreview}>Cancel Loop preview</button>
       <button ref={startButton} type="button" disabled={busy || disabled || !authority} onClick={() => {
         if (lock.current || disabled || current.current !== preview.snapshot) return;
         void send('/api/loops/v1/start', {preview_id: preview.value.preview_id, expected_runs: preview.value.expected_runs}, preview.value);
