@@ -34,12 +34,19 @@ class ConnectionDiagnostic:
     async def run_shared_data(self):
         return await self.run(shared_data=True)
 
-    async def run(self, *, shared_data=False):
+    async def inspect_work(self, task_id):
+        from .application.inspect_selected_work import InspectionResult
+        value = await self.run(task_id=task_id)
+        return InspectionResult(**value)
+
+    async def run(self, *, shared_data=False, task_id=None):
         # No await between admission and assigning the task: one event-loop owner.
         if self.closed or self.active is not None:
-            return outcome("busy", "diagnostic_busy", "A local server diagnostic is already running or stopping.",
-                           "Wait for it to finish, then explicitly check again.")
-        task = asyncio.create_task(self._check(shared_data=True) if shared_data else self._check())
+            return (dict(status="busy", code="inspection_busy", message="A local check is already running or stopping.",
+                             recovery="Wait, then explicitly inspect again.", inspection=None) if task_id is not None else outcome("busy", "diagnostic_busy", "A local server diagnostic is already running or stopping.",
+                           "Wait for it to finish, then explicitly check again."))
+        task = asyncio.create_task(self._check(task_id=task_id) if task_id is not None else
+                                   self._check(shared_data=True) if shared_data else self._check())
         self.active = task
         # Repeated request cancellation can interrupt the caller's cleanup wait.
         # Release admission only when _check has actually finished reaping.
@@ -70,7 +77,7 @@ class ConnectionDiagnostic:
                 pass
             self.active = None
 
-    async def _check(self, *, shared_data=False):
+    async def _check(self, *, shared_data=False, task_id=None):
         process = None
         try:
             async with asyncio.timeout(self.timeout):
@@ -110,6 +117,15 @@ class ConnectionDiagnostic:
                         or not isinstance(initialized["capabilities"].get("tools"), dict)):
                     raise DiagnosticFailure()
                 await send(dict(jsonrpc="2.0", method="notifications/initialized"))
+                if task_id is not None:
+                    first = await request(2, "tools/call", {"name": "get_task", "arguments": {"task_id": task_id}})
+                    second = await request(3, "tools/call", {"name": "get_work_history_v1",
+                        "arguments": {"task_id": task_id, "read_only": True}})
+                    inspection = validated_inspection(first, second, task_id)
+                    return dict(status="passed", code="inspection_passed",
+                        message="Selected work inspected through the installed local MCP server.",
+                        recovery="External-client connection remains unverified. Inspect again explicitly to refresh.",
+                        inspection=inspection)
                 if shared_data:
                     counts = []
                     for identifier, name, key in ((2, "list_agents", "agents"), (3, "list_tasks", "tasks")):
@@ -139,10 +155,16 @@ class ConnectionDiagnostic:
                 return outcome("passed", "diagnostic_passed", "Local server diagnostic passed",
                                "External client configuration remains unknown; connection and exercise remain unverified. Follow the client setup steps.")
         except TimeoutError:
+            if task_id is not None:
+                return dict(status="timeout", code="inspection_timeout", message="Local inspection timed out.",
+                    recovery="Check installation and database access, then explicitly inspect again.", inspection=None)
             return outcome("timeout", "shared_data_timeout" if shared_data else "diagnostic_timeout",
                            "Local shared-data check timed out." if shared_data else "Local server diagnostic timed out.",
                            "Check database access and installation health, then explicitly check again. Keep the database.")
         except Exception:
+            if task_id is not None:
+                return dict(status="failed", code="inspection_failed", message="Work is missing, unavailable, or the local response was invalid.",
+                    recovery="Refresh saved work and select it again. Check installation and database access before explicitly inspecting again.", inspection=None)
             # Never expose stderr, paths, environment, protocol payloads or exceptions.
             return outcome("failed", "shared_data_failed" if shared_data else "diagnostic_failed",
                            "The installed local server returned an error or malformed shared data." if shared_data else "The installed local server could not complete its diagnostic.",
@@ -206,3 +228,57 @@ def validated_count(result, key):
             if len(set(assignees)) != len(assignees):
                 raise DiagnosticFailure()
     return len(data[key])
+
+
+def inspection_payload(result):
+    if result.get("isError", False) is not False:
+        raise DiagnosticFailure()
+    content, data = result.get("content"), result.get("structuredContent")
+    if (not isinstance(content, list) or len(content) != 1
+            or not isinstance(content[0], dict) or content[0].get("type") != "text"
+            or not isinstance(content[0].get("text"), str)
+            or json.loads(content[0]["text"]) != data or not isinstance(data, dict)):
+        raise DiagnosticFailure()
+    return data
+
+
+def validated_inspection(first, second, task_id):
+    # Existing MCP models reject extra fields and malformed nested records. Strict
+    # JSON validation prevents scalar coercion while accepting JSON UUID strings.
+    from .mcp_server import Task, WorkHistory
+    from .application.inspect_selected_work import (
+        LocalInspection, InspectedTask, InspectedRun, InspectedExecution)
+    task_data, history_data = inspection_payload(first), inspection_payload(second)
+    work = Task.model_validate_json(json.dumps(task_data), strict=True)
+    history = WorkHistory.model_validate_json(json.dumps(history_data), strict=True)
+    if work.model_dump(mode="json") != task_data or history.model_dump(mode="json") != history_data:
+        raise DiagnosticFailure()
+    if str(work.id) != task_id or str(history.task.id) != task_id or work != history.task:
+        raise DiagnosticFailure()
+    def unique(values):
+        if len(values) != len(set(values)):
+            raise DiagnosticFailure()
+    unique(work.assignees)
+    unique([run.id for run in history.attempts])
+    attempts = []
+    for run in history.attempts:
+        if run.task_id != work.id or (run.execution is not None and run.execution.run_id != run.id):
+            raise DiagnosticFailure()
+        unique(run.participants)
+        if ((run.state == "active" and (run.ended_at is not None or run.outcome is not None))
+                or (run.state == "finished" and (run.ended_at is None or run.outcome is None))
+                or (run.ended_at is not None and run.ended_at < run.started_at)
+                or (run.skill is not None and run.skill.run_id != run.id)
+                or (run.hook is not None and (run.hook.run_id != run.id or run.hook.task_id != work.id))):
+            raise DiagnosticFailure()
+        if run.execution is not None:
+            execution = run.execution
+            if ((execution.output is not None and execution.error is not None)
+                    or (run.state == 'active' and
+                        (execution.output is not None or execution.error is not None))):
+                raise DiagnosticFailure()
+        row = run.model_dump(mode="json", exclude={"skill", "hook"})
+        if row['execution'] is not None:
+            row['execution'] = InspectedExecution(**row['execution'])
+        attempts.append(InspectedRun(**row))
+    return LocalInspection(InspectedTask(**work.model_dump(mode="json")), attempts)

@@ -759,7 +759,9 @@ test.each(['selection', 'new attempt', 'changed attempt', 'disconnect', 'configu
 
 test('an empty saved output still requires consent', async () => {
   const f = savedResults(); f.state.work[0].attempts.at(-1)!.output = '';
-  render(<App />); await connected(); fireEvent.click(retry());
+  render(<App />); await connected();
+  await waitFor(() => expect((retry() as HTMLButtonElement).disabled).toBe(false), {timeout: 3000});
+  fireEvent.click(retry());
   expect(resendRegion()).toBeTruthy();
   expect(f.calls.every(c => c.path === '/api/state')).toBe(true);
 });
@@ -767,7 +769,9 @@ test('an empty saved output still requires consent', async () => {
 test('a failed latest attempt retries directly even with older saved results', async () => {
   const f = savedResults();
   Object.assign(f.state.work[0].attempts[1], {output: null, outcome: 'failure', error: 'rate_limit'});
-  render(<App />); await connected(); fireEvent.click(retry());
+  render(<App />); await connected();
+  await waitFor(() => expect((retry() as HTMLButtonElement).disabled).toBe(false), {timeout: 3000});
+  fireEvent.click(retry());
   expect(resendRegion()).toBeNull();
   expect(f.calls.filter(c => c.path.endsWith('/execute'))).toEqual([{path: '/api/work/w/execute', body: {expected_runs: 2}}]);
   await act(async () => f.finish());
@@ -929,6 +933,7 @@ test('uncertain execution requires explicit history refresh before retry', async
     return fetcher(path, options);
   });
   render(<App />); await connected();
+  await waitFor(() => expect((retry() as HTMLButtonElement).disabled).toBe(false));
   fireEvent.click(retry());
   await screen.findByText(/Submission needs inspection/);
   expect((retry() as HTMLButtonElement).disabled).toBe(true);

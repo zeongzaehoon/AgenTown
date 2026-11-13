@@ -903,3 +903,24 @@ async def test_web_owner_blocks_mcp_activation_without_consuming_preview(
             assert (await call(client, tools, "stop_loop_v1", {"session_id": sid}))["state"] == "stopped"
     finally:
         await web_owner.close()
+
+
+@pytest.mark.anyio
+async def test_explicit_read_only_history_matches_envelope_without_provider(cli, tmp_path, server_processes):
+    """Both modes preserve the public envelope and mutation-capable annotation."""
+    cli('agent', 'list')
+    database = tmp_path / 'product.sqlite'
+    employee = cli('agent', 'create', 'Inspector')
+    work = cli('task', 'create', 'Inspect only')
+    cli('task', 'assign', work['id'], employee['id'])
+    async with fixture_session(database, forbid_provider=True) as client:
+        tools = await discover(client)
+        assert tools['get_work_history_v1'].annotations.readOnlyHint is False
+        assert tools['get_work_history_v1'].inputSchema['properties']['read_only']['default'] is False
+        read_only = await call(client, tools, 'get_work_history_v1',
+                               {'task_id': work['id'], 'read_only': True})
+        default = await call(client, tools, 'get_work_history_v1', {'task_id': work['id']})
+        assert read_only == default
+        assert read_only['task']['id'] == work['id']
+        assert read_only['task']['assignees'] == [employee['id']]
+        assert read_only['attempts'] == []

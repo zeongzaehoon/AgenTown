@@ -985,3 +985,87 @@ The supervisor browser gate collects it from `python/tests/test_web_browser.py`
 and must retain its JSON and both screenshots with the current run's artifacts
 before acceptance review.
 Live LLM validation remains skipped, not passed.
+
+## Explicit inspection of selected saved work
+
+Prerequisites are the installed AgenTown MCP command and an existing selected
+product database. No provider credentials or external client are required.
+Launch the web product with an **absolute** database path:
+
+```sh
+agentown-web --database /absolute/path/to/product.sqlite
+```
+
+Alternatively open the packaged desktop app using its selected product database.
+In saved work, select a Task and explicitly choose its local MCP inspection action.
+Observe the confirmed Task UUID, title, status and recorded assignee UUIDs, followed
+by recorded attempts and each available result (or an explicit empty-attempt or
+unavailable-result state). The evidence identifies **local MCP inspection** and
+states that external-client verification is false. This proves only that this
+installation can inspect that selected work through its own installed MCP command;
+it does not prove Claude Desktop, Cursor or another external client is connected.
+
+The UI calls `POST /api/connections/v1/inspect-work` with only
+`{"task_id":"<selected canonical Task UUID>"}`. Its version-1 response contains
+`schema_version`, `requested_task_id`, `status`, `code`, `message`, `recovery`,
+and `inspection`. Only `status: "success"` includes inspection data; all unavailable outcomes use
+`status: "failure"` with a specific recovery code. Inspection
+contains `task` (the existing MCP Task fields), `attempts` (MCP Run fields excluding
+Skill/Hook provenance, with nullable existing Execution records), and `evidence`:
+`source: "installed_local_mcp"`, `tools: ["get_task", "get_work_history_v1"]`,
+`read_only: true`, `external_client_verified: false`.
+
+The installed local stdio session initializes MCP, then calls exactly
+`get_task(task_id)` and `get_work_history_v1(task_id, read_only=true)`.
+Task identities must agree with the request and with each other; every attempt
+must belong to that Task and every execution must belong to its attempt.
+Malformed envelopes, tool errors, conflicting identities and malformed records
+return no inspection. No execute/retry tool or provider is called.
+
+`get_work_history_v1` now accepts `read_only` (default **false**). The default
+retains expired-lease recovery and the same WorkHistory response envelope.
+`read_only=true` uses the Rust read-only snapshot without recovering leases;
+expired active records can therefore still appear active. The tool annotation
+remains non-read-only because its default can mutate. This explicit read-only
+mode does not weaken or change the existing count-only shared-data check.
+
+Inspection shares admission with discovery and count-only checks. Busy, timeout
+and failure responses include recovery instructions and `inspection: null`.
+Missing work is reported as unavailable with refresh/reselection guidance.
+The user must explicitly inspect again; neither timeout nor failure executes or
+retries work automatically. Cancellation kills and reaps the child before
+releasing admission. Changing the selected Task must invalidate pending/displayed
+inspection; UI race and accessibility verification belong to the integrated gate.
+
+Focused deterministic checks after supervisor dependency/native preparation:
+
+```sh
+uv run --directory python --locked python -m pytest tests/test_selected_work_inspection.py tests/test_connection_diagnostic.py tests/test_mcp.py
+```
+
+For C66-T1's Python implementation invocation, syntax compilation and a standard-library
+smoke check of failure mapping, real subprocess timeout, child reap and admission
+release passed. The
+isolated workspace lacks pytest, so deterministic execution, native read-only
+nonmutation checks, installed-package exercise and browser verification remain
+pending supervisor integration/verification. Live provider validation was skipped,
+not passed. No external-client connection was exercised by this invocation.
+
+
+C66-T1 integration aligned the inspection HTTP statuses (`success` / `failure`)
+and evidence source (`installed_local_mcp`) across Python and TypeScript. A scoped
+contract smoke passed actual use-case payloads for success, failure, busy and
+timeout through the frontend parser. The adapter also rejects contradictory
+execution output/error records and result-bearing active attempts. These checks
+do not establish installed-product or browser acceptance; consolidated supervisor
+verification remains pending.
+
+The subsequent C66-T1 integration repair makes the uncertain-delivery App test
+and keyboard Hook preview helper wait for enabled execution controls after the
+asynchronous availability check. Recovery assertions remain unchanged. Focused
+checks passed: both previously failing cases (2 tests), `WorkInspection.test.tsx`
+(23 tests), `test_selected_work_inspection.py` (26 tests), and TypeScript
+`tsc --noEmit`. Python checks reused the existing native build artifact; they do
+not establish a fresh native build. Installed-product and browser verification
+remain pending supervisor checks. Live LLM calls remain skipped and external
+client connection remains unverified.

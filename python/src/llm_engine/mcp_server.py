@@ -520,12 +520,12 @@ def create_server(database: str, *, provider_factory=None, auth=None) -> FastMCP
             raise ToolError("Execution could not be finalized; inspect persisted history before retrying.") from None
 
     @server.tool(annotations={**mutations, "idempotentHint": True})
-    def get_work_history_v1(task_id: str) -> WorkHistory:
-        """Inspect attempts/results and recover expired leases; quality stays unverified."""
+    def get_work_history_v1(task_id: str, read_only: bool = False) -> WorkHistory:
+        """Inspect attempts/results; read_only skips expired-lease recovery. Quality stays unverified."""
         # Validate the ID through the existing read path, then obtain one atomic
         # snapshot. Rust also finalizes expired leases in this operation.
         task_id = query(_native.query_task, task_id)[0]
-        _, tasks, executions = query(_native.history_snapshot)
+        _, tasks, executions = query(_native.history_snapshot_read_only if read_only else _native.history_snapshot)
         # Sources are immutable and retained. Reading after the snapshot supplies
         # metadata for every included Run without adding later attempts to it.
         sources = dict(query(_native.execution_sources))

@@ -10,6 +10,7 @@ import { Teams } from './Teams';
 import { CompanyOverview } from './CompanyOverview';
 import { Connections, type OpenClientRequest } from './Connections';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { WorkInspection } from './WorkInspection';
 import { HistoryExport } from './history-export';
 import { advice, api, classifyWork, type WorkOutcome, workStatus, workInputError, WorkInputError, type Attempt, type Work, type Workspace } from './api';
 
@@ -403,6 +404,7 @@ export function App() {
             {(selectedExcluded || !work) && <option value="" disabled>Select a matching request</option>}
             {matches.map(w => <option key={w.id} value={w.id}>{w.input.slice(0, 55)} — {workStatus(w)} · ID: {w.id}</option>)}
           </select>
+          <WorkInspection taskId={work?.id ?? null} />
           <div id="detail">{work && <>
             <h3>Saved work</h3><p>Work ID: {work.id}</p><p className="badge">{workStatus(work)}</p><pre>{work.input}</pre>
             <p>Assigned to: {work.assignees.map(id => state?.employees.find(e => e.id === id)?.name || id).join(', ') || 'No employee assigned'}</p>

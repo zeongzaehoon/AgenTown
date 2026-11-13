@@ -113,6 +113,27 @@ pub(super) fn validate(tx: &Connection, core: &Core) -> Result<(), StorageError>
     }
     Ok(())
 }
+impl ReadOnlyStore {
+    /// Inspect one coherent history snapshot without recovering expired leases.
+    /// The read-only connection cannot initialize, migrate, or persist state.
+    pub fn execution_snapshot(&mut self) -> Result<(Core, Vec<Execution>), StorageError> {
+        let tx = self.connection.transaction()?;
+        check_version(&tx)?;
+        let core = load(&tx)?;
+        let executions = snapshot_executions(&tx)?;
+        tx.commit()?;
+        Ok((core, executions))
+    }
+}
+
+fn snapshot_executions(tx: &Connection) -> Result<Vec<Execution>, StorageError> {
+    let mut statement = tx.prepare("SELECT run_id FROM executions ORDER BY run_id")?;
+    let ids = statement
+        .query_map([], |r| r.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    ids.into_iter().map(|id| get(tx, parse_id(id)?)).collect()
+}
+
 impl SqliteStore {
     /// Recover leases and read all history from the same transaction. Separate
     /// run/result reads can straddle recovery or another process's completion.
@@ -128,15 +149,7 @@ impl SqliteStore {
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         recover(&tx, timestamp)?;
         let core = load(&tx)?;
-        let executions = {
-            let mut statement = tx.prepare("SELECT run_id FROM executions ORDER BY run_id")?;
-            let ids = statement
-                .query_map([], |r| r.get::<_, String>(0))?
-                .collect::<Result<Vec<_>, _>>()?;
-            ids.into_iter()
-                .map(|id| get(&tx, parse_id(id)?))
-                .collect::<Result<Vec<_>, StorageError>>()?
-        };
+        let executions = snapshot_executions(&tx)?;
         tx.commit()?;
         Ok((core, executions))
     }
@@ -494,6 +507,101 @@ mod tests {
         assert!(store.finish_execution(run.run, Some("late"), None).is_err());
         assert_eq!(ReadOnlyStore::open(&path).unwrap().read().unwrap(), core);
     }
+    #[test]
+    fn read_only_history_preserves_expired_lease_and_completed_result_on_reopen() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("db");
+        let mut store = SqliteStore::open(&path).unwrap();
+        let (agent, task) = seed(&mut store);
+        let completed = store
+            .start_execution(task, agent, "first", "test", "fixture")
+            .unwrap();
+        let completed = store
+            .finish_execution(completed.run, Some("retained result"), None)
+            .unwrap();
+        let expired_task = store
+            .transact(|core| {
+                let task = core.create_task("Expired work")?;
+                core.assign(task, agent)?;
+                Ok(task)
+            })
+            .unwrap();
+        // Persist a genuinely expired, valid lease without waiting for wall time.
+        let expired = store
+            .transact(|core| {
+                core.start_run(
+                    expired_task,
+                    "text_execution",
+                    "test",
+                    RunTimestamp::from_unix_millis(1).unwrap(),
+                    &[agent],
+                )
+            })
+            .unwrap();
+        store.connection.execute(
+            "INSERT INTO executions(run_id,input,provider,model,deadline) VALUES (?1,'expired input','test','fixture',120001)",
+            [expired.to_string()],
+        ).unwrap();
+        let before_core = store.read().unwrap();
+        drop(store);
+        let before_bytes = std::fs::read(&path).unwrap();
+        let mut reader = ReadOnlyStore::open(&path).unwrap();
+        let (core, executions) = reader.execution_snapshot().unwrap();
+        assert_eq!(core, before_core);
+        assert_eq!(core.run(expired).unwrap().state(), RunState::Active);
+        assert_eq!(core.run(expired).unwrap().task(), expired_task);
+        assert_eq!(
+            core.run(expired)
+                .unwrap()
+                .participants()
+                .collect::<Vec<_>>(),
+            vec![agent]
+        );
+        assert_eq!(
+            executions.iter().find(|e| e.run == completed.run),
+            Some(&completed)
+        );
+        let pending = executions.iter().find(|e| e.run == expired).unwrap();
+        assert_eq!(pending.deadline, 120001);
+        assert_eq!(
+            (pending.output.as_ref(), pending.error.as_ref()),
+            (None, None)
+        );
+        drop(reader);
+        assert_eq!(std::fs::read(&path).unwrap(), before_bytes);
+        let reopened = ReadOnlyStore::open(&path)
+            .unwrap()
+            .execution_snapshot()
+            .unwrap();
+        assert_eq!(reopened, (core, executions));
+        assert_eq!(std::fs::read(&path).unwrap(), before_bytes);
+        // Existing default history inspection still recovers the same expired lease.
+        let (recovered, results) = SqliteStore::open(&path)
+            .unwrap()
+            .execution_snapshot()
+            .unwrap();
+        assert!(matches!(
+            recovered.run(expired).unwrap().state(),
+            RunState::Finished {
+                outcome: RunOutcome::Interruption,
+                ..
+            }
+        ));
+        assert_eq!(
+            results
+                .iter()
+                .find(|e| e.run == expired)
+                .unwrap()
+                .error
+                .as_deref(),
+            Some("interrupted")
+        );
+        assert_eq!(
+            results.iter().find(|e| e.run == completed.run),
+            Some(&completed)
+        );
+    }
+
     #[test]
     fn history_snapshot_is_consistent_at_lease_boundary() {
         let dir = tempfile::tempdir().unwrap();

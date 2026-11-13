@@ -69,6 +69,8 @@ def create_app(database, model=None, *, port=8765, provider=None, provider_name=
     loops = LoopService(database, provider, model)
     from .connection_diagnostic import ConnectionDiagnostic
     diagnostic = ConnectionDiagnostic(database)
+    from .application.inspect_selected_work import InspectSelectedWork
+    inspect_selected_work = InspectSelectedWork(diagnostic)
 
     @asynccontextmanager
     async def lifespan(app):
@@ -117,6 +119,17 @@ def create_app(database, model=None, *, port=8765, provider=None, provider_name=
     async def connections(request):
         from .connections import connection_setup
         return response(connection_setup(database))
+
+    async def connection_inspect_work(request):
+        try:
+            data = await body(request)
+            if set(data) != {"task_id"}:
+                raise ValueError("Only task_id is accepted")
+            return response(await inspect_selected_work.execute(data["task_id"]))
+        except RequestTooLarge:
+            return response({"error": "Inspection request exceeds 120,000 bytes."}, 413)
+        except (ValueError, TypeError, UnicodeError):
+            return response({"error": "Send only task_id as a canonical Task UUID."}, 400)
 
     async def connection_shared_data(request):
         return await connection_diagnostic(request, shared_data=True)
@@ -349,6 +362,7 @@ def create_app(database, model=None, *, port=8765, provider=None, provider_name=
         Route("/api/loops/v1", loop_api, methods=["GET"]),
         Route("/api/loops/v1/{action}", loop_api, methods=["POST"]),
         Route("/api/connections/v1", connections, methods=["POST"]),
+        Route("/api/connections/v1/inspect-work", connection_inspect_work, methods=["POST"]),
         Route("/api/connections/v1/shared-data", connection_shared_data, methods=["POST"]),
         Route("/api/connections/v1/diagnostic", connection_diagnostic, methods=["POST"]),
         Route("/api/employees", employee, methods=["POST"]),

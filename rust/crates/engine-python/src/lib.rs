@@ -475,6 +475,20 @@ fn history_snapshot(database: &str) -> PyResult<HistoryRecord> {
         .map_err(error)?
         .execution_snapshot()
         .map_err(error)?;
+    history_record(core, executions)
+}
+#[pyfunction]
+fn history_snapshot_read_only(database: &str) -> PyResult<HistoryRecord> {
+    let (core, executions) = ReadOnlyStore::open(database)
+        .map_err(error)?
+        .execution_snapshot()
+        .map_err(error)?;
+    history_record(core, executions)
+}
+fn history_record(
+    core: llm_engine_core::Core,
+    executions: Vec<llm_engine_sqlite::Execution>,
+) -> PyResult<HistoryRecord> {
     let agents = core.agents().map(agent_record).collect();
     let tasks = core
         .tasks()
@@ -508,6 +522,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     hook_execution::register(m)?;
     loop_execution::register(m)?;
     m.add_function(wrap_pyfunction!(history_snapshot, m)?)?;
+    m.add_function(wrap_pyfunction!(history_snapshot_read_only, m)?)?;
     m.add_function(wrap_pyfunction!(start_mcp_execution, m)?)?;
     m.add_function(wrap_pyfunction!(execution_sources, m)?)?;
     m.add_function(wrap_pyfunction!(create_assigned_work, m)?)?;

@@ -17,6 +17,7 @@ function setup() {
 async function inspect(user: ReturnType<typeof userEvent.setup>) {
   await screen.findByRole('option', {name: /Follow up · h/});
   await user.selectOptions(screen.getByLabelText('Employee Hook'), 'h');
+  await waitFor(() => expect((screen.getByRole('button', {name: 'Preview Hook with saved work'}) as HTMLButtonElement).disabled).toBe(false), {timeout: 3000});
   screen.getByRole('button', {name: 'Preview Hook with saved work'}).focus();
   await user.keyboard('{Enter}');
   return screen.findByRole('button', {name: 'Execute once with Hook'});
@@ -61,6 +62,7 @@ test('unknown submission requires successful explicit history refresh before new
     return original(path, options);
   }));
   const user = userEvent.setup(); render(<App />);
+  await waitFor(() => expect((screen.getByRole('button', {name: 'Retry explicitly'}) as HTMLButtonElement).disabled).toBe(false), {timeout: 3000});
   await inspect(user); await user.click(screen.getByRole('button', {name: 'Execute once with Hook'}));
   await screen.findByText(/Submission needs inspection/);
   await user.click(screen.getByRole('button', {name: 'Refresh connection'}));
@@ -71,7 +73,8 @@ test('unknown submission requires successful explicit history refresh before new
   expect((screen.getByRole('button', {name: 'Preview Hook with saved work'}) as HTMLButtonElement).disabled).toBe(true);
   screen.getByRole('button', {name: 'I inspected execution history'}).focus();
   await user.keyboard('{Enter}');
-  await waitFor(() => expect((screen.getByRole('button', {name: 'Preview Hook with saved work'}) as HTMLButtonElement).disabled).toBe(false));
+  await waitFor(() => expect((screen.getByRole('button', {name: 'Retry explicitly'}) as HTMLButtonElement).disabled).toBe(false), {timeout: 3000});
+  await waitFor(() => expect((screen.getByRole('button', {name: 'Preview Hook with saved work'}) as HTMLButtonElement).disabled).toBe(false), {timeout: 3000});
   expect(screen.queryByRole('button', {name: 'Execute once with Hook'})).toBeNull();
 });
 
