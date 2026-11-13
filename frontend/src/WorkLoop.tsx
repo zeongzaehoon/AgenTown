@@ -26,10 +26,23 @@ export function WorkLoop({taskId, connected, inspected, navigation}: {navigation
   const pending = useRef<AbortController | null>(null);
   const region = useRef<HTMLElement>(null);
   const previewRegion = useRef<HTMLElement>(null);
+  const previewControl = useRef<HTMLButtonElement>(null);
   const operation = useRef<LoopOperation | null>(null);
   const revision = useRef(0);
+  const previousDestination = useRef({taskId, navigation});
   function invalidate() {++revision.current; setPreview(null); setConsent(false); setFocusedPolicy('');}
-  useLayoutEffect(() => {invalidate(); setPolicies([]); setSelected(''); setMessage(''); if (operation.current && !['start', 'stop'].includes(operation.current)) {pending.current?.abort(); pending.current = null; setBusy(false);}}, [taskId, connected, inspected, navigation]);
+  useLayoutEffect(() => {
+    // Recover only focus owned by the disappearing preview. Requested navigation
+    // has its own destination and takes precedence over this fallback.
+    const ownedFocus = previewRegion.current?.contains(document.activeElement);
+    const hadPreview = !!previewRegion.current;
+    const requestedNavigation = !!navigation && (previousDestination.current.navigation !== navigation || previousDestination.current.taskId !== taskId);
+    previousDestination.current = {taskId, navigation};
+    invalidate(); setPolicies([]); setSelected('');
+    setMessage(hadPreview ? 'Local Loop preview dismissed. Consent cleared. No activation requested.' : '');
+    if (ownedFocus && !requestedNavigation) region.current?.focus();
+    if (operation.current && !['start', 'stop'].includes(operation.current)) {pending.current?.abort(); pending.current = null; setBusy(false);}
+  }, [taskId, connected, inspected, navigation]);
   useLayoutEffect(() => {setFocusedSession(''); if (navigation) navigationRegion.current?.focus();}, [navigation, taskId]);
   useLayoutEffect(() => {if (focusedSession) document.getElementById(`local-session-${focusedSession}`)?.focus();}, [focusedSession]);
   useLayoutEffect(() => {
@@ -37,6 +50,13 @@ export function WorkLoop({taskId, connected, inspected, navigation}: {navigation
   }, [focusedPolicy, busy]);
   useLayoutEffect(() => () => {pending.current?.abort(); pending.current = null;}, []);
   useLayoutEffect(() => {if (preview) previewRegion.current?.focus();}, [preview]);
+  function dismissPreview() {
+    if (!preview || busy) return;
+    invalidate();
+    setMessage('Local Loop preview dismissed. Consent cleared. No activation requested.');
+    if (previewControl.current && !previewControl.current.disabled) previewControl.current.focus();
+    else region.current?.focus();
+  }
   async function perform(op: LoopOperation, task = taskId, saved?: LoopSession) {
     if (!task || !connected || pending.current || (op === 'start' && (!preview || !consent || recovery.includes(task)))) return;
     const expected = op === 'preview' ? selected : op === 'start' ? preview! : saved;
@@ -112,18 +132,18 @@ export function WorkLoop({taskId, connected, inspected, navigation}: {navigation
     <label>Local enabled Loop <select ref={policyControl} value={selected} disabled={busy || !connected || !inspected} onChange={e => {invalidate(); setSelected(e.target.value);}}>
       <option value="">Choose a Loop</option>{policies.filter(p => p.enabled && p.task_id === taskId).map(p => <option key={p.id} value={p.id}>{p.name} · {p.id}</option>)}
     </select></label>
-    <button type="button" disabled={!selected || busy || !connected || !inspected || recovery.includes(taskId || '')} onClick={() => void perform('preview')}>Preview local Loop</button>
+    <button ref={previewControl} type="button" disabled={!selected || busy || !connected || !inspected || recovery.includes(taskId || '')} onClick={() => void perform('preview')}>Preview local Loop</button>
     <button type="button" disabled={!taskId || !connected || busy} onClick={() => void perform('inspect')}>Inspect local Loop sessions</button>
     {taskId && recovery.includes(taskId) && <><p>Activation consent consumed. Inspect persisted sessions and attempts before acknowledging recovery and requesting a fresh preview.</p><button type="button" disabled={busy || !connected || !recoveryRead.includes(taskId)} onClick={() => {invalidate(); setRecovery(rows => rows.filter(t => t !== taskId));}}>I inspected local Loop records</button></>}
     <p role="status">{busy ? 'Waiting for retained local MCP owner…' : message}</p>
-    {preview && <section ref={previewRegion} tabIndex={-1} aria-label="Local Loop preview" onKeyDown={e => {if (e.key === 'Escape') {invalidate(); region.current?.focus();}}}>
+    {preview && <section ref={previewRegion} tabIndex={-1} aria-label="Local Loop preview" onKeyDown={e => {if (e.key === 'Escape') {e.preventDefault(); e.stopPropagation(); dismissPreview();}}}>
       <h5>{preview.policy_name}</h5><p>Task: {preview.task_id} · Employee: {preview.agent_id} · Policy: {preview.policy_id}</p>
       <p>Exact input</p><pre>{preview.input}</pre>
       <p>Maximum attempts: {preview.max_iterations} · Interval: {preview.interval_seconds} seconds · Prior attempts: {preview.expected_runs}</p>
       <p>Provider: {preview.provider} · Model: {preview.model} · Preview ID: {preview.preview_id}</p>
       <label><input type="checkbox" checked={consent} onChange={e => setConsent(e.target.checked)} />I authorize one activation of this exact bounded Loop preview.</label>
       <button type="button" disabled={!consent || busy || !connected} onClick={() => void perform('start')}>Authorize and activate local Loop</button>
-      <button type="button" onClick={() => {invalidate(); region.current?.focus();}}>Cancel local Loop preview</button>
+      <button type="button" onClick={dismissPreview}>Cancel local Loop preview</button>
     </section>}
     <p>Stop prevents new admissions and attempts local cancellation. Remote completion may remain unknown. Disconnecting or changing selection does not stop a session.</p>
     {[...sessions.values()].map(s => <section tabIndex={-1} id={`local-session-${s.session_id}`} key={s.session_id} aria-label={`Local Loop session ${s.session_id}`}>

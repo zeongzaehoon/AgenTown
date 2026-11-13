@@ -3169,3 +3169,38 @@ preservation and pending/uncertain dispatch recovery. Supervisor full verificati
 passed 1,029 frontend tests, the production build, 508 Python tests with 2 skipped,
 Rust and desktop checks, and 2 Chromium browser checks. Live LLM calls are skipped,
 not passed.
+
+### Dismiss local MCP Loop previews (C89-T1)
+
+```sh
+uv run --directory python --locked agentown-web --database /tmp/agentown-local-loop.sqlite3 --port 8765
+```
+
+Open http://127.0.0.1:8765. Prerequisites: saved employee-assigned text work
+and an enabled matching Loop. No provider credentials are needed for inspection,
+preview or dismissal. In Company overview, choose the saved Loop's **Open linked
+work for Loop** action, then **Inspect through local MCP**, **Find matching Loops
+through local MCP**, and **Preview local Loop**.
+
+Check consent, then choose **Cancel local Loop preview**, or press Escape while
+focus is inside the preview. The preview disappears, the status announces
+“Local Loop preview dismissed. Consent cleared. No activation requested.” and
+focus returns to **Preview local Loop**. Repeat with a fresh preview: consent
+must be unchecked and activation disabled until checked again. Dismissal sends
+no request, changes no saved work or drafts, and leaves retained-session Stop
+access intact. Escape outside the preview does not dismiss it.
+
+With deterministic network fixtures, disconnect or invalidate explicit inspection
+while focus is in the preview. Focus reaches **Bounded Loop through local MCP**;
+when focus is on an outside control, that control keeps focus. Requested Loop
+navigation instead reaches **Requested Loop inspection**. Reconnect and inspect
+again before requesting a fresh preview and fresh consent. Dispatched activation
+has no preview to cancel: changing selection or pressing Escape neither aborts
+nor replays activation, even if delivery becomes uncertain. Inspect persisted
+sessions explicitly to recover; retained sessions keep their existing Stop rules.
+
+Scoped checks: `cd frontend && npm test -- src/WorkLoop.test.tsx src/App.test.tsx`
+and `npm run build`. Supervisor verification passed 1,041 frontend tests, the
+production build, and 505 Python tests, with 2 Python tests skipped. The selected
+frontend profile deferred installed-browser and process-recovery gates; those passed
+in the preceding C88 full profile. Live provider calls are skipped, not passed.

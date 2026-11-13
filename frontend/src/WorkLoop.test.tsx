@@ -161,3 +161,85 @@ test('discovery rejects changed Task linkage and does not select an alternative 
   expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe('');
   expect((screen.getByRole('button', {name: 'Preview local Loop'}) as HTMLButtonElement).disabled).toBe(true);
 });
+
+test.each(['Cancel', 'Escape'])('%s dismisses only the preview, announces and restores Preview with fresh consent', async method => {
+  const fetcher = setup();
+  fetcher.mockResolvedValueOnce(reply({...preview, preview_id: 'fresh'}, 'loop_previewed'));
+  render(<WorkLoop taskId={task} connected inspected />);
+  await prepare(); await userEvent.click(screen.getByRole('checkbox'));
+  const before = fetcher.mock.calls.length;
+  if (method === 'Cancel') await userEvent.click(screen.getByRole('button', {name: 'Cancel local Loop preview'}));
+  else await userEvent.keyboard('{Escape}');
+  expect(fetcher).toHaveBeenCalledTimes(before);
+  expect(document.activeElement).toBe(screen.getByRole('button', {name: 'Preview local Loop'}));
+  expect(screen.queryByRole('region', {name: 'Local Loop preview'})).toBeNull();
+  expect(screen.getByRole('status').textContent).toBe('Local Loop preview dismissed. Consent cleared. No activation requested.');
+  await userEvent.keyboard('{Enter}');
+  expect((await screen.findByRole('checkbox') as HTMLInputElement).checked).toBe(false);
+  expect((screen.getByRole('button', {name: 'Authorize and activate local Loop'}) as HTMLButtonElement).disabled).toBe(true);
+});
+
+test.each(['disconnect', 'inspection', 'navigation', 'outside'] as const)('preview invalidation recovers owned focus and respects other destinations: %s', async reason => {
+  const fetcher = setup();
+  const content = (connected = true, inspected = true, navigation?: {taskId: string; policyId: string}) => <><button>Outside control</button><WorkLoop taskId={task} connected={connected} inspected={inspected} navigation={navigation} /></>;
+  const view = render(content()); await prepare();
+  await userEvent.click(screen.getByRole('checkbox'));
+  if (reason === 'outside') screen.getByRole('button', {name: 'Outside control'}).focus();
+  view.rerender(content(reason !== 'disconnect', false, reason === 'navigation' ? {taskId: task, policyId: policy} : undefined));
+  expect(screen.queryByRole('checkbox')).toBeNull();
+  expect(document.activeElement).toBe(reason === 'outside' ? screen.getByRole('button', {name: 'Outside control'}) : screen.getByRole('region', {name: reason === 'navigation' ? 'Requested Loop inspection' : 'Bounded Loop through local MCP'}));
+  expect(fetcher).toHaveBeenCalledTimes(2);
+});
+
+test.each(['receipt', 'uncertain'])('Escape after dispatched activation never cancels or replays delivery: %s', async result => {
+  const fetcher = setup(); let finish!: (value: Response) => void; let fail!: (error: Error) => void;
+  fetcher.mockImplementationOnce(() => new Promise<Response>((resolve, reject) => {finish = resolve; fail = reject;}));
+  const view = render(<WorkLoop taskId={task} connected inspected />); await prepare();
+  await userEvent.click(screen.getByRole('checkbox'));
+  await userEvent.click(screen.getByRole('button', {name: 'Authorize and activate local Loop'}));
+  expect(screen.queryByRole('button', {name: 'Cancel local Loop preview'})).toBeNull();
+  const signal = fetcher.mock.calls[2][1].signal as AbortSignal;
+  await userEvent.keyboard('{Escape}');
+  view.rerender(<WorkLoop taskId={policy} connected inspected={false} />);
+  expect(signal.aborted).toBe(false);
+  await act(async () => {if (result === 'receipt') finish(reply(session, 'loop_started')); else fail(new Error('lost receipt'));});
+  expect(fetcher).toHaveBeenCalledTimes(3);
+  if (result === 'receipt') expect((screen.getByRole('button', {name: `Stop local Loop ${policy}`}) as HTMLButtonElement).disabled).toBe(false);
+  else expect(screen.getByText(/Delivery uncertain/)).toBeTruthy();
+});
+
+test('preview dismissal preserves retained-session Stop access without requesting cancellation', async () => {
+  const fetcher = setup();
+  fetcher.mockReset().mockResolvedValueOnce(reply(inspection(), 'loops_inspected'))
+    .mockResolvedValueOnce(reply({schema_version: 1, loops: [{id: policy, name: 'Draft', task_id: task, max_iterations: 2, interval_seconds: 60, enabled: true}]}, 'loops_discovered'))
+    .mockResolvedValueOnce(reply(preview, 'loop_previewed'));
+  render(<WorkLoop taskId={task} connected inspected />);
+  await userEvent.click(screen.getByRole('button', {name: 'Inspect local Loop sessions'}));
+  await prepare();
+  await userEvent.click(screen.getByRole('button', {name: 'Cancel local Loop preview'}));
+  expect((screen.getByRole('button', {name: `Stop local Loop ${policy}`}) as HTMLButtonElement).disabled).toBe(false);
+  expect(fetcher).toHaveBeenCalledTimes(3);
+});
+
+
+test('existing policy navigation does not suppress focused preview recovery on disconnect', async () => {
+  const fetcher = setup();
+  const navigation = {taskId: task, policyId: policy};
+  const view = render(<WorkLoop taskId={task} connected inspected navigation={navigation} />);
+  await prepare();
+  view.rerender(<WorkLoop taskId={task} connected={false} inspected={false} navigation={navigation} />);
+  expect(document.activeElement).toBe(screen.getByRole('region', {name: 'Bounded Loop through local MCP'}));
+  expect(screen.queryByRole('checkbox')).toBeNull();
+  expect(fetcher).toHaveBeenCalledTimes(2);
+});
+
+test('Escape on an outside control leaves preview and checked consent intact', async () => {
+  const fetcher = setup();
+  render(<><button>Outside control</button><WorkLoop taskId={task} connected inspected /></>);
+  await prepare(); await userEvent.click(screen.getByRole('checkbox'));
+  screen.getByRole('button', {name: 'Outside control'}).focus();
+  await userEvent.keyboard('{Escape}');
+  expect((screen.getByRole('checkbox') as HTMLInputElement).checked).toBe(true);
+  expect(document.activeElement).toBe(screen.getByRole('button', {name: 'Outside control'}));
+  expect(fetcher).toHaveBeenCalledTimes(2);
+});

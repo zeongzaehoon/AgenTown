@@ -1134,7 +1134,7 @@ test('selected local inspection remains reachable when refreshed history omits t
   expect(screen.queryByRole('checkbox', {name: /I authorize one/})).toBeNull();
 });
 
-test.each(['Skill', 'Hook'] as const)('Company %s preview dismissal preserves saved work and unrelated drafts without requests', async kind => {
+test.each(['Skill', 'Hook', 'Loop'] as const)('Company %s preview dismissal preserves saved work and unrelated drafts without requests', async kind => {
   // Isolate dismissal from background reads while retaining real interaction timers.
   // Keep the exact request-count assertion: dismissal must send no request at all.
   const interval = globalThis.setInterval;
@@ -1144,12 +1144,16 @@ test.each(['Skill', 'Hook'] as const)('Company %s preview dismissal preserves sa
   const record = '33333333-3333-4333-8333-333333333333';
   const skill = {id: record, name: 'Manual', instructions: 'Instructions', enabled: true};
   const hook = {id: record, name: 'Follow up', skill_id: record, target_kind: 'agent', target_id: employee, event: 'run_completed', enabled: true};
+  const loop = {id: record, name: 'Repeater', task_id: task, max_iterations: 2, interval_seconds: 60, enabled: true};
   const f = fixture({...initial(), employees: [{id: employee, name: 'Writer'}], work: [{id: task, input: 'Saved text', status: 'pending', assignees: [employee], attempts: []}]});
   const fallback = globalThis.fetch;
   const reply = (value: unknown) => new Response(JSON.stringify(value));
   let previews = 0;
   const envelope = (data: unknown, code: string, requested_task_id: string | null = task) => ({schema_version: 1, requested_task_id, status: 'confirmed', code, data, recovery: 'Inspect explicitly'});
   const fetcher = vi.fn(async (path: string, options: RequestInit) => {
+    if (path === '/api/config/v1/loops') return reply({loops: [loop]});
+    if (path === '/api/connections/v1/loops/list') return reply(envelope({schema_version: 1, loops: [loop]}, 'loops_discovered'));
+    if (path === '/api/connections/v1/loops/preview') return reply(envelope({schema_version: 1, preview_id: `fresh-${++previews}`, policy_id: record, policy_name: 'Repeater', task_id: task, agent_id: employee, input: 'Saved text', max_iterations: 2, interval_seconds: 60, expected_runs: 0, created_at: 1, policy_enabled: true, provider: 'fixture', model: 'fixture'}, 'loop_previewed'));
     if (path === '/api/config/v1/skills') return reply({skills: [skill]});
     if (path === '/api/config/v1/hooks') return reply({hooks: [hook]});
     if (path === '/api/connections/v1/inspect-work') return reply({schema_version: 1, requested_task_id: task, status: 'success', code: 'inspected', message: 'Inspected', recovery: 'Inspect again', inspection: {
@@ -1167,18 +1171,22 @@ test.each(['Skill', 'Hook'] as const)('Company %s preview dismissal preserves sa
   vi.stubGlobal('fetch', fetcher); render(<App />); await connected();
   fireEvent.change(draftInput(), {target: {value: 'Keep work draft'}});
   fireEvent.change(screen.getByLabelText('Employee name'), {target: {value: 'Keep employee draft'}});
-  const chooser = await screen.findByRole('combobox', {name: new RegExp(kind === 'Skill' ? '^Saved work for Skill:' : '^Assigned work for Hook:')});
-  await waitFor(() => expect((chooser as HTMLSelectElement).disabled).toBe(false));
-  await userEvent.selectOptions(chooser, task);
-  await userEvent.click(screen.getByRole('button', {name: new RegExp(kind === 'Skill' ? '^Open saved work for Skill:' : '^Open assigned work for Hook:')}));
+  if (kind === 'Loop') {
+    await userEvent.click(await screen.findByRole('button', {name: /^Open linked work for Loop: Repeater/}));
+  } else {
+    const chooser = await screen.findByRole('combobox', {name: new RegExp(kind === 'Skill' ? '^Saved work for Skill:' : '^Assigned work for Hook:')});
+    await waitFor(() => expect((chooser as HTMLSelectElement).disabled).toBe(false));
+    await userEvent.selectOptions(chooser, task);
+    await userEvent.click(screen.getByRole('button', {name: new RegExp(kind === 'Skill' ? '^Open saved work for Skill:' : '^Open assigned work for Hook:')}));
+  }
   await userEvent.click(screen.getByRole('button', {name: 'Inspect through local MCP'}));
-  await userEvent.click(await screen.findByRole('button', {name: `Find ${kind}s through local MCP`}));
+  await userEvent.click(await screen.findByRole('button', {name: kind === 'Loop' ? 'Find matching Loops through local MCP' : `Find ${kind}s through local MCP`}));
   const local = screen.getByRole('combobox', {name: `Local enabled ${kind}`});
   await waitFor(() => expect((local as HTMLSelectElement).value).toBe(record));
   const control = screen.getByRole('button', {name: `Preview local ${kind}`});
   for (const method of ['Escape', 'Cancel']) {
     await userEvent.click(control);
-    const consent = await screen.findByLabelText(new RegExp(`I authorize one execution of this exact ${kind} preview`));
+    const consent = await screen.findByLabelText(new RegExp(kind === 'Loop' ? 'I authorize one activation of this exact bounded Loop preview' : `I authorize one execution of this exact ${kind} preview`));
     expect((consent as HTMLInputElement).checked).toBe(false);
     await userEvent.click(consent);
     const before = fetcher.mock.calls.length;
@@ -1187,7 +1195,7 @@ test.each(['Skill', 'Hook'] as const)('Company %s preview dismissal preserves sa
     expect(fetcher.mock.calls).toHaveLength(before);
     expect(document.activeElement).toBe(control);
     expect(screen.queryByRole('region', {name: `Local ${kind} preview`})).toBeNull();
-    expect(screen.getByText(`Local ${kind} preview dismissed. Consent cleared. No execution requested.`)).toBeTruthy();
+    expect(screen.getByText(`Local ${kind} preview dismissed. Consent cleared. No ${kind === 'Loop' ? 'activation' : 'execution'} requested.`)).toBeTruthy();
     expect((local as HTMLSelectElement).value).toBe(record);
     expect(draftInput().value).toBe('Keep work draft');
     expect((screen.getByLabelText('Employee name') as HTMLInputElement).value).toBe('Keep employee draft');
@@ -1195,6 +1203,6 @@ test.each(['Skill', 'Hook'] as const)('Company %s preview dismissal preserves sa
   }
   expect(previews).toBe(2);
   expect(f.state.work[0].attempts).toHaveLength(0);
-  expect(fetcher.mock.calls.some(([path]) => path.endsWith('/execute'))).toBe(false);
+  expect(fetcher.mock.calls.some(([path]) => /\/(execute|start|stop)$/.test(path))).toBe(false);
   expect(fetcher.mock.calls.filter(([path, options]) => path.startsWith('/api/config/') && options?.method !== 'GET')).toHaveLength(0);
 });
