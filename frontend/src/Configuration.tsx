@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { type Workspace, listTeams, type Team } from './api';
-import { savedSkills, savedHooks, savedLoopPolicies, savedConfigurationRecord, configurationRequest, type ConfigurationNavigation, type ConfigurationFields, type ConfigurationKind, type ConfigurationRecord } from './configuration-api';
+import { savedSkills, savedHooks, savedLoopPolicies, confirmedConfigurationReceipt, configurationRequest, type ConfigurationNavigation, type ConfigurationFields, type ConfigurationKind, type ConfigurationRecord } from './configuration-api';
 
 type Draft = Record<string, string>;
 const labels = {skills: 'Skill', hooks: 'Hook', loops: 'Loop'};
@@ -106,7 +106,7 @@ function ConfigurationPanel({workspace, openSkill, openRecord}: {workspace: Work
       <p>Configuration {record.enabled ? 'enabled' : 'disabled'}. No automatic execution. Apply enabled Skills through a saved-work preview; Hooks and Loops remain inactive.</p>
       <button type="button" disabled={blocked} onClick={() => void perform(async signal => {
         const saved = await configurationRequest<ConfigurationRecord>(kind, `/${encodeURIComponent(record.id)}/enabled`, {enabled: !record.enabled}, signal);
-        if (!signal.aborted) remember(savedConfigurationRecord(kind, saved, record.id));
+        if (!signal.aborted) remember(confirmedConfigurationReceipt(kind, saved, record, !record.enabled, record));
       })}>{record.enabled ? 'Disable configuration' : 'Enable configuration'}</button></>}
     <form onSubmit={event => {
       event.preventDefault(); if (blocked || validation) return;
@@ -114,7 +114,7 @@ function ConfigurationPanel({workspace, openSkill, openRecord}: {workspace: Work
       void perform(async signal => {
         const response = await configurationRequest<unknown>(kind, selected ? `/${encodeURIComponent(selected)}` : '', fields as unknown as ConfigurationFields, signal);
         if (signal.aborted) return;
-        const saved = savedConfigurationRecord(kind, response, selected || undefined);
+        const saved = confirmedConfigurationReceipt(kind, response, fields as unknown as ConfigurationFields, record?.enabled ?? false, record, records?.[kind]);
         remember(saved); setSelection(previous => ({...previous, [kind]: saved.id}));
         setDrafts(previous => { const next = {...previous}; delete next[key]; delete next[`${kind}/${saved.id}`]; return next; });
         focusSelection.current = true;

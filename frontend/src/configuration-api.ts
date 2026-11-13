@@ -70,3 +70,20 @@ export function savedConfigurationRecord(kind: ConfigurationKind, response: unkn
   }
   return saved;
 }
+
+/** Check the receipt against the command before replacing confirmed UI state. */
+export function confirmedConfigurationReceipt(kind: ConfigurationKind, response: unknown, fields: ConfigurationFields,
+  enabled: boolean, previous?: ConfigurationRecord, loaded: ConfigurationRecord[] = []): ConfigurationRecord {
+  const saved = savedConfigurationRecord(kind, response, previous?.id);
+  // Rust str::trim uses Unicode White_Space; JS trim additionally removes BOM.
+  const name = fields.name.replace(/^\p{White_Space}+|\p{White_Space}+$/gu, '');
+  const keys = kind === 'skills' ? ['instructions'] : kind === 'hooks'
+    ? ['skill_id', 'target_kind', 'target_id', 'event'] : ['task_id', 'max_iterations', 'interval_seconds'];
+  const expected = fields as unknown as Record<string, unknown>;
+  const actual = saved as unknown as Record<string, unknown>;
+  if (saved.name !== name || saved.enabled !== enabled || keys.some(key => actual[key] !== expected[key]) ||
+    (!previous && loaded.some(item => item.id === saved.id))) {
+    throw new Error('Saved configuration did not confirm the requested change.');
+  }
+  return saved;
+}

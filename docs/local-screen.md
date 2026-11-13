@@ -2233,3 +2233,60 @@ members, missing requested additions, duplicate IDs, atomic invalid list
 rejection, failed recovery, retained drafts/selections, duplicate submission and
 keyboard recovery. Supervisor browser/build verification is required separately;
 this reproduction does not require live provider calls.
+
+### Contradictory configuration receipts (C58-T1)
+
+Launch the local product using the command above and open **Open configuration**.
+Create a Skill, then a Hook referencing it and an employee, and a Loop referencing
+saved work. These actions configure records only; no provider credentials are
+needed. Select each saved record, enable it, edit its name, and save. The enabled
+state must remain enabled. Names with surrounding whitespace are trimmed;
+Skill instructions keep their whitespace.
+
+For a reproducible contradiction, install this one-shot receipt interceptor in
+browser developer tools before creating, saving or toggling a configuration:
+
+```js
+window.configurationRecoveryFetch = window.fetch;
+window.fetch = async (input, init) => {
+  const result = await window.configurationRecoveryFetch(input, init);
+  if (['POST', 'PUT'].includes(init?.method) &&
+      String(input).startsWith('/api/config/v1/')) {
+    window.fetch = window.configurationRecoveryFetch;
+    const receipt = await result.json();
+    return Response.json({...receipt, name: 'Contradictory receipt'});
+  }
+  return result;
+};
+```
+
+Repeat for Skills, Hooks and Loops. The mutation reaches the server, but its
+receipt must not replace the displayed confirmed values, change the selection,
+clear the draft, or announce success. Save and toggle buttons must remain
+blocked. To exercise a toggle mismatch, replace the returned object with
+`{...receipt, enabled: !receipt.enabled}`. For a duplicate creation ID, select
+**Create new**, retain an existing record's ID, and return
+`{...receipt, id: 'THE_EXISTING_ID'}` instead. For field mismatches use
+`instructions` on Skills, `skill_id`, `target_kind`, `target_id` or `event` on
+Hooks, and `task_id`, `max_iterations` or `interval_seconds` on Loops.
+
+Tab to **Refresh configuration** and press Enter. A failed refresh must keep the
+lockout and drafts. After a successful refresh, inspect **Saved values**, IDs and
+enabled state; the server may already have saved the first request. Switching
+record types and back retains drafts and selections. Refresh issues GETs only.
+Only a deliberate save/toggle after inspection sends another mutation; successful
+creates/edits return focus to **Saved record**. Restore transport if needed with
+`window.fetch = window.configurationRecoveryFetch`.
+
+Run the deterministic interaction coverage with installed frontend dependencies:
+
+```sh
+cd frontend
+npx vitest run src/Configuration.test.tsx
+```
+
+It covers normalized successes, each field contradiction, enabled-state changes
+on edits, both toggle directions, duplicate creation IDs, failed/successful
+refresh, retained confirmed values/drafts/selections and keyboard recovery across
+all three types. Frontend tests/build and ordinary Python checks remain part of
+supervisor verification; live provider calls are skipped under user policy.
