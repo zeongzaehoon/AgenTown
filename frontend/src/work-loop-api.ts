@@ -80,3 +80,12 @@ export function parseCompanyLoops(value: unknown): LocalLoopResult {
 export async function inspectCompanyLoops(signal: AbortSignal) {
   return parseCompanyLoops(await api<unknown>('/api/connections/v1/loops/inspect-company', {}, signal));
 }
+
+/** Mutable admission counters are progress, not session identity. */
+export function sameLocalSession(a: LoopSession, b: LoopSession): boolean {
+  const wireA = a as unknown as Record<string, unknown>;
+  const wireB = b as unknown as Record<string, unknown>;
+  return a.session_id === b.session_id && samePreview(a.preview, b.preview) &&
+    a.provider === b.provider && a.model === b.model &&
+    ['schema_version', 'started_at', 'expires_at', 'declared_source'].every(k => wireA[k] === wireB[k]);
+}

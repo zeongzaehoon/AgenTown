@@ -3038,3 +3038,36 @@ from `python/`, run `python -m pytest tests/test_selected_loop.py` with the nati
 binding installed. These fixtures do not establish real provider operation; live
 provider calls remain skipped. Browser verification is performed by the supervisor
 under the change-based verification profile.
+
+### Stop a retained local MCP Loop from Company overview
+
+Run `agentown-web --database PATH` against the database containing the retained
+local MCP session, then open Company overview. Choose **Inspect company Loops
+through local MCP** explicitly. The row displays the exact Task ID, session ID,
+persisted state and current owner authority. Linked work need not be present in
+loaded history. Inspection alone never authorizes a mutation.
+
+For an active session with fresh granted local authority, focus **Stop local MCP
+Loop SESSION from overview** and press Enter (or click it). A pending status
+appears immediately; duplicate activation cannot dispatch another request.
+The request uses that row's exact Task and session IDs through the retained
+owner Stop API. Success is shown only after a separate persisted Task inspection
+returns `stopped` with matching session identity, preview, provider/model and
+session timestamps. The row then displays **Persisted state: stopped** and
+**Saved stopped state confirmed**. This acknowledges local cancellation; remote
+completion may remain unknown.
+
+Stale, unavailable, competing-owner, terminal and pending controls include an
+explanation. Authority expires after 2.4 seconds: inspect explicitly again.
+An uncertain response leaves Stop unavailable and announces that the outcome is
+not confirmed. Use **Inspect company Loops through local MCP** to reconcile the
+saved state before any new explicit action; nothing automatically resends.
+Draft text and existing work/session navigation remain available.
+
+Deterministic interaction coverage lives in `frontend/src/OverviewLoops.test.tsx`
+(run `cd frontend && npm test -- src/OverviewLoops.test.tsx` with dependencies
+installed). It covers keyboard/focus feedback, exact request identity, duplicate
+prevention, stale inspection responses, missing linked work, uncertain delivery,
+authority/expiry/terminal guards and persisted provenance confirmation. Browser
+and consolidated profile checks are performed by the supervisor after handoff.
+Live provider calls remain skipped, not passed.

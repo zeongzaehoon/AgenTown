@@ -1,4 +1,4 @@
-import { inspectCompanyLoops } from './work-loop-api';
+import { inspectCompanyLoops, localLoop, sameLocalSession } from './work-loop-api';
 import { canControl, controlText, sourceText, type LoopControl } from './loop-control';
 import { useEffect, useRef, useState } from 'react';
 import { ApiError, api, type Workspace } from './api';
@@ -103,11 +103,14 @@ function CompanyMcpLoops({workspace, onOpenSession}: {workspace: Workspace | nul
   const [status, setStatus] = useState('Not inspected. Explicitly inspect recorded sessions through the retained local MCP owner.');
   const [busy, setBusy] = useState(false);
   const [fresh, setFresh] = useState(false);
+  const stopLock = useRef(false);
+  const inspectedAt = useRef(0);
   const active = useRef<AbortController | null>(null);
   const revision = useRef(0);
   const expiry = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => { ++revision.current; active.current?.abort(); if (expiry.current) clearTimeout(expiry.current); }, []);
   async function inspect() {
+    if (stopLock.current) return;
     const generation = ++revision.current;
     active.current?.abort();
     if (expiry.current) clearTimeout(expiry.current);
@@ -117,24 +120,61 @@ function CompanyMcpLoops({workspace, onOpenSession}: {workspace: Workspace | nul
       const result = await inspectCompanyLoops(controller.signal);
       if (generation !== revision.current) return;
       if (!result.inspection) {setStatus('Retained local MCP inspection unavailable. Previous records, if any, are stale. Inspect again.'); return;}
-      setInspection(result.inspection); setFresh(true);
+      setInspection(result.inspection); setFresh(true); inspectedAt.current = Date.now();
       setStatus(result.inspection.sessions.length ? 'Recorded local MCP sessions loaded.' : 'No recorded local MCP sessions.');
       expiry.current = setTimeout(() => { if (generation === revision.current) {setFresh(false); setStatus('Local MCP inspection stale. Inspect again for current persisted state and authority.');} }, 2400);
     } catch {
       if (generation === revision.current) setStatus('Retained local MCP inspection unavailable. Previous records, if any, are stale. Inspect again.');
     } finally {if (generation === revision.current) setBusy(false);}
   }
+  async function stop(sessionId: string) {
+    const expected = inspection?.sessions.find(s => s.session_id === sessionId);
+    if (stopLock.current || busy || !fresh || Date.now() - inspectedAt.current >= 2400 ||
+        !canControl(inspection?.control) || expected?.state !== 'active') return;
+    stopLock.current = true;
+    const generation = ++revision.current;
+    active.current?.abort();
+    if (expiry.current) clearTimeout(expiry.current);
+    const controller = new AbortController(); active.current = controller;
+    setBusy(true); setFresh(false);
+    setStatus(`Stop requested for local MCP session ${sessionId}. Saved stopped state is not yet confirmed.`);
+    try {
+      const result = await localLoop('stop', expected.preview.task_id, controller.signal, expected);
+      if (generation !== revision.current) return;
+      if (result.status !== 'confirmed' || !result.receipt || !sameLocalSession(result.receipt, expected)) throw new Error('Stop delivery unconfirmed');
+      setStatus('Stop response received. Confirming persisted local MCP stopped state…');
+      const saved = await localLoop('inspect', expected.preview.task_id, controller.signal);
+      if (generation !== revision.current) return;
+      const persisted = saved.inspection?.sessions.find(s => s.session_id === sessionId);
+      if (saved.status !== 'confirmed' || !persisted || persisted.state !== 'stopped' ||
+          !sameLocalSession(persisted, expected)) throw new Error('Persisted stopped state unconfirmed');
+      // Keep other Tasks visible, but do not refresh their authority from a Task-scoped read.
+      setInspection(previous => previous && ({...previous, sessions: previous.sessions.map(s => s.session_id === sessionId ? persisted : s)}));
+      setStatus(`Saved stopped state confirmed for local MCP session ${sessionId}. Remote completion may remain unknown. Inspect company Loops again before another action.`);
+    } catch {
+      if (generation === revision.current) setStatus(`Stop outcome for local MCP session ${sessionId} is not confirmed. Explicitly inspect company Loops again before another attempt. Nothing is resent automatically. Remote completion may remain unknown.`);
+    } finally {
+      stopLock.current = false;
+      if (generation === revision.current) setBusy(false);
+    }
+  }
   return <section aria-label="Company local MCP Loop inspection">
     <h4>Retained local MCP Loop activity</h4>
     <p role="status">{status}</p>
-    <button type="button" onClick={() => void inspect()}>Inspect company Loops through local MCP</button>
-    <p>Read recorded sessions across all work. Inspection and opening work grant no consent and never preview, start or stop work. Inspect the selected session again before an explicit Stop.</p>
+    <button type="button" aria-disabled={stopLock.current} onClick={() => void inspect()}>Inspect company Loops through local MCP</button>
+    <p>Read recorded sessions across all work. Inspection and opening work grant no consent and never preview, start or stop work. Stop requires fresh inspection and granted local authority. Stop prevents new admissions and requests local cancellation; remote completion may remain unknown.</p>
     {inspection && <>
       <p aria-label="Retained MCP owner authority">{fresh ? '' : 'Stale authority: '}{controlText(inspection.control)}</p>
       <ul aria-label="Company local MCP sessions">{inspection.sessions.map(s => {
         const work = workspace?.work.find(w => w.id === s.preview.task_id);
         return <li key={s.session_id}>
           <p>Task: {s.preview.task_id} · Session: {s.session_id} · Persisted state: {s.state}</p>
+          <button type="button" aria-disabled={busy || !fresh || !canControl(inspection.control) || s.state !== 'active'}
+            aria-describedby={`mcp-stop-reason-${s.session_id}`} onClick={() => void stop(s.session_id)}>Stop local MCP Loop {s.session_id} from overview</button>
+          <p id={`mcp-stop-reason-${s.session_id}`}>{s.state !== 'active' ? 'This session is not active; no stop is available.'
+            : busy ? 'An inspection or stop is pending. Wait before another action.'
+            : !fresh ? 'Explicit fresh company inspection required before stopping.'
+            : !canControl(inspection.control) ? controlText(inspection.control) : 'Stop this exact session by explicit action. Ownership is checked again by the server.'}</p>
           <p>{sourceText(s.declared_source)}</p>
           <p>{loopLabel(s, inspection.attempts)} · Admitted: {s.admitted} / {s.preview.max_iterations}</p>
           {work && onOpenSession ? <button type="button" disabled={busy} onClick={() => onOpenSession({taskId: s.preview.task_id, sessionId: s.session_id})}>Inspect local MCP session {s.session_id} in work</button>
