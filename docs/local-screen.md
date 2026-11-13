@@ -2770,3 +2770,35 @@ canonical `task_id`, observed `expected_runs` and explicit boolean
 `resubmission_consent`. See the [exact contract and recovery steps](text-execution.md#explicit-local-product-execution-api).
 Inspection remains read-only; uncertain delivery requires inspection and fresh
 consent, never automatic replay. Live-provider validation remains skipped.
+
+### Execute selected saved work through local MCP
+
+Launch `agentown-web --database /absolute/path/product.sqlite --port 8765`
+with the existing `--provider` and `--model` flags for your configured provider.
+Open `http://127.0.0.1:8765`, create an employee and save/assign ordinary text,
+or select existing saved work. Choose **Inspect through local MCP**. Review the
+exact saved ordinary-text input, assigned employee IDs, active-attempt indicator,
+and observed attempt count. Inspection itself never calls a provider.
+
+For eligible work, check **I authorize one execution of this saved input** and
+choose **Execute once through local MCP**. This can incur provider cost. For work
+with prior attempts the checkbox explicitly authorizes one resubmission. Each
+submission consumes consent and locks duplicate clicks. Selection changes and
+disconnection discard consent and any late response. Keyboard users can Tab to
+the checkbox, press Space, then Tab and Enter to execute. After a response or
+failure, focus moves to **Inspect before another execution**.
+
+A recorded result is labelled quality unverified. “Transport completed” means the
+execution record arrived; inspect whether it contains output or a provider error.
+It does not approve output or complete the saved Task. Configuration, busy and
+admission rejection, timeout, malformed replies and lost delivery all require
+explicit reinspection before fresh consent. Nothing automatically replays.
+Recovery inspection remains available for the selected ID even if refreshed
+history no longer lists that work; missing readiness cannot authorize execution.
+Reconnect explicitly when disconnected, then inspect again. An active attempt
+must finish or be reconciled through the existing recovery procedure in
+[text execution](text-execution.md) before requesting more work.
+
+Real provider calls remain skipped under the user’s live-test policy. React
+interaction fixtures exercise consent and recovery without credentials; their
+outputs are deterministic fixtures, not live LLM validation.

@@ -350,9 +350,13 @@ the active attempt to finish; for an expired lease explicitly invoke the existin
 MCP `get_work_history_v1` with `{"task_id":"<canonical UUID>","read_only":false}`
 to let Rust reconcile it, then refresh read-only inspection. Review the latest persisted result and
 attempt count, then obtain fresh explicit consent before resubmitting. Neither
-adapter nor API automatically retries or resumes the costly call. Frontend action
-integration is a separate delivery; this API can be exercised with a same-origin
-JSON client while that work is pending.
+adapter nor API automatically retries or resumes the costly call. The product screen exposes this boundary through explicit inspection, a one-request
+consent checkbox and Execute once through local MCP. Every returned response,
+including rejection, consumes the inspection for execution purposes. Explicitly
+inspect again before granting fresh consent. The screen uses the observed
+`expected_runs` and sends `resubmission_consent: true` only after fresh resubmission
+consent for a nonzero count. Client timeout covers 75 seconds and does not prove
+remote cancellation. See [screen steps](local-screen.md#execute-selected-saved-work-through-local-mcp).
 
 Deterministic implementation evidence for this boundary: scoped execution plus
 inspection checks passed (129 cases), followed by execution plus web checks

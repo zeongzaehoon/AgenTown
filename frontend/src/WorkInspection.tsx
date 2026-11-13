@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef, useState } from 'react';
+import { WorkExecution } from './WorkExecution';
 import { RequestTimeoutError } from './api';
 import { inspectSelectedWork, type InspectionResponse } from './work-inspection-api';
 
@@ -56,6 +57,7 @@ export function WorkInspection({taskId, connected = true}: {taskId: string | nul
         <p>Readiness does not validate provider configuration, grant consent or authorize execution. Execution must recheck current state.</p>
         <p>Each tool is a separate observation. Input, assignments and counts may differ as work changes between reads. Inspect again explicitly for newer observations.</p>
       </section>
+      <WorkExecution readiness={inspection.readiness} onInspect={() => void inspect()} />
       {!inspection.attempts.length && <p>No recorded attempts. No execution was requested by this inspection.</p>}
       {inspection.attempts.map((run, index) => <article key={run.id} aria-label={`Inspected attempt ${index + 1}`}>
         <h4>Attempt {index + 1}</h4><p>Run ID: {run.id}</p>

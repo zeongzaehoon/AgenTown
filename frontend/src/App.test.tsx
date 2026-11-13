@@ -1117,3 +1117,17 @@ test('handoff follows canonical saved selection and loses validity on disconnect
   expect(within(handoff()).getByText(/Select available saved work/)).toBeTruthy();
   expect(f.calls.every(call => call.path === '/api/state')).toBe(true);
 });
+
+test('selected local inspection remains reachable when refreshed history omits that work', async () => {
+  const f = fixture({...initial(), employees: [{id: 'employee-1', name: 'Writer'}],
+    work: [{id: 'work-1', input: 'Saved request', status: 'pending', assignees: ['employee-1'], attempts: []}]});
+  render(<App />); await connected();
+  await screen.findByText('Work ID: work-1');
+  f.state.work = []; refresh();
+  await waitFor(() => expect(screen.queryByText('Work ID: work-1')).toBeNull());
+  const inspect = screen.getByRole('button', {name: 'Inspect through local MCP'}) as HTMLButtonElement;
+  expect(inspect.disabled).toBe(false);
+  inspect.focus(); await userEvent.keyboard('{Enter}');
+  await waitFor(() => expect(f.calls.some(call => call.path === '/api/connections/v1/inspect-work' && call.body.task_id === 'work-1')).toBe(true));
+  expect(screen.queryByRole('checkbox', {name: /I authorize one/})).toBeNull();
+});

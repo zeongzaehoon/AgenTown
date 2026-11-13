@@ -49,10 +49,10 @@ test('pending inspection is invalidated by selection and cannot replace a newer 
   const user = userEvent.setup(); const view = render(<WorkInspection taskId="task-a" />);
   await user.click(screen.getByRole('button', {name: 'Inspect through local MCP'}));
   expect(screen.getByText('Inspecting selected work through local MCP…')).toBeTruthy();
-  expect((screen.getByRole('button') as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByRole('button', {name: 'Inspect through local MCP'}) as HTMLButtonElement).disabled).toBe(true);
   view.rerender(<WorkInspection taskId="task-b" />);
   expect(screen.queryByText(/Confirmed Task ID/)).toBeNull();
-  await user.click(screen.getByRole('button'));
+  await user.click(screen.getByRole('button', {name: 'Inspect through local MCP'}));
   await screen.findByText('Confirmed Task ID: task-b');
   await act(async () => {complete(new Response(JSON.stringify(savedContext())));});
   expect(screen.queryByText('Confirmed Task ID: task-a')).toBeNull();
@@ -68,22 +68,22 @@ test.each(['busy', 'timeout', 'missing_work', 'failure'])('%s clears success and
   const fetcher = vi.fn(async () => new Response(JSON.stringify(response)));
   vi.stubGlobal('fetch', fetcher);
   const user = userEvent.setup(); render(<WorkInspection taskId="task-a" />);
-  await user.click(screen.getByRole('button')); await screen.findByText('Saved result');
+  await user.click(screen.getByRole('button', {name: 'Inspect through local MCP'})); await screen.findByText('Saved result');
   response = {schema_version: 1, requested_task_id: 'task-a', status: 'failure', code,
     message: `Inspection ${code}`, recovery: 'Check local server then inspect explicitly.', inspection: null};
-  await user.click(screen.getByRole('button')); await screen.findByRole('alert');
+  await user.click(screen.getByRole('button', {name: 'Inspect through local MCP'})); await screen.findByRole('alert');
   expect(screen.queryByText('Saved result')).toBeNull();
   expect(screen.queryByText(/Confirmed local MCP inspection/)).toBeNull();
   expect(fetcher).toHaveBeenCalledTimes(2);
   response = success();
-  await user.click(screen.getByRole('button')); await screen.findByText('Saved result');
+  await user.click(screen.getByRole('button', {name: 'Inspect through local MCP'})); await screen.findByText('Saved result');
 });
 
 test('empty attempt and absent provider execution are distinct recorded states', async () => {
   const response = success(); response.inspection.attempts = [];
   vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(response))));
   const user = userEvent.setup(); render(<WorkInspection taskId="task-a" />);
-  await user.click(screen.getByRole('button'));
+  await user.click(screen.getByRole('button', {name: 'Inspect through local MCP'}));
   await screen.findByText(/No recorded attempts/);
 });
 
@@ -101,7 +101,7 @@ test.each([
   expect(() => parseWorkInspection(response, 'task-a')).toThrow();
   vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(response))));
   const user = userEvent.setup(); render(<WorkInspection taskId="task-a" />);
-  await user.click(screen.getByRole('button')); await screen.findByRole('alert');
+  await user.click(screen.getByRole('button', {name: 'Inspect through local MCP'})); await screen.findByRole('alert');
   expect(screen.queryByText(/Confirmed local MCP inspection/)).toBeNull();
   expect(screen.queryByText('Saved result')).toBeNull();
 });
@@ -110,7 +110,7 @@ test('transport failure never retries or retains success', async () => {
   const fetcher = vi.fn().mockRejectedValue(new Error('offline'));
   vi.stubGlobal('fetch', fetcher);
   const user = userEvent.setup(); render(<WorkInspection taskId="task-a" />);
-  await user.click(screen.getByRole('button')); await screen.findByRole('alert');
+  await user.click(screen.getByRole('button', {name: 'Inspect through local MCP'})); await screen.findByRole('alert');
   expect(fetcher).toHaveBeenCalledTimes(1);
   expect(screen.queryByText(/Confirmed local MCP inspection/)).toBeNull();
 });
@@ -122,14 +122,14 @@ test('returning to the same Task cannot revive an aborted inspection or its erro
     .mockResolvedValue(new Response(JSON.stringify(success())));
   vi.stubGlobal('fetch', fetcher);
   const user = userEvent.setup(); const view = render(<WorkInspection taskId="task-a" />);
-  await user.click(screen.getByRole('button'));
+  await user.click(screen.getByRole('button', {name: 'Inspect through local MCP'}));
   const signal = (fetcher.mock.calls[0][1] as RequestInit).signal!;
   view.rerender(<WorkInspection taskId="task-b" />);
   expect(signal.aborted).toBe(true);
   view.rerender(<WorkInspection taskId="task-a" />);
   expect(fetcher).toHaveBeenCalledTimes(1);
   expect(screen.queryByText(/Confirmed Task ID/)).toBeNull();
-  screen.getByRole('button').focus(); await user.keyboard('{Enter}');
+  screen.getByRole('button', {name: 'Inspect through local MCP'}).focus(); await user.keyboard('{Enter}');
   await screen.findByText('Confirmed Task ID: task-a');
   await act(async () => {rejectOld(new Error('late failure for old task-a request'));});
   expect(screen.queryByRole('alert')).toBeNull();
@@ -144,7 +144,7 @@ test('attempt without a provider record is inspectable without claiming a result
   raw.inspection.attempts[0].execution = null;
   vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(response))));
   const user = userEvent.setup(); render(<WorkInspection taskId="task-a" />);
-  await user.click(screen.getByRole('button'));
+  await user.click(screen.getByRole('button', {name: 'Inspect through local MCP'}));
   await screen.findByText('No provider execution recorded for this attempt.');
   expect(screen.queryByText('Saved result')).toBeNull();
 });
@@ -154,10 +154,10 @@ test('bounded HTTP timeout releases the control without retrying', async () => {
   const fetcher = vi.fn(() => new Promise<Response>(() => {}));
   vi.stubGlobal('fetch', fetcher);
   render(<WorkInspection taskId="task-a" />);
-  await act(async () => {screen.getByRole('button').click();});
+  await act(async () => {screen.getByRole('button', {name: 'Inspect through local MCP'}).click();});
   await act(async () => {await vi.advanceTimersByTimeAsync(15_001);});
   expect(screen.getByRole('alert').textContent).toContain('Local inspection timed out');
-  expect((screen.getByRole('button') as HTMLButtonElement).disabled).toBe(false);
+  expect((screen.getByRole('button', {name: 'Inspect through local MCP'}) as HTMLButtonElement).disabled).toBe(false);
   expect(fetcher).toHaveBeenCalledTimes(1);
 });
 
@@ -192,7 +192,7 @@ test('saved Skill and Hook context belongs to its attempt and inspection never e
   const fetcher = vi.fn(async () => new Response(JSON.stringify(savedContext())));
   vi.stubGlobal('fetch', fetcher);
   const user = userEvent.setup(); const view = render(<WorkInspection taskId="task-a" />);
-  await user.click(screen.getByRole('button'));
+  await user.click(screen.getByRole('button', {name: 'Inspect through local MCP'}));
   const first = await screen.findByRole('article', {name: 'Inspected attempt 1'});
   expect(within(first).getByText('Skill ID: 33333333-3333-4333-8333-333333333333')).toBeTruthy();
   expect(within(first).getByText('Saved instructions', {selector: 'pre'})).toBeTruthy();
@@ -236,11 +236,11 @@ test.each([
     .mockResolvedValueOnce(new Response(JSON.stringify(savedContext())));
   vi.stubGlobal('fetch', fetcher);
   const user = userEvent.setup(); render(<WorkInspection taskId="task-a" />);
-  await user.click(screen.getByRole('button')); await screen.findByRole('alert');
+  await user.click(screen.getByRole('button', {name: 'Inspect through local MCP'})); await screen.findByRole('alert');
   expect(screen.queryByText(/Confirmed local MCP inspection/)).toBeNull();
   expect(screen.queryByText('Saved Hook: Original follow-up')).toBeNull();
   expect(fetcher).toHaveBeenCalledTimes(1);
-  await user.click(screen.getByRole('button'));
+  await user.click(screen.getByRole('button', {name: 'Inspect through local MCP'}));
   await screen.findByText('Saved Hook: Original follow-up');
   expect(fetcher.mock.calls.every(([path]) => path === '/api/connections/v1/inspect-work')).toBe(true);
   expect(fetcher).toHaveBeenCalledTimes(2);
@@ -268,7 +268,7 @@ test('Loop display retains saved policy/input/limits and labels separately obser
   expect(() => parseWorkInspection(response, 'task-a')).not.toThrow();
   vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(response))));
   const user = userEvent.setup(); render(<WorkInspection taskId="task-a" />);
-  await user.click(screen.getByRole('button'));
+  await user.click(screen.getByRole('button', {name: 'Inspect through local MCP'}));
   const saved = await screen.findByRole('region', {name: 'Saved Loop context'});
   expect(within(saved).getByText('Saved Loop policy: Original bounded policy')).toBeTruthy();
   expect(within(saved).getByText('Recorded request')).toBeTruthy();
@@ -285,11 +285,11 @@ test('uncertain Loop linkage never claims absence and explicit inspection can re
     .mockResolvedValueOnce(new Response(JSON.stringify(loopContext())));
   vi.stubGlobal('fetch', fetcher);
   const user = userEvent.setup(); render(<WorkInspection taskId="task-a" />);
-  await user.click(screen.getByRole('button'));
+  await user.click(screen.getByRole('button', {name: 'Inspect through local MCP'}));
   await screen.findByText(/Loop linkage is uncertain/);
   expect(screen.queryByText('No recorded Loop linkage for this attempt.')).toBeNull();
   expect(fetcher).toHaveBeenCalledTimes(1);
-  await user.click(screen.getByRole('button'));
+  await user.click(screen.getByRole('button', {name: 'Inspect through local MCP'}));
   await screen.findByText('Saved Loop policy: Original bounded policy');
   expect(fetcher).toHaveBeenCalledTimes(2);
 });
@@ -336,9 +336,9 @@ test('a late Loop inspection is discarded after selected work changes', async ()
     .mockResolvedValue(new Response(JSON.stringify(success('task-b'))));
   vi.stubGlobal('fetch', fetcher);
   const user = userEvent.setup(); const view = render(<WorkInspection taskId="task-a" />);
-  await user.click(screen.getByRole('button'));
+  await user.click(screen.getByRole('button', {name: 'Inspect through local MCP'}));
   view.rerender(<WorkInspection taskId="task-b" />);
-  await user.click(screen.getByRole('button'));
+  await user.click(screen.getByRole('button', {name: 'Inspect through local MCP'}));
   await screen.findByText('Confirmed Task ID: task-b');
   await act(async () => {finish(new Response(JSON.stringify(loopContext())));});
   expect(screen.queryByRole('region', {name: 'Saved Loop context'})).toBeNull();
@@ -366,7 +366,7 @@ test.each(['eligible', 'ineligible', 'missing'] as const)('readiness displays th
   const fetcher = vi.fn(async () => new Response(JSON.stringify(response)));
   vi.stubGlobal('fetch', fetcher);
   const user = userEvent.setup(); render(<WorkInspection taskId="task-a" />);
-  await user.click(screen.getByRole('button'));
+  await user.click(screen.getByRole('button', {name: 'Inspect through local MCP'}));
   const panel = await screen.findByRole('region', {name: 'Ordinary-text execution readiness'});
   expect(within(panel).getByText(`Advisory eligibility: ${eligibility}`)).toBeTruthy();
   expect(within(panel).getByText(/does not validate provider configuration, grant consent or authorize execution/)).toBeTruthy();
@@ -407,13 +407,13 @@ test.each([
   const fetcher = vi.fn(async () => new Response(JSON.stringify(response)));
   vi.stubGlobal('fetch', fetcher);
   const user = userEvent.setup(); render(<WorkInspection taskId="task-a" />);
-  await user.click(screen.getByRole('button'));
+  await user.click(screen.getByRole('button', {name: 'Inspect through local MCP'}));
   await screen.findByRole('region', {name: 'Ordinary-text execution readiness'});
   response = success(); mutate(response);
-  await user.click(screen.getByRole('button')); await screen.findByRole('alert');
+  await user.click(screen.getByRole('button', {name: 'Inspect through local MCP'})); await screen.findByRole('alert');
   expect(screen.queryByRole('region', {name: 'Ordinary-text execution readiness'})).toBeNull();
   expect(fetcher).toHaveBeenCalledTimes(2);
-  response = success(); await user.click(screen.getByRole('button'));
+  response = success(); await user.click(screen.getByRole('button', {name: 'Inspect through local MCP'}));
   await screen.findByRole('region', {name: 'Ordinary-text execution readiness'});
   expect(fetcher).toHaveBeenCalledTimes(3);
 });
@@ -425,21 +425,21 @@ test('disconnect clears readiness, aborts pending reads and requires explicit re
     .mockResolvedValue(new Response(JSON.stringify(success())));
   vi.stubGlobal('fetch', fetcher);
   const user = userEvent.setup(); const view = render(<WorkInspection taskId="task-a" connected />);
-  await user.click(screen.getByRole('button'));
+  await user.click(screen.getByRole('button', {name: 'Inspect through local MCP'}));
   await screen.findByRole('region', {name: 'Ordinary-text execution readiness'});
   view.rerender(<WorkInspection taskId="task-a" connected={false} />);
   expect(screen.queryByRole('region', {name: 'Ordinary-text execution readiness'})).toBeNull();
-  expect((screen.getByRole('button') as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByRole('button', {name: 'Inspect through local MCP'}) as HTMLButtonElement).disabled).toBe(true);
   view.rerender(<WorkInspection taskId="task-a" connected />);
   expect(fetcher).toHaveBeenCalledTimes(1);
-  await user.click(screen.getByRole('button'));
+  await user.click(screen.getByRole('button', {name: 'Inspect through local MCP'}));
   const signal = (fetcher.mock.calls[1][1] as RequestInit).signal!;
   view.rerender(<WorkInspection taskId="task-a" connected={false} />);
   expect(signal.aborted).toBe(true);
   view.rerender(<WorkInspection taskId="task-a" connected />);
   await act(async () => {finish(new Response(JSON.stringify(success())));});
   expect(screen.queryByRole('region', {name: 'Ordinary-text execution readiness'})).toBeNull();
-  await user.click(screen.getByRole('button'));
+  await user.click(screen.getByRole('button', {name: 'Inspect through local MCP'}));
   await screen.findByRole('region', {name: 'Ordinary-text execution readiness'});
   expect(fetcher).toHaveBeenCalledTimes(3);
 });
@@ -451,10 +451,10 @@ test('timeout clears prior readiness and ignores late completion before explicit
     .mockResolvedValue(new Response(JSON.stringify(success())));
   vi.stubGlobal('fetch', fetcher);
   render(<WorkInspection taskId="task-a" />);
-  await act(async () => {screen.getByRole('button').click();});
+  await act(async () => {screen.getByRole('button', {name: 'Inspect through local MCP'}).click();});
   expect(screen.getByRole('region', {name: 'Ordinary-text execution readiness'})).toBeTruthy();
   vi.useFakeTimers();
-  await act(async () => {screen.getByRole('button').click();});
+  await act(async () => {screen.getByRole('button', {name: 'Inspect through local MCP'}).click();});
   expect(screen.queryByRole('region', {name: 'Ordinary-text execution readiness'})).toBeNull();
   await act(async () => {await vi.advanceTimersByTimeAsync(15_001);});
   expect(screen.getByRole('alert').textContent).toContain('Local inspection timed out');
@@ -462,7 +462,7 @@ test('timeout clears prior readiness and ignores late completion before explicit
   expect(screen.queryByRole('region', {name: 'Ordinary-text execution readiness'})).toBeNull();
   expect(fetcher).toHaveBeenCalledTimes(2);
   vi.useRealTimers();
-  await act(async () => {screen.getByRole('button').click();});
+  await act(async () => {screen.getByRole('button', {name: 'Inspect through local MCP'}).click();});
   expect(screen.getByRole('region', {name: 'Ordinary-text execution readiness'})).toBeTruthy();
   expect(fetcher).toHaveBeenCalledTimes(3);
 });

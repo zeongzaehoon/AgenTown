@@ -48,7 +48,7 @@ export const EXECUTION_DEADLINE_MS = 75_000;
 export class RequestTimeoutError extends Error {}
 export async function api<T>(path: string, data: object, signal?: AbortSignal, method: 'POST' | 'GET' = 'POST'): Promise<T> {
   const controller = new AbortController();
-  const execution = path.endsWith('/execute');
+  const execution = path.endsWith('/execute') || path === '/api/connections/v1/execute-work';
   const timeout = execution ? EXECUTION_DEADLINE_MS : REQUEST_DEADLINE_MS;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let cancel = () => {};
