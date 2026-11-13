@@ -2873,3 +2873,32 @@ input, employee, attempt count, bounds and server provider/model. The web proces
 retains the installed MCP execution owner until shutdown, so inspection and Stop
 reach the same owner. Deterministic subprocess fixtures are test evidence only;
 real provider operation remains skipped, and browser verification is pending.
+
+### Selected-work Loop through the retained local MCP owner
+
+Launch the installed product with `agentown-web --database /ABSOLUTE/PATH/company.sqlite3`.
+Use existing saved work assigned to an employee and an enabled Loop policy for that
+Task. Select the saved work, choose **Inspect through local MCP**, then **Find matching
+Loops through local MCP**. Choose a Loop and **Preview local Loop**. Review the exact
+saved input, employee, provider/model, prior attempt count, maximum attempts and
+interval. Check the authorization box, then separately choose **Authorize and activate
+local Loop**. Configuration, mounting, discovery and preview never activate it.
+
+Choose **Inspect local Loop sessions** to read persisted state and attempts. Results
+are quality-unverified. A receipt alone is not a persisted-state confirmation. After
+activation, consent is consumed; inspect records and acknowledge inspection before
+requesting a new preview. Uncertain delivery never triggers automatic replay.
+
+Session controls remain visible when changing selected work, replacing a preview or
+losing the connection. Reconnect, inspect the retained session and choose **Stop local
+Loop**. Stop prevents new admissions and attempts local cancellation; remote provider
+completion may remain unknown. Changing selection or disconnecting does not stop work.
+Another owner requires Stop through that owning MCP/web server; after shutting down
+that owner, inspect and explicitly retry. Restarting this page can recover sessions
+by selecting their Task and explicitly inspecting local Loop sessions.
+
+This UI uses the installed local MCP process (`list_loops_v1`, `preview_loop_v1`,
+`start_loop_v1`, `inspect_loop_sessions_v1`, `stop_loop_v1`) through the web server's
+retained owner. It is not evidence of an external-client connection or live-provider
+validation. Deterministic interaction coverage is in `frontend/src/WorkLoop.test.tsx`;
+supervisor browser validation is pending for this implementation snapshot.

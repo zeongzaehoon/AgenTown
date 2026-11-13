@@ -1369,3 +1369,12 @@ process death may leave interrupted records until the next explicit owner action
 read-only inspection never acquires authority or replays work. A restarted web
 process has no old consent and never automatically starts a session. Stop prevents
 further admissions; already delivered remote requests may still finish or incur cost.
+
+The selected-work web inspection also exposes bounded Loop actions through
+`POST /api/connections/v1/loops/{list,preview,start,inspect,stop}`. Every request binds
+`task_id`; preview adds `policy_id`, start adds the complete returned preview as
+`consent` plus `execution_consent: true`, and Stop adds `session_id`. The web server
+retains one installed local MCP owner; it does not reconnect and replay uncertain
+mutations. See [local screen steps](local-screen.md#selected-work-loop-through-the-retained-local-mcp-owner).
+Enabled policies are configuration only. Stop is local cancellation with potentially
+unknown remote completion. External-client and live-provider validation are not claimed.
