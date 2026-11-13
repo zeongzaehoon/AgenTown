@@ -109,6 +109,29 @@ test('transport failure never retries or retains success', async () => {
   expect(screen.queryByText(/Confirmed local MCP inspection/)).toBeNull();
 });
 
+test('returning to the same Task cannot revive an aborted inspection or its error', async () => {
+  let rejectOld!: (reason: Error) => void;
+  const fetcher = vi.fn()
+    .mockImplementationOnce(() => new Promise<Response>((_, reject) => {rejectOld = reject;}))
+    .mockResolvedValue(new Response(JSON.stringify(success())));
+  vi.stubGlobal('fetch', fetcher);
+  const user = userEvent.setup(); const view = render(<WorkInspection taskId="task-a" />);
+  await user.click(screen.getByRole('button'));
+  const signal = (fetcher.mock.calls[0][1] as RequestInit).signal!;
+  view.rerender(<WorkInspection taskId="task-b" />);
+  expect(signal.aborted).toBe(true);
+  view.rerender(<WorkInspection taskId="task-a" />);
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  expect(screen.queryByText(/Confirmed Task ID/)).toBeNull();
+  screen.getByRole('button').focus(); await user.keyboard('{Enter}');
+  await screen.findByText('Confirmed Task ID: task-a');
+  await act(async () => {rejectOld(new Error('late failure for old task-a request'));});
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(screen.getByText('Saved result')).toBeTruthy();
+  expect(fetcher).toHaveBeenCalledTimes(2);
+  expect(fetcher.mock.calls.every(([path]) => path === '/api/connections/v1/inspect-work')).toBe(true);
+});
+
 test('attempt without a provider record is inspectable without claiming a result', async () => {
   const response = success();
   const raw = response as unknown as {inspection: {attempts: {execution: unknown}[]}};

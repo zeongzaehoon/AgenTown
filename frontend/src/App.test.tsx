@@ -759,11 +759,25 @@ test.each(['selection', 'new attempt', 'changed attempt', 'disconnect', 'configu
 
 test('an empty saved output still requires consent', async () => {
   const f = savedResults(); f.state.work[0].attempts.at(-1)!.output = '';
+  const user = userEvent.setup();
   render(<App />); await connected();
   await waitFor(() => expect((retry() as HTMLButtonElement).disabled).toBe(false), {timeout: 3000});
-  fireEvent.click(retry());
+  retry().focus(); await user.keyboard('{Enter}');
   expect(resendRegion()).toBeTruthy();
   expect(f.calls.every(c => c.path === '/api/state')).toBe(true);
+  await user.keyboard('{Escape}');
+  expect(resendRegion()).toBeNull();
+  expect(document.activeElement).toBe(retry());
+  expect(f.calls.every(c => c.path === '/api/state')).toBe(true);
+  await user.keyboard('{Enter}');
+  await user.tab();
+  expect(document.activeElement).toBe(resend());
+  await user.keyboard('{Enter}');
+  expect(f.calls.filter(c => c.path.endsWith('/execute'))).toEqual([
+    {path: '/api/work/w/execute', body: {expected_runs: 2}},
+  ]);
+  await act(async () => f.finish());
+  expect(f.state.work[0].attempts[1].output).toBe('');
 });
 
 test('a failed latest attempt retries directly even with older saved results', async () => {

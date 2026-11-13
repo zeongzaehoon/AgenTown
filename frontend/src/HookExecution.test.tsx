@@ -53,8 +53,10 @@ test('disabled, unmatched and unavailable Skills are separate choices', async ()
 });
 test('unknown submission requires successful explicit history refresh before new consent', async () => {
   setup(); const original = globalThis.fetch; let refreshFails = false;
+  const submissions = vi.fn();
   vi.stubGlobal('fetch', vi.fn(async (path: string, options: RequestInit) => {
     if (path.endsWith('/execute')) {
+      submissions();
       expect(JSON.parse(options.body as string)).toEqual({hook_preview_id: 'p', expected_runs: 1});
       refreshFails = true; throw new Error('unknown delivery');
     }
@@ -76,6 +78,14 @@ test('unknown submission requires successful explicit history refresh before new
   await waitFor(() => expect((screen.getByRole('button', {name: 'Retry explicitly'}) as HTMLButtonElement).disabled).toBe(false), {timeout: 3000});
   await waitFor(() => expect((screen.getByRole('button', {name: 'Preview Hook with saved work'}) as HTMLButtonElement).disabled).toBe(false), {timeout: 3000});
   expect(screen.queryByRole('button', {name: 'Execute once with Hook'})).toBeNull();
+  expect(submissions).toHaveBeenCalledTimes(1);
+  // Recovery only permits a new preview. It cannot reuse consumed consent.
+  const execute = await inspect(user);
+  expect(submissions).toHaveBeenCalledTimes(1);
+  expect(document.activeElement).toBe(execute);
+  await user.keyboard('{Escape}');
+  expect(screen.queryByRole('button', {name: 'Execute once with Hook'})).toBeNull();
+  expect(submissions).toHaveBeenCalledTimes(1);
 });
 
 test('configuration unavailable is announced without offering execution', async () => {

@@ -2537,3 +2537,53 @@ This invocation did not launch the product or run browser checks. Frontend
 dependencies are absent in the isolated snapshot; focused tests, frontend
 tests/build and ordinary Python checks remain pending supervisor verification.
 Live provider calls are skipped, not passed.
+
+### Selected-work local MCP inspection recovery (C67-T1)
+
+Launch with the installed product entry point and an absolute product database:
+
+```sh
+agentown-web --database /absolute/path/to/product.sqlite --port 8765
+```
+
+Open http://127.0.0.1:8765, select saved work, and keyboard-activate **Inspect
+through local MCP**. Confirm the displayed Task ID matches the selection, and
+inspect recorded attempts, provider results and their unverified quality label.
+This is installed-local-MCP evidence only; it does not verify an external client
+or execute work. A work item without attempts must say so explicitly.
+
+Change selection while inspection is pending, including A → B → A. Old results
+and errors must stay discarded. No new inspection occurs until explicitly
+requested. If the local server is busy, unavailable, or times out, the inspection
+control becomes available for explicit retry; recovery must never execute work.
+
+Execution regression exercise: select work whose latest saved output is an empty
+string. **Retry explicitly** must still open resend consent. Escape cancels and
+returns focus; only **Confirm resend** submits one attempt. For an uncertain Hook
+submission, a failed **Refresh connection** must keep recovery blocked. After a
+successful explicit refresh, keyboard-activate **I inspected execution history**.
+Recovery must require a fresh Hook preview and fresh consent, with no replay.
+
+C67 implementation evidence: inspected current inspection, consent, Hook preview
+validation and explicit-refresh code. The current tests already contain the
+availability waits and required `hook_name` fixture repair. No new production
+defect was established by static inspection, so these repairs are preserved.
+Added deterministic coverage for A → B → A late-error rejection and cancellation,
+empty-output keyboard cancel/confirm with exactly one submission, and Hook
+recovery requiring fresh preview without replay. Existing coverage checks matching
+Task identity, stale success, unavailable inspection, explicit retry and timeout.
+
+Frontend dependencies are absent in this isolated workspace (`frontend/node_modules`
+does not exist), so focused tests and TypeScript checks were not executed. No
+current verification artifact was supplied; historical failure descriptions are
+diagnostic leads only. The supervisor must run frontend tests/build and the other
+checks selected by its current verification profile. Focused regression command:
+
+```sh
+cd frontend
+./node_modules/.bin/vitest run src/WorkInspection.test.tsx src/HookExecution.test.tsx src/App.test.tsx -t 'inspection|empty saved output|unknown submission'
+```
+
+The launch and browser exercise above were not executed in this invocation;
+supervisor browser validation remains pending. Live LLM calls are skipped, not
+passed. External clients remain unverified.
