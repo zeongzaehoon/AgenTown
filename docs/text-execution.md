@@ -460,3 +460,13 @@ recovery access and never automatically resends. A lost response alone cannot
 prove whether reconciliation persisted.
 
 Selected saved work can also use an enabled Skill through the installed local MCP adapter. Launch `agentown-web --database /absolute/path/product.sqlite` with the normal server provider/model settings, explicitly discover Skills, preview the saved Task with the chosen Skill, show the effective input, and submit that preview with explicit execution consent. See [the local Skill API requests](mcp.md#apply-a-skill-through-the-local-product-api). The response confirms persisted Run/Skill provenance; stale or consumed previews cannot be reused. Lost delivery is uncertain and must never trigger an automatic replay. This API slice does not add frontend controls. Live provider validation is skipped, not passed.
+
+The installed selected-work employee Hook API is documented with runnable discovery,
+preview and consent requests in [MCP setup](mcp.md#selected-work-employee-hook-api).
+It requires assigned saved work, a terminal source attempt and matching enabled
+employee Hook/Skill. Provider-free preview shows effective input and source identity;
+execution requires the complete unchanged consent tuple. Server-owned configuration
+and caller identity cannot be overridden in request JSON. Lost/unverifiable delivery
+remains uncertain and is never automatically replayed. Deterministic API/stdio and
+installed-package fixtures cover this boundary; live provider validation remains
+skipped under the current user policy.

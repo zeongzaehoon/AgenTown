@@ -55,7 +55,7 @@ class LocalBoundary:
         await self.app(scope, receive, secured)
 
 
-def create_app(database, model=None, *, port=8765, provider=None, provider_name="anthropic", execution_port=None, recovery_port=None, skill_port=None):
+def create_app(database, model=None, *, port=8765, provider=None, provider_name="anthropic", execution_port=None, recovery_port=None, skill_port=None, hook_port=None):
     database = str(database)
     # Injection is for tests only. The CLI uses the selected configured provider.
     configuration = None
@@ -88,12 +88,20 @@ def create_app(database, model=None, *, port=8765, provider=None, provider_name=
         database, provider_name, model, configured=configuration is None)
     apply_selected_skill = ApplySelectedSkill(local_skill)
 
+    from .application.apply_selected_hook import ApplySelectedHook, SelectedHookRequest
+    from .local_mcp_hook import LocalMcpHook, CONSENT_FIELDS
+    local_hook = hook_port if hook_port is not None else LocalMcpHook(
+        database, provider_name, model, configured=configuration is None)
+    apply_selected_hook = ApplySelectedHook(local_hook)
+
     @asynccontextmanager
     async def lifespan(app):
         try:
             yield
         finally:
             await diagnostic.close()
+            if hook_port is None:
+                await local_hook.close()
             if skill_port is None:
                 await local_skill.close()
             if recovery_port is None:
@@ -193,6 +201,23 @@ def create_app(database, model=None, *, port=8765, provider=None, provider_name=
         except (ValueError, TypeError, UnicodeError):
             return response({"error": "Send only the documented Skill fields, canonical IDs and explicit execution_consent: true."}, 400)
         return response(await apply_selected_skill.execute(selected))
+
+    async def connection_hook(request):
+        operation = request.path_params["operation"]
+        fields = {
+            "list": set(), "preview": {"task_id", "hook_id"},
+            "execute": set(CONSENT_FIELDS) | {"preview_id", "execution_consent"},
+        }
+        try:
+            data = await body(request)
+            if operation not in fields or set(data) != fields[operation]:
+                raise ValueError("Unexpected Hook fields")
+            selected = SelectedHookRequest(operation=operation, **data)
+        except RequestTooLarge:
+            return response({"error": "Hook request exceeds 120,000 bytes."}, 413)
+        except (ValueError, TypeError, UnicodeError):
+            return response({"error": "Send only the documented Hook fields, canonical IDs and explicit execution_consent: true."}, 400)
+        return response(await apply_selected_hook.execute(selected))
 
     async def connection_shared_data(request):
         return await connection_diagnostic(request, shared_data=True)
@@ -424,6 +449,7 @@ def create_app(database, model=None, *, port=8765, provider=None, provider_name=
     app = Starlette(lifespan=lifespan, routes=configuration_routes(database, body, response) + [Route("/", home), Route("/api/state", state, methods=["POST"]),
         Route("/api/loops/v1", loop_api, methods=["GET"]),
         Route("/api/loops/v1/{action}", loop_api, methods=["POST"]),
+        Route("/api/connections/v1/hooks/{operation}", connection_hook, methods=["POST"]),
         Route("/api/connections/v1/skills/{operation}", connection_skill, methods=["POST"]),
         Route("/api/connections/v1", connections, methods=["POST"]),
         Route("/api/connections/v1/reconcile-work", connection_reconcile_work, methods=["POST"]),

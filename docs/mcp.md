@@ -1240,3 +1240,50 @@ Frontend interaction fixtures cover preview without execution, one-use consent, 
 responses, failure recovery and keyboard focus. Supervisor checks for the current
 frontend profile remain the acceptance gate; unrelated installation evidence is not a
 prerequisite. Live provider calls are skipped, not passed.
+
+### Selected-work employee Hook API
+
+Launch the installed product with `agentown-web --database /absolute/path/product.sqlite3`
+(and, for execution, the server's `--provider` / `--model` and normal provider environment).
+`agentown-mcp` must be installed beside the web command. The web adapter uses its
+existing `list_hooks_v1`, `preview_hook_work_v1`, `execute_hook_work_v1` and read-only
+`get_work_history_v1` tools; it never dispatches directly through a provider SDK.
+
+With the web server at its default port, discover saved Hooks and preview one:
+
+```sh
+curl -s http://127.0.0.1:8765/api/connections/v1/hooks/list \
+  -H 'Origin: http://127.0.0.1:8765' -H 'Content-Type: application/json' -d '{}'
+curl -s http://127.0.0.1:8765/api/connections/v1/hooks/preview \
+  -H 'Origin: http://127.0.0.1:8765' -H 'Content-Type: application/json' \
+  -d '{"task_id":"SAVED-TASK-UUID","hook_id":"SAVED-HOOK-UUID"}' > hook-preview.json
+```
+
+Replace placeholders with canonical UUIDs. Prerequisites: assigned saved text work,
+a latest terminal source attempt, and a matching enabled employee Hook and enabled
+Skill. Discovery includes disabled/ineligible Hooks; preview enforces eligibility.
+Discovery and preview work without provider credentials and make no provider call.
+A preview persists an opaque consent token but does not execute work.
+
+Read the response's `data`, including effective `input`, employee (`agent_id`), Skill,
+source Run, event/outcome and attempt count. After explicit user authorization,
+construct the exact execution body (requires jq):
+
+```sh
+jq '.data | {task_id, hook_id, agent_id, skill_id, source_run_id, event,
+  source_outcome, input, expected_runs, preview_id} + {execution_consent:true}' \
+  hook-preview.json > hook-consent.json
+curl -s http://127.0.0.1:8765/api/connections/v1/hooks/execute \
+  -H 'Origin: http://127.0.0.1:8765' -H 'Content-Type: application/json' \
+  --data-binary @hook-consent.json
+```
+
+Do not automate the authorization step. Unknown fields, including provider/model,
+credentials and caller identity overrides, are rejected. The server supplies provider,
+model and caller `agentown-local-product`. All consent fields must match a preview
+confirmed in this web-server lifetime; Rust atomically checks freshness, single use
+and duplicate admission. A restart requires a fresh preview and explicit consent.
+A completed response includes persisted execution and Hook/Skill provenance,
+validated against history and caller identity. `uncertain` means dispatch may have
+persisted even if delivery or receipt verification failed. Inspect history before any
+new explicit action; never replay automatically. No automatic Hook activation is added.

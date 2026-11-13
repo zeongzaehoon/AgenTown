@@ -122,3 +122,58 @@ def test_installed_web_assets_and_process_recovery(tmp_path, installed_package):
             shutil.copy2(db, evidence / 'installed-work.sqlite3')
     assert secret not in db.read_bytes().decode('utf-8', errors='ignore')
     assert secret not in (evidence / 'installed-server.txt').read_text()
+
+
+def test_installed_selected_hook_stdio(tmp_path, installed_package):
+    """Installed package adapter + MCP child, with synthetic provider I/O only."""
+    python, runtime, env = installed_package
+    fixture = runtime / 'hook_mcp_fixture.py'
+    fixture.write_text(Path(__file__).with_name('mcp_fixture_server.py').read_text())
+    script = runtime / 'selected_hook_check.py'
+    script.write_text('''import asyncio, json, sys
+from pathlib import Path
+from llm_engine import _native
+from llm_engine.local_mcp_hook import LocalMcpHook, CONSENT_FIELDS
+from llm_engine.application.apply_selected_hook import SelectedHookRequest as Request
+
+db, fixture = sys.argv[1:]
+employee = _native.create_agent(db, 'Installed writer')[0]
+task = _native.create_assigned_work(db, 'Installed saved work', employee)[0]
+skill = _native.create_skill(db, 'Concise', 'Use short sentences.')['id']
+_native.set_skill_enabled(db, skill, True)
+hook = _native.create_hook(db, 'Follow up', skill, 'agent', employee, 'run_completed')['id']
+_native.set_hook_enabled(db, hook, True)
+source = _native.start_web_execution(db, task, 'anthropic', 'fixture', 0)
+_native.finish_execution(db, source[0], 'Source result', None)
+async def check():
+    # Exercise installed entry point without credentials: discovery/preview only.
+    port = LocalMcpHook(db, 'anthropic', None)
+    assert (await port.execute_work(Request('list'))).status == 'confirmed'
+    preview = (await port.execute_work(Request('preview', task, hook))).data
+    assert preview['source_run_id'] == source[0]
+    assert not Path(db + '.dispatches').exists()
+    await port.close()
+    # Real installed MCP implementation, deterministic provider in a child process.
+    port = LocalMcpHook(db, 'anthropic', 'fixture')
+    port.command = [sys.executable, fixture, db]
+    preview = (await port.execute_work(Request('preview', task, hook))).data
+    payload = {key: preview[key] for key in CONSENT_FIELDS}
+    request = Request('execute', **payload, preview_id=preview['preview_id'], execution_consent=True)
+    result = await port.execute_work(request)
+    assert result.status == 'completed', result
+    assert result.data['hook'] == _native.hook_provenance(db)[0]
+    assert (await port.execute_work(request)).code == 'admission_rejected'
+    assert Path(db + '.dispatches').read_text() == 'dispatch\\n'
+    await port.close()
+    print(json.dumps(result.data))
+asyncio.run(check())
+''')
+    child_env = dict(env)
+    # Intentionally synthetic; fixture-only calls never reach a provider service.
+    child_env['ANTHROPIC_API_KEY'] = 'installed-hook-fixture-only'
+    result = subprocess.run([str(python), '-I', str(script), str(tmp_path / 'hook.sqlite'), str(fixture)],
+                            cwd=runtime, env=child_env, capture_output=True, text=True, timeout=90)
+    assert result.returncode == 0, result.stdout + result.stderr
+    receipt = json.loads(result.stdout)
+    assert receipt['hook']['target_kind'] == 'agent'
+    assert receipt['execution']['quality'] == 'unverified'
