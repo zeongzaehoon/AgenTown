@@ -141,13 +141,14 @@ for (const operation of ['create', 'members'] as const) {
       const original = {id: 't0', name: 'Editors', members: ['missing']};
       let recovery: 'initial' | 'failed' | 'valid' = 'initial';
       let validSave = false;
+      let persisted: Team | null = null;
       const fetcher = vi.fn(async (_path: string, init: RequestInit) => {
         if (init.method === 'GET') {
           if (recovery === 'failed') return response({teams: [original, {...original, name: 'Corrupt replacement'}]});
-          return response({teams: [original, {id: 't1', name: 'Editors', members: []}]});
+          return response({teams: [persisted?.id === 't0' ? persisted : original, {id: 't1', name: 'Editors', members: []}, ...(persisted?.id === 'new' ? [persisted] : [])]});
         }
         const saved = operation === 'create' ? {id: 'new', name: 'New team', members: []} : {...original, members: ['missing', 'a']};
-        if (validSave) return response(saved);
+        if (validSave) { persisted = saved; return response(saved); }
         if (invalid === 'unreadable') return new Response('{');
         if (invalid === 'malformed') return response({id: 1});
         if (invalid === 'mismatched') return response({...saved, name: 'Different', id: 'other'});
@@ -192,6 +193,8 @@ for (const operation of ['create', 'members'] as const) {
       await screen.findByText('Showing persisted teams.');
       expect(postCount()).toBe(1);
       expect((screen.getByLabelText('Alex · Employee ID: a') as HTMLInputElement).checked).toBe(true);
+      screen.getByRole('button', {name: 'I inspected saved teams and membership'}).focus();
+      await user.keyboard('{Enter}');
       validSave = true;
       screen.getByRole('button', {name: operation === 'create' ? 'Create team' : 'Add members'}).focus();
       await user.keyboard('{Enter}');
@@ -221,3 +224,71 @@ test('invalid initial snapshot stays unavailable until explicit valid refresh', 
   expect((screen.getByLabelText('Team name') as HTMLInputElement).value).toBe('Retained');
   expect(fetcher.mock.calls).toHaveLength(2);
 });
+
+for (const operation of ['create', 'members'] as const) {
+  for (const outcome of ['missing', 'name', 'membership', 'failed', 'confirmed'] as const) {
+    test(`${operation}: matching receipt followed by ${outcome} persisted state`, async () => {
+      const original: Team = {id: 't0', name: 'Editors', members: ['missing']};
+      const other: Team = {id: 't1', name: 'Other', members: []};
+      let saved: Team | null = null;
+      let release!: () => void;
+      let recovery = false;
+      const fetcher = vi.fn(async (_path: string, init: RequestInit) => {
+        if (init.method === 'POST') {
+          saved = operation === 'create' ? {id: 'new', name: 'New team', members: []} : {...original, members: ['missing', 'a']};
+          return response(saved);
+        }
+        if (!saved) return response({teams: [original, other]});
+        if (!recovery) {
+          await new Promise<void>(resolve => { release = resolve; });
+          if (outcome === 'failed') throw new TypeError('offline');
+          const record = outcome === 'name' ? {...saved, name: 'Wrong'} : outcome === 'membership' ? {...saved, members: ['a']} : saved;
+          return response({teams: [other, ...(operation === 'create' ? [original] : []), ...(outcome === 'missing' ? [] : [record])]});
+        }
+        return response({teams: [other, ...(operation === 'create' ? [original] : []), saved]});
+      });
+      vi.stubGlobal('fetch', fetcher);
+      render(<Teams workspace={workspace} connected onSelectEmployee={vi.fn()} />);
+      fireEvent.click(screen.getByRole('button', {name: 'Browse teams'}));
+      await screen.findByText('Team ID: t0');
+      fireEvent.change(screen.getByLabelText('Team name'), {target: {value: 'New team'}});
+      fireEvent.change(screen.getByLabelText('Saved team'), {target: {value: 't1'}});
+      fireEvent.click(screen.getByLabelText('Alex · Employee ID: b'));
+      fireEvent.change(screen.getByLabelText('Saved team'), {target: {value: 't0'}});
+      fireEvent.click(screen.getByLabelText('Alex · Employee ID: a'));
+      const submit = () => fireEvent.submit(screen.getByRole('button', {name: operation === 'create' ? 'Create team' : 'Add members'}).closest('form')!);
+      submit();
+      await waitFor(() => expect(release).toBeTypeOf('function'));
+      submit();
+      expect(fetcher.mock.calls.filter(([, init]) => init.method === 'POST')).toHaveLength(1);
+      expect((screen.getByLabelText('Team name') as HTMLInputElement).value).toBe('New team');
+      expect(screen.getByText('Unavailable employee · ID: missing')).toBeTruthy();
+      await act(async () => release());
+      if (outcome === 'confirmed') {
+        await screen.findByText(operation === 'create' ? 'Team saved · ID: new' : 'Membership saved · Team ID: t0');
+        expect((screen.getByLabelText('Team name') as HTMLInputElement).value).toBe(operation === 'create' ? '' : 'New team');
+        if (operation === 'members') expect(screen.getByText('0 selected to add. Selections are retained when switching teams or refreshing; review them before saving.')).toBeTruthy();
+      } else {
+        await screen.findByText(/Drafts are retained; nothing is automatically resent/);
+        expect(screen.queryByText(/Team saved ·|Membership saved ·/)).toBeNull();
+        expect((screen.getByLabelText('Team name') as HTMLInputElement).value).toBe('New team');
+        expect(screen.getByText('Unavailable employee · ID: missing')).toBeTruthy();
+        expect((screen.getByLabelText('Alex · Employee ID: a') as HTMLInputElement).checked).toBe(true);
+        submit();
+        recovery = true;
+        const user = (await import('@testing-library/user-event')).default.setup();
+        screen.getByRole('button', {name: 'Refresh teams'}).focus();
+        await user.keyboard('{Enter}');
+        await screen.findByText('Showing persisted teams.');
+        expect((screen.getByRole('button', {name: 'Create team'}) as HTMLButtonElement).disabled).toBe(true);
+        screen.getByRole('button', {name: 'I inspected saved teams and membership'}).focus();
+        await user.keyboard('{Enter}');
+        expect((screen.getByRole('button', {name: 'Create team'}) as HTMLButtonElement).disabled).toBe(false);
+      }
+      fireEvent.change(screen.getByLabelText('Saved team'), {target: {value: 't1'}});
+      expect((screen.getByLabelText('Alex · Employee ID: b') as HTMLInputElement).checked).toBe(true);
+      expect(fetcher.mock.calls.filter(([, init]) => init.method === 'POST')).toHaveLength(1);
+      expect(leaveProtected()).toBe(true);
+    });
+  }
+}

@@ -2371,3 +2371,35 @@ These fixtures cover receipt/refresh failures, keyboard recovery, duplicate
 submission guards, Rust Unicode whitespace behavior and exact work text.
 Consolidated checks and browser validation are pending supervisor verification
 for this snapshot. Live provider calls remain skipped, not passed.
+
+Team persisted-save confirmation (C61-T1): use the existing prepared-checkout
+launch command:
+
+```sh
+uv run --directory python --locked agentown-web --database /tmp/agentown-teams-recovery.sqlite3 --port 8765
+```
+
+Open <http://127.0.0.1:8765> and choose **Browse teams**. Create a team or
+add employees. A save receipt now triggers a validated GET of teams before the
+success message, confirmed data update, or submitted draft removal. The read
+must contain the receipt ID, requested name and membership, including previously
+confirmed members. Other team selections and the unrelated name draft remain.
+
+For uncertain-delivery exercises, use the existing Teams transport interception
+steps above, but return a valid POST receipt and intercept the following GET:
+return an empty teams list, a changed name, omitted previous member, or reject
+the read. Confirm no success appears, the prior team and drafts remain, and
+repeated submit/Enter does not send another POST. Restore transport, Tab to
+**Refresh teams**, and press Enter. Inspect the refreshed IDs, names and members,
+then activate **I inspected saved teams and membership** with Enter. Only then
+may you explicitly submit again; refresh and inspection never resend a request.
+If the first save is visible, discard the retained draft rather than duplicate it.
+A failed refresh keeps inspection disabled. On a confirmed save, only the
+submitted draft clears and focus returns to **Saved team**.
+
+Deterministic cases in `frontend/src/Teams.test.tsx` cover matching receipts
+followed by missing/contradictory state, failed reads, confirmed saves, unrelated
+drafts, duplicate submissions while confirming, and keyboard refresh/inspection.
+With dependencies available: `cd frontend && npx vitest run src/Teams.test.tsx`
+and `npx tsc --noEmit`. Supervisor-selected consolidated and browser checks
+remain pending; live LLM calls are skipped under the current user policy.

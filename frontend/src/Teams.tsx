@@ -24,6 +24,7 @@ function TeamPanel({workspace, connected, onSelectEmployee, openTeam, hidden, on
   const [stale, setStale] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [recovery, setRecovery] = useState<'refresh' | 'inspect' | null>(null);
   const lock = useRef(false);
   const controller = useRef<AbortController | null>(null);
   const selector = useRef<HTMLSelectElement>(null);
@@ -36,9 +37,10 @@ function TeamPanel({workspace, connected, onSelectEmployee, openTeam, hidden, on
       const result = await listTeams(signal);
       if (signal.aborted) return;
       setTeams(result.teams); setStale(false); setError('');
+      setRecovery(previous => previous ? 'inspect' : null);
       setSelected(previous => previous || result.teams[0]?.id || '');
     } catch (failure) {
-      if (!signal.aborted) { setStale(true); setError(`${(failure as Error).message} Refresh teams successfully and inspect saved teams before retrying. Your drafts are retained; nothing is automatically resent.`); }
+      if (!signal.aborted) { setRecovery(previous => previous ? 'refresh' : null); setStale(true); setError(`${(failure as Error).message} Refresh teams successfully and inspect saved teams before retrying. Your drafts are retained; nothing is automatically resent.`); }
     }
   }
   async function perform(action?: (signal: AbortSignal) => Promise<void>) {
@@ -50,8 +52,8 @@ function TeamPanel({workspace, connected, onSelectEmployee, openTeam, hidden, on
       else await refresh(request.signal);
     } catch (failure) {
       if (!request.signal.aborted) {
-        setStale(true);
-        setError(`${(failure as Error).message} Refresh teams and inspect membership before explicitly retrying. Your drafts are retained; nothing is automatically resent.`);
+        setStale(true); setRecovery('refresh');
+        setError(`${(failure as Error).message} Delivery is uncertain. Refresh teams and inspect membership before explicitly retrying. Your drafts are retained; nothing is automatically resent.`);
       }
     } finally {
       lock.current = false;
@@ -67,7 +69,15 @@ function TeamPanel({workspace, connected, onSelectEmployee, openTeam, hidden, on
   useEffect(() => {
     if (openTeam) { setSelected(openTeam.id); selector.current?.focus(); }
   }, [openTeam]);
-  const unavailable = !connected || stale || teams === null || busy;
+  async function confirm(saved: Team, signal: AbortSignal) {
+    const result = await listTeams(signal);
+    const persisted = result.teams.find(item => item.id === saved.id);
+    if (!persisted || persisted.name !== saved.name || persisted.members.length !== saved.members.length || !saved.members.every(id => persisted.members.includes(id))) {
+      throw new Error('The refreshed team does not confirm the save receipt.');
+    }
+    return result.teams;
+  }
+  const unavailable = !connected || stale || teams === null || busy || recovery !== null;
   return <>
     <DraftStatus labels={[...(name.trim() ? ['New team name'] : []), ...Object.entries(drafts).filter(([, members]) => members.length > 0).map(([id]) => `Team membership · ${teams?.find(item => item.id === id)?.name ?? id} · ID: ${id}`)]} />
     <div hidden={hidden}>
@@ -76,12 +86,19 @@ function TeamPanel({workspace, connected, onSelectEmployee, openTeam, hidden, on
     {error && <p role="alert">{error}</p>}
     <p role="status">{notice}</p>
     <button type="button" disabled={busy} onClick={() => void perform()}>Refresh teams</button>
+    {recovery && <>
+      <p role="status">Delivery is uncertain. Refresh teams, then inspect saved team IDs, names and membership before retrying. Drafts are retained; nothing is automatically resent.</p>
+      <button type="button" disabled={busy || !connected || recovery !== 'inspect'} onClick={() => {
+        setRecovery(null); setNotice('Inspection confirmed. Review retained drafts before explicitly submitting again.');
+      }}>I inspected saved teams and membership</button>
+    </>}
     <form onSubmit={event => {
       event.preventDefault(); if (unavailable || !name.trim()) return;
       void perform(async signal => {
         const saved = await createTeam(name, signal, (teams ?? []).map(item => item.id));
+        const confirmed = await confirm(saved, signal);
         if (signal.aborted) return;
-        setTeams(previous => [...(previous ?? []), saved]); setSelected(saved.id); setName('');
+        setTeams(confirmed); setSelected(saved.id); setName('');
         setNotice(`Team saved · ID: ${saved.id}`); selector.current?.focus();
       });
     }}>
@@ -109,8 +126,9 @@ function TeamPanel({workspace, connected, onSelectEmployee, openTeam, hidden, on
         const id = team.id;
         void perform(async signal => {
           const saved = await addTeamMembers(id, draft, signal, team);
+          const confirmed = await confirm(saved, signal);
           if (signal.aborted) return;
-          setTeams(previous => previous?.map(item => item.id === id ? saved : item) ?? [saved]);
+          setTeams(confirmed);
           setDrafts(previous => ({...previous, [id]: []}));
           setNotice(`Membership saved · Team ID: ${id}`); selector.current?.focus();
         });
