@@ -32,7 +32,7 @@ function fixture(state = initial()) {
     if (path.endsWith('/execute')) {
       const attempts = state.work[0].attempts;
       expect(body.expected_runs).toBe(attempts.length);
-      const attempt = {id: `run-${attempts.length}`, state: 'active' as const, outcome: null, started: attempts.length, participants: ['employee-1'], provider: state.provider, model: state.model!};
+      const attempt = {id: `run-${attempts.length}`, state: 'active' as const, outcome: null, started: attempts.length, participants: ['employee-1'], input: state.work[0].input, output: null, error: null, quality: 'unverified' as const, provider: state.provider, model: state.model!};
       attempts.push(attempt);
       await new Promise<void>(resolve => { finish = () => {
         Object.assign(attempt, attempts.length === 1 ? {state: 'finished', outcome: 'failure', error: 'rate_limit'} : {state: 'finished', outcome: 'reported_success', output: '<script>unsafe()</script> FULL RESULT', quality: 'unverified'});
@@ -933,6 +933,10 @@ test('uncertain execution requires explicit history refresh before retry', async
   await screen.findByText(/Submission needs inspection/);
   expect((retry() as HTMLButtonElement).disabled).toBe(true);
   refresh();
+  const inspection = screen.getByRole('button', {name: 'I inspected execution history'}) as HTMLButtonElement;
+  await waitFor(() => expect(inspection.disabled).toBe(false));
+  expect((retry() as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(inspection);
   await waitFor(() => expect((retry() as HTMLButtonElement).disabled).toBe(false));
   expect(submissions).toBe(1);
   fireEvent.click(retry());

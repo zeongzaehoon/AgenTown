@@ -2431,3 +2431,29 @@ record types, creation/editing, both toggle directions, delayed confirmation,
 invalid/failed confirmation, unrelated drafts and keyboard recovery). Run from
 `frontend`: `npm test -- --run src/Configuration.test.tsx src/unsaved-drafts.test.tsx`.
 Supervisor verification and browser validation remain pending for this snapshot.
+
+Execution persisted-history confirmation (C63-T1): from a prepared checkout,
+launch a disposable workspace with
+`uv run --directory python --locked agentown-web --database /tmp/agentown-execution-confirmation.sqlite3 --port 8765`.
+Open <http://127.0.0.1:8765>. Use the existing deterministic provider fixture
+setup above; no real provider calls are required. Create an employee and saved
+work, execute ordinary work, then preview and execute an enabled Skill and Hook.
+Each receipt must be followed by validated `/api/state` history containing its
+new Run ID, terminal outcome, input, provider/model, result/error, unverified
+quality and applicable saved provenance before submission unlocks.
+
+For deterministic interaction coverage run from `frontend`:
+`npx vitest run src/execution-receipt.test.tsx src/App.test.tsx src/deadlines.test.tsx`
+and `npx tsc --noEmit`. The receipt tests exercise all three paths with success
+and provider failure, held confirmation, absent/contradictory/malformed/failed
+history, repeated clicks, retained drafts and keyboard recovery. To exercise
+manually with transport interception, preserve a valid receipt and hold or
+replace its following `/api/state` response. Controls stay locked while held.
+Missing or contradictory history announces uncertain delivery. Restore responses,
+Tab to **Refresh connection**, press Enter, inspect saved attempts and provenance,
+then Tab to **I inspected execution history** and press Enter. A failed refresh
+keeps inspection disabled; polling never releases recovery. Retry only explicitly
+if needed; neither recovery action resends work. Skill and Hook need fresh previews.
+Supervisor consolidated verification, disposable-server/browser exercises and
+visual validation remain pending for this snapshot. Real LLM calls are skipped,
+not passed.

@@ -67,6 +67,10 @@ test('unknown submission requires successful explicit history refresh before new
   expect((screen.getByRole('button', {name: 'Preview Hook with saved work'}) as HTMLButtonElement).disabled).toBe(true);
   refreshFails = false;
   await user.click(screen.getByRole('button', {name: 'Refresh connection'}));
+  await waitFor(() => expect((screen.getByRole('button', {name: 'I inspected execution history'}) as HTMLButtonElement).disabled).toBe(false));
+  expect((screen.getByRole('button', {name: 'Preview Hook with saved work'}) as HTMLButtonElement).disabled).toBe(true);
+  screen.getByRole('button', {name: 'I inspected execution history'}).focus();
+  await user.keyboard('{Enter}');
   await waitFor(() => expect((screen.getByRole('button', {name: 'Preview Hook with saved work'}) as HTMLButtonElement).disabled).toBe(false));
   expect(screen.queryByRole('button', {name: 'Execute once with Hook'})).toBeNull();
 });

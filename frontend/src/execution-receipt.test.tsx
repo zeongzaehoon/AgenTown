@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import userEvent from '@testing-library/user-event';
 import { afterEach, expect, test, vi } from 'vitest';
 import { App } from './App';
-import { validateExecutionReceipt } from './execution-receipt';
+import { confirmExecutionHistory, validateExecutionReceipt } from './execution-receipt';
 import type { Workspace } from './api';
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
@@ -18,7 +18,7 @@ function receipt(kind: string) {
 const button = (name: string) => screen.getByRole('button', {name}) as HTMLButtonElement;
 
 for (const kind of ['ordinary', 'Skill', 'Hook']) {
-  test.each(['valid', 'malformed', 'unsupported'])(`${kind}: %s receipt, single submission and explicit refresh recovery`, async responseKind => {
+  test.each(['valid', 'provider failure', 'delayed', 'missing', 'mismatch', 'provenance mismatch', 'malformed history', 'failed history', 'malformed', 'unsupported'])(`${kind}: %s receipt, single submission and explicit refresh recovery`, async responseKind => {
     const polls: (() => void)[] = [];
     const interval = globalThis.setInterval;
     vi.spyOn(globalThis, 'setInterval').mockImplementation(((callback: () => void, ms: number) => {
@@ -26,14 +26,34 @@ for (const kind of ['ordinary', 'Skill', 'Hook']) {
       return interval(callback, ms);
     }) as typeof setInterval);
     let failRefresh = false;
+    let sent = false;
+    let releaseHistory: (() => void) | undefined;
+    const valid = ['valid', 'provider failure', 'delayed'].includes(responseKind);
+    const result = {...receipt(kind), ...(responseKind === 'provider failure' ? {output: null, error: 'timeout'} : {})};
     let calls = 0;
     vi.stubGlobal('fetch', vi.fn(async (path: string, options: RequestInit) => {
       let body: unknown = {};
-      if (path === '/api/state') { if (failRefresh) throw new Error('offline'); body = state; }
+      if (path === '/api/state') {
+        if (failRefresh || (sent && responseKind === 'failed history')) throw new Error('offline');
+        body = state;
+        if (sent && !['missing', 'malformed', 'unsupported'].includes(responseKind)) {
+          if (responseKind === 'delayed') await new Promise<void>(resolve => { releaseHistory = resolve; });
+          const attempt = {id: result.run_id, state: 'finished', outcome: result.error ? 'failure' : 'reported_success', participants: ['e'],
+            input: result.input, provider: result.provider, model: result.model, output: result.output, error: result.error, quality: result.quality,
+            ...(kind === 'ordinary' ? {} : {[kind.toLowerCase()]: (result as unknown as Record<string, unknown>)[kind.toLowerCase()]})};
+          if (responseKind === 'mismatch') attempt.input = 'Contradiction';
+          if (responseKind === 'provenance mismatch') {
+            if (kind === 'ordinary') Object.assign(attempt, {skill: {}});
+            else Object.assign(attempt, {[kind.toLowerCase()]: {...(result as unknown as Record<string, object>)[kind.toLowerCase()], instructions: 'Changed'}});
+          }
+          body = {...state, work: [{...state.work[0], attempts: [...state.work[0].attempts, attempt]}]};
+          if (responseKind === 'malformed history') body = {work: null};
+        }
+      }
       else if (path.endsWith('/execute')) {
-        calls++;
+        calls++; sent = true;
         expect(JSON.parse(options.body as string)).toEqual(kind === 'ordinary' ? {expected_runs: 1} : kind === 'Skill' ? {expected_runs: 1, preview_id: 'p'} : {expected_runs: 1, hook_preview_id: 'p'});
-        body = responseKind === 'valid' ? receipt(kind) : responseKind === 'malformed' ? null : {...receipt(kind), schema_version: 2};
+        body = responseKind === 'malformed' ? null : responseKind === 'unsupported' ? {...result, schema_version: 2} : result;
       } else if (path.endsWith('-preview')) body = kind === 'Hook' ? preview : {schema_version: 1, preview_id: 'p', task_id: 'w', skill_id: 's', expected_runs: 1, input: preview.input};
       else if (path.endsWith('/skills')) body = {skills: [{id: 's', name: 'Short', instructions: 'Concise', enabled: true}]};
       else if (path.endsWith('/hooks')) body = {hooks: [{id: 'h', name: 'Follow up', enabled: true, skill_id: 's', target_kind: 'agent', target_id: 'e', event: 'run_completed'}]};
@@ -43,7 +63,9 @@ for (const kind of ['ordinary', 'Skill', 'Hook']) {
       return new Response(JSON.stringify(body));
     }));
     render(<App />);
-    await waitFor(() => expect(button('Retry explicitly').disabled).toBe(false));
+    // Initial admission waits for both workspace and Loop inspection effects.
+    // Allow their startup under the consolidated DOM-heavy verification run.
+    await waitFor(() => expect(button('Retry explicitly').disabled).toBe(false), {timeout: 3000});
     fireEvent.change(screen.getByLabelText('What would you like help with?'), {target: {value: 'Keep draft'}});
     const user = userEvent.setup();
     async function submit() {
@@ -57,12 +79,19 @@ for (const kind of ['ordinary', 'Skill', 'Hook']) {
     }
     await submit();
     await waitFor(() => expect(calls).toBe(1));
-    await waitFor(() => expect(button('Retry explicitly').disabled).toBe(responseKind !== 'valid'));
+    if (responseKind === 'delayed') {
+      await waitFor(() => expect(releaseHistory).toBeTypeOf('function'));
+      expect(button('Retry explicitly').disabled).toBe(true);
+      fireEvent.click(button('Retry explicitly'));
+      expect(calls).toBe(1);
+      await act(async () => { releaseHistory!(); });
+    }
+    await waitFor(() => expect(button('Retry explicitly').disabled).toBe(!valid));
     expect((screen.getByLabelText('What would you like help with?') as HTMLTextAreaElement).value).toBe('Keep draft');
     expect((screen.getByLabelText('Saved work') as HTMLSelectElement).value).toBe('w');
     expect(screen.getByText(/Attempt 1 ·/)).toBeTruthy();
     if (kind !== 'ordinary') expect(screen.queryByRole('button', {name: `Execute once with ${kind}`})).toBeNull();
-    if (responseKind === 'valid') { expect(screen.queryByText(/Submission needs inspection/)).toBeNull(); return; }
+    if (valid) { expect(screen.queryByText(/Submission needs inspection/)).toBeNull(); return; }
     await screen.findByText(/Submission needs inspection/);
     await act(async () => { polls.forEach(poll => poll()); });
     expect(button('Retry explicitly').disabled).toBe(true);
@@ -70,10 +99,13 @@ for (const kind of ['ordinary', 'Skill', 'Hook']) {
     await user.click(button('Refresh connection'));
     await waitFor(() => expect(document.querySelector('#connection')!.textContent).toContain('Disconnected'));
     expect(button('Retry explicitly').disabled).toBe(true);
-    failRefresh = false;
+    failRefresh = false; sent = false;
     await act(async () => { polls.forEach(poll => poll()); });
     expect(button('Retry explicitly').disabled).toBe(true);
     button('Refresh connection').focus(); await user.keyboard('{Enter}');
+    await waitFor(() => expect(button('I inspected execution history').disabled).toBe(false));
+    expect(button('Retry explicitly').disabled).toBe(true);
+    button('I inspected execution history').focus(); await user.keyboard('{Enter}');
     await waitFor(() => expect(button('Retry explicitly').disabled).toBe(false));
     expect(calls).toBe(1);
     if (kind !== 'ordinary') expect(screen.queryByRole('button', {name: `Execute once with ${kind}`})).toBeNull();
@@ -131,5 +163,21 @@ test('a refresh begun before uncertain delivery cannot clear the recovery requir
   expect(button('Retry explicitly').disabled).toBe(true);
   holdRefresh = false;
   fireEvent.click(button('Refresh connection'));
+  await waitFor(() => expect(button('I inspected execution history').disabled).toBe(false));
+  fireEvent.click(button('I inspected execution history'));
   await waitFor(() => expect(button('Retry explicitly').disabled).toBe(false));
+});
+
+test.each(['id', 'state', 'outcome', 'input', 'provider', 'model', 'output', 'error', 'quality'])('history confirmation rejects contradictory %s', field => {
+  const value = receipt('ordinary');
+  const attempt = {id: value.run_id, state: 'finished', outcome: 'reported_success', participants: ['e'],
+    input: value.input, provider: value.provider, model: value.model, output: value.output, error: value.error, quality: value.quality};
+  const confirmed = {...state, work: [{...state.work[0], attempts: [attempt]}]} as Workspace;
+  expect(() => confirmExecutionHistory(value, state.work[0], confirmed)).not.toThrow();
+  Object.assign(attempt, {[field]: 'contradiction'});
+  expect(() => confirmExecutionHistory(value, state.work[0], confirmed)).toThrow(/uncertain/);
+});
+
+test('history confirmation rejects a missing submitted work record', () => {
+  expect(() => confirmExecutionHistory(receipt('ordinary'), state.work[0], {...state, work: []})).toThrow(/uncertain/);
 });

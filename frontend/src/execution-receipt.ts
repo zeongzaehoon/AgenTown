@@ -32,3 +32,28 @@ export function validateExecutionReceipt(value: unknown, work: Work, workspace: 
   if (kind === 'hook' && (saved.task_id !== work.id || saved.hook_enabled !== true
     || saved.skill_enabled !== true || saved.target_kind !== 'agent')) invalid();
 }
+
+// Called only after receipt validation and a fresh, validated workspace read.
+export function confirmExecutionHistory(receipt: unknown, work: Work, workspace: Workspace | undefined): void {
+  const value = receipt as RecordValue;
+  const saved = workspace?.work.find(item => item.id === work.id);
+  const attempt = saved?.attempts.find(item => item.id === value.run_id);
+  const matchesProvenance = (kind: 'skill' | 'hook') => {
+    const expected = value[kind];
+    const actual = attempt?.[kind];
+    if (expected == null) return actual == null;
+    if (!record(expected) || !actual) return false;
+    // Compare persisted provenance fields; transport-only receipt fields are
+    // already validated against the preview by validateExecutionReceipt.
+    const fields = ['run_id', 'preview_id', 'skill_id', 'skill_name', 'instructions', 'input', 'admitted_at',
+      ...(kind === 'hook' ? ['hook_id', 'hook_name', 'event', 'agent_id', 'source_run_id', 'source_outcome'] : [])];
+    return fields.every(key => (actual as unknown as RecordValue)[key] === expected[key]);
+  };
+  if (!saved || saved.input !== work.input || !attempt || attempt.state !== 'finished'
+    || attempt.outcome !== (value.error === null ? 'reported_success' : 'failure')
+    || attempt.input !== value.input || attempt.provider !== value.provider || attempt.model !== value.model
+    || attempt.output !== value.output || attempt.error !== value.error || attempt.quality !== value.quality
+    || !matchesProvenance('skill') || !matchesProvenance('hook')) {
+    throw new Error('Execution delivery is uncertain: the acknowledged Run could not be confirmed in refreshed history. Work may already have run. Your draft and selection are retained. Choose Refresh connection, inspect history, then explicitly retry only if needed. Nothing is automatically resent.');
+  }
+}

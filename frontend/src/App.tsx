@@ -1,5 +1,5 @@
 import { DraftStatus, useUnsavedDrafts } from './unsaved-drafts';
-import { validateExecutionReceipt } from './execution-receipt';
+import { confirmExecutionHistory, validateExecutionReceipt } from './execution-receipt';
 import { validateWorkspace } from './workspace-validation';
 import { type ConfigurationNavigation } from './configuration-api';
 import { LoopExecution } from './LoopExecution';
@@ -112,6 +112,7 @@ export function App() {
   const [notice, setNotice] = useState('');
   const [inspectionRequired, setInspectionRequired] = useState(false);
   const executionBlocked = useRef(false);
+  const [executionInspectionReady, setExecutionInspectionReady] = useState(false);
   const executionRecoveryVersion = useRef(0);
   const [creationRecovery, setCreationRecovery] = useState<'refresh' | 'inspect' | null>(null);
   const creationBlocked = useRef(false);
@@ -172,6 +173,7 @@ export function App() {
       setConnected(true); setConnectionError(''); return next;
     } catch (error) {
       if (current !== generation.current) return;
+      if (executionBlocked.current) setExecutionInspectionReady(false);
       setConnected(false); setConnectionError(error instanceof SyntaxError
         ? 'Workspace data unavailable: the server returned unreadable data. Check the local server, then choose Refresh connection. Loaded history and unsaved drafts are retained; nothing is automatically resent.'
         : (error as Error).message);
@@ -181,7 +183,7 @@ export function App() {
   }, []);
   useEffect(() => {
     void refresh();
-    const timer = setInterval(() => { if (!poll.current && !locks.current.has('employee') && !locks.current.has('work')) void refresh(); }, 800);
+    const timer = setInterval(() => { if (!poll.current && locks.current.size === 0) void refresh(); }, 800);
     return () => {
       clearInterval(timer); ++generation.current; poll.current?.abort(); poll.current = null;
       mutations.current.forEach(controller => controller.abort());
@@ -215,7 +217,7 @@ export function App() {
     pendingFocus.current = 'draft';
   }
 
-  async function mutate(key: string, action: (signal: AbortSignal) => Promise<void>) {
+  async function mutate(key: string, action: (signal: AbortSignal) => Promise<void>, confirmsHistory = false) {
     if (!connected || locks.current.has(key) || (executionBlocked.current && key !== 'employee' && key !== 'work' && !key.startsWith('stop/')) || ((key === 'employee' || key === 'work') && creationBlocked.current)) return;
     locks.current.add(key); setBusy(new Set(locks.current)); setNotice('');
     const controller = new AbortController();
@@ -229,19 +231,24 @@ export function App() {
         setCreationRecovery('refresh');
         setNotice((error as Error).message);
       } else {
-        executionBlocked.current = true; ++executionRecoveryVersion.current;
+        executionBlocked.current = true; ++executionRecoveryVersion.current; setExecutionInspectionReady(false);
         setNotice((error as Error).message); setInspectionRequired(true);
       }
     }
     finally {
       // Always inspect server state after uncertain delivery, never replay a request.
-      if (!controller.signal.aborted && key !== 'employee' && key !== 'work') await refresh();
+      if (!controller.signal.aborted && (!confirmsHistory || executionBlocked.current) && key !== 'employee' && key !== 'work') await refresh();
       mutations.current.delete(controller);
       locks.current.delete(key);
       if (!controller.signal.aborted) setBusy(new Set(locks.current));
     }
   }
-  const baseCannotExecute = inspectionRequired || !connected || !work || busy.has(work.id) || !!state?.configuration || work.status === 'cancelled' || work.assignees.length !== 1 || work.attempts.some(a => a.state === 'active');
+  async function confirmExecution(receipt: unknown, submitted: Work, workspace: Workspace, signal: AbortSignal, preview?: import('./api').SkillPreview | import('./api').HookPreview) {
+    validateExecutionReceipt(receipt, submitted, workspace, preview);
+    const confirmed = await refresh();
+    if (!signal.aborted) confirmExecutionHistory(receipt, submitted, confirmed);
+  }
+  const baseCannotExecute = inspectionRequired || !connected || !work || [...busy].some(key => key !== 'employee' && key !== 'work') || !!state?.configuration || work.status === 'cancelled' || work.assignees.length !== 1 || work.attempts.some(a => a.state === 'active');
   const cannotExecute = baseCannotExecute || loopAvailabilityState.id !== selected || loopAvailabilityState.blocked;
   // Compare values, not snapshot identity: unchanged polling must retain consent.
   const executionSnapshot = JSON.stringify([work, state?.configuration, state?.provider, state?.model]);
@@ -279,8 +286,8 @@ export function App() {
     setResubmission(null);
     historyRef.current?.focus();
     void mutate(work.id, async signal => {
-      validateExecutionReceipt(await api<unknown>(`/api/work/${encodeURIComponent(work.id)}/execute`, {expected_runs: work.attempts.length}, signal), work, state!);
-    });
+      await confirmExecution(await api<unknown>(`/api/work/${encodeURIComponent(work.id)}/execute`, {expected_runs: work.attempts.length}, signal), work, state!, signal);
+    }, true);
   }
   return <>
     <a className="skip" href="#main">Skip to workspace</a>
@@ -291,11 +298,12 @@ export function App() {
       <p id="notice" role="alert">{notice}</p><button id="refresh" type="button" onClick={() => {
         const version = recoveryVersion.current;
         const executionVersion = executionRecoveryVersion.current;
+        setExecutionInspectionReady(false);
         const executionInFlight = [...locks.current].some(key => key !== 'employee' && key !== 'work');
         void refresh().then(ok => {
           if (ok) {
             if (!executionInFlight && executionVersion === executionRecoveryVersion.current && ![...locks.current].some(key => key !== 'employee' && key !== 'work')) {
-              executionBlocked.current = false; setInspectionRequired(false);
+              if (executionBlocked.current) setExecutionInspectionReady(true);
             }
             if (creationBlocked.current && version === recoveryVersion.current && !locks.current.has('employee') && !locks.current.has('work')) setCreationRecovery('inspect');
           }
@@ -306,6 +314,15 @@ export function App() {
         <button type="button" disabled={creationRecovery !== 'inspect' || !connected} onClick={() => {
           creationBlocked.current = false; setCreationRecovery(null); setNotice('Inspection confirmed. Review your drafts before explicitly submitting again.');
         }}>I inspected employees and saved work</button>
+      </section>}
+      {inspectionRequired && <section aria-label="Execution recovery">
+        <p role="status">Submission needs inspection. Delivery is uncertain. Choose Refresh connection, inspect the attempts below, then explicitly retry. Nothing is resent automatically.</p>
+        <button type="button" disabled={!executionInspectionReady || !connected || busy.size > 0} onClick={() => {
+          if (!executionBlocked.current || !executionInspectionReady || !connected || locks.current.size > 0) return;
+          executionBlocked.current = false; setInspectionRequired(false); setExecutionInspectionReady(false);
+          setNotice('History inspection confirmed. Review saved attempts before explicitly retrying. Nothing was resent.');
+          historyRef.current?.focus();
+        }}>I inspected execution history</button>
       </section>}
       <CompanyOverview onSelectTeamMember={id => { setViewEmployee(id); setSearch(''); setOutcome('all'); searchRef.current?.focus(); }} onOpenTeam={id => setTeamRequest({id})} onOpenClient={id => setClientRequest({id})} onOpenSkill={id => setConfigurationRequest({kind: 'skills', id})} onOpenHook={id => setConfigurationRequest({kind: 'hooks', id})} onOpenLoop={id => setConfigurationRequest({kind: 'loops', id})} workspace={state} connected={connected} error={connectionError} selectedEmployee={viewEmployee} onSelectEmployee={setViewEmployee} onOpenWork={id => {
         setViewEmployee(''); setSearch(''); setOutcome('all'); setSelected(id); historyRef.current?.focus();
@@ -397,7 +414,7 @@ export function App() {
               <button type="button" ref={cancelRef} onClick={cancelReplacement}>Cancel</button>
               <button type="button" disabled={busy.has('work')} onClick={() => loadDraft(replacement)}>Replace draft</button>
             </section>}
-            {inspectionRequired && <p role="status">Submission needs inspection. Choose Refresh connection, inspect the attempts below, then explicitly retry. Nothing is resent automatically.</p>}
+
             <LoopExecution key={`loop/${work.id}`} work={work} workspace={state!} connected={connected}
               draft={input} disabled={baseCannotExecute} availability={loopAvailability}
               submit={async (path, payload, emergency) => {
@@ -413,13 +430,13 @@ export function App() {
             <HookExecution key={`hook/${work.id}`} work={work} workspace={state!} connected={connected}
               draft={input} disabled={cannotExecute}
               submit={preview => { void mutate(work.id, async signal => {
-                validateExecutionReceipt(await api<unknown>(`/api/work/${encodeURIComponent(work.id)}/execute`, {hook_preview_id: preview.preview_id, expected_runs: preview.expected_runs}, signal), work, state!, preview);
-              }); }} />
+                await confirmExecution(await api<unknown>(`/api/work/${encodeURIComponent(work.id)}/execute`, {hook_preview_id: preview.preview_id, expected_runs: preview.expected_runs}, signal), work, state!, signal, preview);
+              }, true); }} />
             <SkillExecution key={`skill/${work.id}`} work={work} workspace={state!} connected={connected}
               draft={input} disabled={cannotExecute}
               submit={preview => { void mutate(work.id, async signal => {
-                validateExecutionReceipt(await api<unknown>(`/api/work/${encodeURIComponent(work.id)}/execute`, {preview_id: preview.preview_id, expected_runs: preview.expected_runs}, signal), work, state!, preview);
-              }); }} />
+                await confirmExecution(await api<unknown>(`/api/work/${encodeURIComponent(work.id)}/execute`, {preview_id: preview.preview_id, expected_runs: preview.expected_runs}, signal), work, state!, signal, preview);
+              }, true); }} />
             <button id="execute" ref={executeRef} type="button" disabled={cannotExecute} onClick={() => execute()}>{work.attempts.length ? 'Retry explicitly' : 'Execute work'}</button>
             {resubmission !== null && <section ref={resubmissionRef} role="region" aria-labelledby="resend-title" aria-describedby="resend-help" onKeyDown={event => {
               if (event.key === 'Escape') { event.preventDefault(); cancelResubmission(); }

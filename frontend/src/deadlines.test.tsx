@@ -117,6 +117,10 @@ for (const path of ['/api/employees', '/api/work', '/api/work/w/execute']) {
       fireEvent.click(button('I inspected employees and saved work'));
       expect(draft().value).toBe('Save this');
     }
+    if (path.endsWith('/execute')) {
+      expect(button('I inspected execution history').disabled).toBe(false);
+      fireEvent.click(button('I inspected execution history'));
+    }
     expect(button(target).disabled).toBe(false);
     expect(calls.filter(url => url !== '/api/state')).toEqual([path]);
   });
@@ -185,6 +189,10 @@ for (const path of ['/api/work', '/api/work/w/execute']) {
     stalled = false;
     fireEvent.click(button('Refresh connection')); await flush();
     if (path === '/api/work') fireEvent.click(button('I inspected employees and saved work'));
+    if (path.endsWith('/execute')) {
+      expect(button('I inspected execution history').disabled).toBe(false);
+      fireEvent.click(button('I inspected execution history'));
+    }
     expect(button(target).disabled).toBe(false);
     expect(calls.filter(url => url !== '/api/state')).toEqual([path]);
   });
