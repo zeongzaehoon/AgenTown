@@ -167,7 +167,9 @@ export function App() {
     try {
       const next = validateWorkspace(await api<unknown>('/api/state', {}, controller.signal));
       if (current !== generation.current) return;
-      setState(next); setSelected(previous => previous || next.work[0]?.id || ''); setConnected(true); setConnectionError(''); return true;
+      setState(next);
+      if (!creationBlocked.current && !locks.current.has('employee') && !locks.current.has('work')) setSelected(previous => previous || next.work[0]?.id || '');
+      setConnected(true); setConnectionError(''); return next;
     } catch (error) {
       if (current !== generation.current) return;
       setConnected(false); setConnectionError(error instanceof SyntaxError
@@ -179,7 +181,7 @@ export function App() {
   }, []);
   useEffect(() => {
     void refresh();
-    const timer = setInterval(() => { if (!poll.current) void refresh(); }, 800);
+    const timer = setInterval(() => { if (!poll.current && !locks.current.has('employee') && !locks.current.has('work')) void refresh(); }, 800);
     return () => {
       clearInterval(timer); ++generation.current; poll.current?.abort(); poll.current = null;
       mutations.current.forEach(controller => controller.abort());
@@ -233,7 +235,7 @@ export function App() {
     }
     finally {
       // Always inspect server state after uncertain delivery, never replay a request.
-      if (!controller.signal.aborted) await refresh();
+      if (!controller.signal.aborted && key !== 'employee' && key !== 'work') await refresh();
       mutations.current.delete(controller);
       locks.current.delete(key);
       if (!controller.signal.aborted) setBusy(new Set(locks.current));
@@ -315,8 +317,16 @@ export function App() {
         <p id="employees-empty" hidden={!!state?.employees.length}>No employees yet. Create your first one.</p>
         <ul id="employees">{state?.employees.map(e => <li key={e.id}>{e.name}</li>)}</ul>
         <form id="employee-form" onSubmit={event => {event.preventDefault(); void mutate('employee', async signal => {
+          const previousIds = new Set(state!.employees.map(record => record.id));
           const id = creationId(await api<unknown>('/api/employees', {name}, signal));
           if (signal.aborted) return;
+          const confirmed = await refresh();
+          if (signal.aborted) return;
+          // Rust str::trim uses Unicode White_Space, unlike JavaScript trim.
+          const requestedName = name.replace(/^\p{White_Space}+|\p{White_Space}+$/gu, '');
+          if (!confirmed || previousIds.has(id) || confirmed.employees.find(record => record.id === id)?.name !== requestedName) {
+            throw new Error('Employee creation could not be confirmed in refreshed employees.');
+          }
           setEmployee(id); setName(previous => previous === name ? '' : previous); pendingFocus.current = 'input';
         });}}>
           <DraftStatus labels={name.trim() ? ['Employee name'] : []} />
@@ -325,8 +335,15 @@ export function App() {
           <button disabled={!!creationRecovery || !connected || busy.has('employee')}>Create employee</button>
         </form></section>
         <section><h2>2. Give them work</h2><form id="work-form" onSubmit={event => {event.preventDefault(); if (!assignee || replacement) return; setInputTouched(true); if (workInputError(input, assignee)) { inputRef.current?.focus(); return; } void mutate('work', async signal => {
+          const previousIds = new Set(state!.work.map(record => record.id));
           const id = creationId(await api<unknown>('/api/work', {input, employee: assignee}, signal));
           if (signal.aborted) return;
+          const confirmed = await refresh();
+          if (signal.aborted) return;
+          const saved = confirmed?.work.find(record => record.id === id);
+          if (!confirmed || previousIds.has(id) || !saved || saved.input !== input || saved.assignees.length !== 1 || saved.assignees[0] !== assignee) {
+            throw new Error('Work creation could not be confirmed in refreshed saved work.');
+          }
           setSelected(id); setInput(''); setInputTouched(false); setServerInputError(''); pendingFocus.current = 'execute';
         });}}>
           <label htmlFor="employee">Assign to</label><select id="employee" required disabled={busy.has('work')} value={assignee} onChange={e => { setEmployee(e.target.value); setServerInputError(''); }}><option value="">Select an employee</option>{state?.employees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}</select>

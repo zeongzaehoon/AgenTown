@@ -107,10 +107,16 @@ for (const path of ['/api/employees', '/api/work', '/api/work/w/execute']) {
     expect(document.querySelector('#connection')!.textContent).toContain('History refresh timed out');
     expect(draft().disabled).toBe(false);
     expect(employee().disabled).toBe(false);
-    // Unsaved text survives execution and employee creation; confirmed work saving clears it.
-    expect(draft().value).toBe(path === '/api/work' ? '' : 'Save this');
+    // A receipt with a failed refresh never confirms creation or clears a draft.
+    expect(draft().value).toBe('Save this');
     stallHistory = false;
     fireEvent.click(button('Refresh connection')); await flush();
+    if (path === '/api/employees' || path === '/api/work') {
+      expect(button(target).disabled).toBe(true);
+      expect(button('I inspected employees and saved work').disabled).toBe(false);
+      fireEvent.click(button('I inspected employees and saved work'));
+      expect(draft().value).toBe('Save this');
+    }
     expect(button(target).disabled).toBe(false);
     expect(calls.filter(url => url !== '/api/state')).toEqual([path]);
   });
@@ -171,7 +177,11 @@ for (const path of ['/api/work', '/api/work/w/execute']) {
     await advance(REQUEST_DEADLINE_MS);
     expect(draft().disabled).toBe(false);
     expect(draft().value).toBe('Keep my draft');
-    expect(document.querySelector('#connection')!.textContent).toContain('timed out');
+    if (path === '/api/work') {
+      // Creation delivery failures require explicit recovery; no automatic history request.
+      expect(document.querySelector('#notice')!.textContent).toContain('timed out');
+      expect(button('I inspected employees and saved work').disabled).toBe(true);
+    } else expect(document.querySelector('#connection')!.textContent).toContain('timed out');
     stalled = false;
     fireEvent.click(button('Refresh connection')); await flush();
     if (path === '/api/work') fireEvent.click(button('I inspected employees and saved work'));

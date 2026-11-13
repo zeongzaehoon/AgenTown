@@ -642,6 +642,7 @@ test('loaded draft stays protected during pending and rejected saving until expl
   fireEvent.click(screen.getByRole('button', {name: 'Save work'}));
   expect(submissions).toHaveLength(2);
   expectLeaveProtection(true);
+  f.state.work.push({id: 'saved', input: text, status: 'pending', assignees: ['e'], attempts: []});
   await act(async () => settle(new Response(JSON.stringify({id: 'saved'}))));
   expect(draftInput().value).toBe('');
   expectLeaveProtection(false);

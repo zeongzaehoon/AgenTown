@@ -1,9 +1,11 @@
-import { useEffect } from 'react';
+import { useLayoutEffect } from 'react';
 
 // Independent contributors compose through the browser event: clearing one
 // draft cannot remove another feature's protection.
 export function useUnsavedDrafts(dirty: boolean) {
-  useEffect(() => {
+  // Keep browser leave protection in sync with the committed draft UI, including
+  // the commit that displays a successful save and removes its draft.
+  useLayoutEffect(() => {
     if (!dirty) return;
     function confirmLeave(event: BeforeUnloadEvent) {
       event.preventDefault();

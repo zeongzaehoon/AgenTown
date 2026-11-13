@@ -111,3 +111,74 @@ test('successful employee creation preserves name edits made while the request i
   expect(field(requestLabel).value).toBe('Draft request');
   expect(f.mutations).toEqual(['/api/employees']);
 });
+
+for (const target of ['Create employee', 'Save work']) {
+  for (const failure of ['missing record', 'reused ID', 'contradictory content', 'wrong assignee', 'failed refresh', 'invalid snapshot']) {
+    test(`${target}: ${failure} after a valid receipt retains drafts and selection`, async () => {
+      const f = await setup();
+      f.respond(async () => {
+        const id = failure === 'reused ID' ? (target === 'Save work' ? 'old' : 'e') : 'new';
+        if (failure !== 'missing record' && failure !== 'reused ID') {
+          if (target === 'Save work') f.state.work.push({id, input: failure === 'contradictory content' ? 'Different text' : 'Draft request',
+            assignees: [failure === 'wrong assignee' ? 'e' : 'other'], status: 'pending', attempts: []});
+          else f.state.employees.push({id, name: failure === 'contradictory content' || failure === 'wrong assignee' ? 'Different employee' : 'Draft employee'});
+        }
+        if (failure === 'failed refresh') f.failRefresh(true);
+        if (failure === 'invalid snapshot') f.state.work.push({...f.state.work[0]});
+        return new Response(JSON.stringify({id}));
+      });
+      act(() => { button(target).click(); button(target).click(); });
+      await screen.findByRole('region', {name: 'Creation recovery'});
+      await waitFor(() => expect(field(requestLabel).disabled).toBe(false));
+      retained();
+      expect(f.mutations).toHaveLength(1);
+      expect(button('I inspected employees and saved work').disabled).toBe(true);
+      fireEvent.submit(document.querySelector(target === 'Save work' ? '#work-form' : '#employee-form')!);
+      expect(f.mutations).toHaveLength(1);
+      // Polling and recovery never resend, and inspection needs an explicit refresh.
+      f.failRefresh(false);
+      if (failure === 'invalid snapshot') f.state.work.pop();
+      await act(async () => { f.polls.forEach(poll => poll()); });
+      retained();
+      expect(button('I inspected employees and saved work').disabled).toBe(true);
+      const user = userEvent.setup();
+      button('Refresh connection').focus();
+      await user.keyboard('{Enter}');
+      await waitFor(() => expect(button('I inspected employees and saved work').disabled).toBe(false));
+      await user.tab();
+      expect(document.activeElement).toBe(button('I inspected employees and saved work'));
+      await user.keyboard('{Enter}');
+      retained();
+      expect(f.mutations).toHaveLength(1);
+    });
+  }
+}
+
+for (const [draft, normalized] of [['\u0085 Writer \u0085', 'Writer'], ['\uFEFFWriter\uFEFF', '\uFEFFWriter\uFEFF']]) {
+  test(`employee confirmation respects Rust whitespace for ${JSON.stringify(draft)}`, async () => {
+    const f = await setup();
+    fireEvent.change(field('Employee name'), {target: {value: draft}});
+    f.respond(async () => {
+      f.state.employees.push({id: 'new', name: normalized});
+      return new Response('{"id":"new"}');
+    });
+    fireEvent.click(button('Create employee'));
+    await waitFor(() => expect(field('Employee name').value).toBe(''));
+    expect(field('Assign to').value).toBe('new');
+    expect(f.mutations).toHaveLength(1);
+  });
+}
+
+test('work confirmation preserves the exact request including surrounding whitespace', async () => {
+  const f = await setup();
+  const input = ' \n Draft request \n ';
+  fireEvent.change(field(requestLabel), {target: {value: input}});
+  f.respond(async () => {
+    f.state.work.push({id: 'new', input, status: 'pending', assignees: ['other'], attempts: []});
+    return new Response('{"id":"new"}');
+  });
+  act(() => { button('Save work').click(); button('Save work').click(); });
+  await waitFor(() => expect(field(requestLabel).value).toBe(''));
+  expect((screen.getByLabelText('Saved work') as HTMLSelectElement).value).toBe('new');
+  expect(f.mutations).toHaveLength(1);
+});

@@ -2339,3 +2339,35 @@ actual leave guard without browser-dialog automation. Supervisor verification
 must run the frontend TypeScript/test gate and the applicable product profile.
 Browser exercise and consolidated verification are pending for this snapshot;
 live provider calls are skipped under user policy.
+
+Creation confirmation and recovery (C60-T1): launch `agentown-web` using the
+local server setup above, then open its displayed workspace URL.
+
+1. Enter an employee name with surrounding spaces and choose **Create employee**.
+   The name clears and **Assign to** changes only after refreshed employees
+   contain the new receipt ID with the Rust-normalized name. Edit the name while
+   saving: that newer draft must survive successful confirmation.
+2. Enter work with surrounding whitespace, select an employee, and choose
+   **Save work**. Only a refreshed record with a new receipt ID, the exact text,
+   and that single assignee clears the draft and selects the saved work.
+3. With a controlled API fixture, return an existing ID, omit the receipt record
+   from refreshed state, change its name/text/assignee, return invalid workspace
+   data, or fail the refresh. Drafts and previous selections must remain. The
+   **Creation recovery** region appears and both creation actions stay blocked.
+   Double clicks and direct form submissions must not create duplicate requests.
+4. Restore valid state. Polling alone must not unlock submission. Focus
+   **Refresh connection**, press Enter, then Tab to **I inspected employees and
+   saved work**. Inspect loaded records before pressing Enter to acknowledge.
+   Nothing is resent; review drafts before any explicit new submission.
+
+Runnable deterministic interaction coverage, with frontend dependencies installed:
+
+```sh
+cd frontend
+npx vitest run src/creation-recovery.test.tsx src/deadlines.test.tsx src/App.test.tsx
+```
+
+These fixtures cover receipt/refresh failures, keyboard recovery, duplicate
+submission guards, Rust Unicode whitespace behavior and exact work text.
+Consolidated checks and browser validation are pending supervisor verification
+for this snapshot. Live provider calls remain skipped, not passed.
