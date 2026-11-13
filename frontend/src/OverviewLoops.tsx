@@ -4,7 +4,7 @@ import { ApiError, api, type Workspace } from './api';
 import { loopLabel } from './LoopExecution';
 import { confirmedLoop, loopInspection, loopReceipt, type LoopInspection } from './loop-response';
 
-export interface LoopNavigation {taskId: string; sessionId: string}
+export type LoopNavigation = {taskId: string; sessionId: string; policyId?: never} | {taskId: string; policyId: string; sessionId?: never};
 
 /** Polling and navigation inspect only; stopping requires explicit session consent. */
 export function OverviewLoops({workspace, onOpenWork, onOpenSession}: {onOpenSession?: (request: LoopNavigation) => void; workspace: Workspace | null; onOpenWork: (id: string) => void}) {

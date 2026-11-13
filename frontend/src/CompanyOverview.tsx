@@ -53,7 +53,7 @@ export function CompanyOverview({workspace, connected, error, onOpenWork, select
     <TeamRooms onOpenWork={onOpenWork} workspace={workspace} connected={connected} selectedEmployee={selectedEmployee} onSelectEmployee={onSelectTeamMember ?? onSelectEmployee} onOpenTeam={onOpenTeam} />
     <SkillBooks onOpenSkill={onOpenSkill} />
     <HookDevices onOpenHook={onOpenHook} />
-    <LoopDevices onOpenLoop={onOpenLoop} />
+    <LoopDevices onOpenLoop={onOpenLoop} onOpenPolicy={onOpenSession} workspace={workspace} connected={connected} />
     <OverviewLoops onOpenSession={onOpenSession} workspace={workspace} onOpenWork={onOpenWork} />
     {workspace && <>
       {workspace.configuration && <p>Execution setup needed: {workspace.configuration} Employees and saved assignments are still shown.</p>}

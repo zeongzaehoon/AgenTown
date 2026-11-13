@@ -115,3 +115,49 @@ test('uncertain Stop is unconfirmed and is not replayed automatically', async ()
   expect((screen.getByRole('button', {name: `Stop local Loop ${policy}`} ) as HTMLButtonElement).disabled).toBe(true);
   expect(fetcher).toHaveBeenCalledTimes(2);
 });
+
+test.each(['enabled', 'disabled', 'missing'])('policy navigation selects exact ID after explicit discovery: %s', async state => {
+  const duplicate = '33333333-3333-4333-8333-333333333333';
+  const row = {id: policy, name: 'Draft', task_id: task, max_iterations: 2, interval_seconds: 60, enabled: state !== 'disabled'};
+  const fetcher = vi.fn().mockResolvedValue(reply({schema_version: 1, loops: [{...row, id: duplicate, enabled: true}, ...(state === 'missing' ? [] : [row])]}, 'loops_discovered'));
+  vi.stubGlobal('fetch', fetcher);
+  render(<WorkLoop taskId={task} connected inspected navigation={{taskId: task, policyId: policy}} />);
+  expect(document.activeElement).toBe(screen.getByRole('region', {name: 'Requested Loop inspection'}));
+  expect(fetcher).not.toHaveBeenCalled();
+  const discovery = screen.getByRole('button', {name: 'Find matching Loops through local MCP'});
+  discovery.focus(); await userEvent.keyboard('{Enter}');
+  const select = screen.getByRole('combobox', {name: 'Local enabled Loop'}) as HTMLSelectElement;
+  expect(select.value).toBe(state === 'enabled' ? policy : '');
+  if (state === 'enabled') expect(document.activeElement).toBe(select);
+  else expect(screen.getByText(state === 'disabled' ? /Requested Loop policy is disabled/ : /Requested Loop policy is missing or no longer matches/)).toBeTruthy();
+  expect(JSON.parse(fetcher.mock.calls[0][1].body)).toEqual({task_id: task});
+  expect(fetcher.mock.calls.map(c => c[0])).toEqual(['/api/connections/v1/loops/list']);
+  expect(screen.queryByRole('checkbox')).toBeNull();
+});
+
+test('same-Task policy navigation clears prior consent and ignores obsolete discovery', async () => {
+  const fetcher = setup();
+  const view = render(<WorkLoop taskId={task} connected inspected />);
+  await prepare(); await userEvent.click(screen.getByRole('checkbox'));
+  view.rerender(<WorkLoop taskId={task} connected inspected navigation={{taskId: task, policyId: policy}} />);
+  expect(screen.queryByRole('checkbox')).toBeNull();
+  let finish!: (r: Response) => void;
+  fetcher.mockImplementationOnce(() => new Promise<Response>(resolve => {finish = resolve;}));
+  await userEvent.click(screen.getByRole('button', {name: 'Find matching Loops through local MCP'}));
+  const other = '33333333-3333-4333-8333-333333333333';
+  view.rerender(<WorkLoop taskId={task} connected inspected navigation={{taskId: task, policyId: other}} />);
+  await act(async () => finish(reply({schema_version: 1, loops: [{id: policy, name: 'Draft', task_id: task, enabled: true, max_iterations: 2, interval_seconds: 60}]}, 'loops_discovered')));
+  expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe('');
+  expect(document.activeElement).toBe(screen.getByRole('region', {name: 'Requested Loop inspection'}));
+  expect(fetcher.mock.calls.some(c => /\/(start|stop)$/.test(String(c[0])))).toBe(false);
+});
+
+
+test('discovery rejects changed Task linkage and does not select an alternative policy', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(reply({schema_version: 1, loops: [{id: policy, name: 'Draft', task_id: policy, enabled: true, max_iterations: 2, interval_seconds: 60}]}, 'loops_discovered')));
+  render(<WorkLoop taskId={task} connected inspected navigation={{taskId: task, policyId: policy}} />);
+  await userEvent.click(screen.getByRole('button', {name: 'Find matching Loops through local MCP'}));
+  expect(await screen.findByText(/Local MCP response could not be confirmed/)).toBeTruthy();
+  expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe('');
+  expect((screen.getByRole('button', {name: 'Preview local Loop'}) as HTMLButtonElement).disabled).toBe(true);
+});

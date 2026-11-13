@@ -1,8 +1,10 @@
+import type { LoopNavigation } from './OverviewLoops';
+import type { Workspace } from './api';
 import { useEffect, useRef, useState } from 'react';
 import { configurationRequest, savedLoopPolicies, type LoopRecord } from './configuration-api';
 
 /** Office inspection is read-only and independent of provider availability. */
-export function LoopDevices({onOpenLoop}: {onOpenLoop?: (id: string) => void}) {
+export function LoopDevices({onOpenLoop, onOpenPolicy, workspace, connected = true}: {onOpenLoop?: (id: string) => void; onOpenPolicy?: (request: LoopNavigation) => void; workspace?: Workspace | null; connected?: boolean}) {
   const [devices, setDevices] = useState<LoopRecord[] | null>(null);
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState('');
@@ -25,17 +27,22 @@ export function LoopDevices({onOpenLoop}: {onOpenLoop?: (id: string) => void}) {
   useEffect(() => { void refresh(); return () => request.current?.abort(); }, []);
   return <section className="loop-policy-devices" aria-labelledby="loop-policy-devices-title">
     <h3 id="loop-policy-devices-title">Saved Loop policy devices</h3>
-    <p>Open a saved policy in Configuration. These devices are separate from execution sessions below. Configuration enabled does not mean a session is running. Opening never saves, previews, starts or stops work.</p>
-    <p role="status">{busy ? 'Loading Loop devices…' : error ? devices ? 'Loop devices are stale — showing the last successful snapshot.' : 'Loop devices unavailable.' : devices?.length ? 'Showing saved Loop devices.' : 'No saved Loops yet. Create a Loop in Configuration.'}</p>
+    <p>Open linked work for explicit local MCP inspection, or open a saved policy in Configuration. These devices are separate from execution sessions below. Configuration enabled does not mean a session is running. Opening never saves, previews, starts or stops work.</p>
+    <p role="status">{!connected ? 'Disconnected. Loaded Loop devices may be stale.' : busy ? 'Loading Loop devices…' : error ? devices ? 'Loop devices are stale — showing the last successful snapshot.' : 'Loop devices unavailable.' : devices?.length ? 'Showing saved Loop devices.' : 'No saved Loops yet. Create a Loop in Configuration.'}</p>
     {error && <p role="alert">{error}</p>}
     <button type="button" disabled={busy} onClick={() => void refresh()}>Refresh Loop devices</button>
-    <div className="loop-policy-device-grid">{devices?.map(device => <button type="button" className="loop-policy-device" key={device.id}
+    <div className="loop-policy-device-grid">{devices?.map(device => <article key={device.id}><button type="button" className="loop-policy-device" key={device.id}
       disabled={!onOpenLoop} aria-controls="configuration-panel"
       aria-label={`Open Loop device: ${device.name} · ID: ${device.id}`} onClick={() => onOpenLoop?.(device.id)}>
       <span aria-hidden="true">⚑</span><strong>{device.name}</strong><span>Saved repeating-work policy</span><span>ID: {device.id}</span><span>Linked Task ID: {device.task_id}</span>
       <span>Iteration limit: {device.max_iterations}</span><span>Interval: {device.interval_seconds} seconds</span>
-      <span>Configuration {device.enabled ? 'enabled' : 'disabled'}</span>
+      <span>Open Configuration</span><span>Configuration {device.enabled ? 'enabled' : 'disabled'}</span>
       {(busy || error) && <span>{busy ? 'Refreshing snapshot' : 'Stale snapshot'}</span>}
-    </button>)}</div>
+    </button>
+      <button type="button" aria-controls="selected-work-inspection" disabled={!onOpenPolicy || !connected || !workspace?.work.some(w => w.id === device.task_id)}
+        aria-label={`Open linked work for Loop: ${device.name} · Policy ID: ${device.id} · Task ID: ${device.task_id}`}
+        onClick={() => onOpenPolicy?.({taskId: device.task_id, policyId: device.id})}>Open linked work · local MCP</button>
+      {!workspace?.work.some(w => w.id === device.task_id) && <p>Linked work unavailable in loaded saved work. Refresh saved history before opening.</p>}
+    </article>)}</div>
   </section>;
 }

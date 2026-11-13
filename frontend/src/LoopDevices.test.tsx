@@ -83,6 +83,14 @@ test('App opens exact IDs repeatedly, retains configuration and work drafts and 
   expect((screen.getByLabelText('Instructions') as HTMLTextAreaElement).value).toBe('New Skill draft');
   fireEvent.click(screen.getByRole('button', {name: 'Open Loop device: Manual · ID: two'}));
   await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('Saved record')));
+  const linked = screen.getByRole('button', {name: 'Open linked work for Loop: Manual · Policy ID: one · Task ID: w'});
+  linked.focus(); await userEvent.keyboard('{Enter}');
+  expect(document.activeElement).toBe(screen.getByRole('region', {name: 'Requested Loop inspection'}));
+  expect(screen.getByText(/Requested Task: w · Policy: one/)).toBeTruthy();
+  expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('Unsaved policy');
+  expect((screen.getByLabelText('What would you like help with?') as HTMLTextAreaElement).value).toBe('Work draft');
+  expect((screen.getByRole('button', {name: 'Open linked work for Loop: Manual · Policy ID: two · Task ID: other'}) as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.getByText(/Linked work unavailable/)).toBeTruthy();
   malformed = true;
   fireEvent.click(screen.getByRole('button', {name: 'Refresh configuration'}));
   expect(await screen.findByText(/Saved Loop data unavailable/)).toBeTruthy();

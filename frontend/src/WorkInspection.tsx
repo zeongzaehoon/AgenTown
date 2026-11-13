@@ -17,7 +17,7 @@ export function WorkInspection({taskId, connected = true, loopRequest}: {loopReq
     request.current?.controller.abort(); request.current = null;
     setResponse(null); setError(''); setPending(false);
     return () => { request.current?.controller.abort(); request.current = null; };
-  }, [taskId, connected]);
+  }, [taskId, connected, loopRequest]);
   async function inspect() {
     if (!connected || !taskId || request.current) return;
     const active = {id: taskId, controller: new AbortController()};
@@ -34,7 +34,7 @@ export function WorkInspection({taskId, connected = true, loopRequest}: {loopReq
     }
   }
   const inspection = response?.status === 'success' ? response.inspection : null;
-  return <section aria-label="Local MCP work inspection" aria-busy={pending}>
+  return <section id="selected-work-inspection" aria-label="Local MCP work inspection" aria-busy={pending}>
     <h3>Inspect selected work through local MCP</h3>
     <p>This reads recorded work through the installed local MCP server. It does not execute work or contact a provider. External-client connection remains unverified.</p>
     {!connected && <p role="status">Disconnected. Refresh the connection, then inspect explicitly for current readiness.</p>}

@@ -15,7 +15,9 @@ export function WorkLoop({taskId, connected, inspected, navigation}: {navigation
   const [records, setRecords] = useState<Record<string, LoopInspection>>({});
   const [receipts, setReceipts] = useState<Record<string, LoopSession>>({});
   const [focusedSession, setFocusedSession] = useState('');
+  const [focusedPolicy, setFocusedPolicy] = useState('');
   const [uncertainStops, setUncertainStops] = useState<string[]>([]);
+  const policyControl = useRef<HTMLSelectElement>(null);
   const navigationRegion = useRef<HTMLElement>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
@@ -24,18 +26,22 @@ export function WorkLoop({taskId, connected, inspected, navigation}: {navigation
   const pending = useRef<AbortController | null>(null);
   const region = useRef<HTMLElement>(null);
   const previewRegion = useRef<HTMLElement>(null);
+  const operation = useRef<LoopOperation | null>(null);
   const revision = useRef(0);
-  function invalidate() {++revision.current; setPreview(null); setConsent(false);}
-  useLayoutEffect(() => {invalidate(); setPolicies([]); setSelected('');}, [taskId, connected, inspected, navigation]);
+  function invalidate() {++revision.current; setPreview(null); setConsent(false); setFocusedPolicy('');}
+  useLayoutEffect(() => {invalidate(); setPolicies([]); setSelected(''); setMessage(''); if (operation.current && !['start', 'stop'].includes(operation.current)) {pending.current?.abort(); pending.current = null; setBusy(false);}}, [taskId, connected, inspected, navigation]);
   useLayoutEffect(() => {setFocusedSession(''); if (navigation) navigationRegion.current?.focus();}, [navigation, taskId]);
   useLayoutEffect(() => {if (focusedSession) document.getElementById(`local-session-${focusedSession}`)?.focus();}, [focusedSession]);
+  useLayoutEffect(() => {
+    if (focusedPolicy && !busy) policyControl.current?.focus();
+  }, [focusedPolicy, busy]);
   useLayoutEffect(() => () => {pending.current?.abort(); pending.current = null;}, []);
   useLayoutEffect(() => {if (preview) previewRegion.current?.focus();}, [preview]);
   async function perform(op: LoopOperation, task = taskId, saved?: LoopSession) {
     if (!task || !connected || pending.current || (op === 'start' && (!preview || !consent || recovery.includes(task)))) return;
     const expected = op === 'preview' ? selected : op === 'start' ? preview! : saved;
     invalidate(); if (op === 'inspect') setFocusedSession(''); const generation = revision.current;
-    const active = new AbortController(); pending.current = active; setBusy(true);
+    const active = new AbortController(); operation.current = op; pending.current = active; setBusy(true);
     if (op === 'start') {setRecovery(rows => [...new Set([...rows, task])]); setRecoveryRead(rows => rows.filter(t => t !== task));}
     try {
       let result = await localLoop(op, task, active.signal, expected);
@@ -61,7 +67,7 @@ export function WorkLoop({taskId, connected, inspected, navigation}: {navigation
           setRecords(rows => ({...rows, [task]: result.inspection!}));
           if (op === 'inspect') {
             setUncertainStops(rows => rows.filter(id => !result.inspection!.sessions.some(s => s.session_id === id)));
-            if (navigation?.taskId === task && generation === revision.current) {
+            if (navigation?.sessionId && navigation.taskId === task && generation === revision.current) {
               const found = result.inspection.sessions.find(s => s.session_id === navigation.sessionId);
               setFocusedSession(found?.session_id || '');
               if (!found) {setMessage('Requested Loop session is missing from this Task inspection. Nothing was started or stopped.'); return;}
@@ -72,7 +78,18 @@ export function WorkLoop({taskId, connected, inspected, navigation}: {navigation
         }
       }
       if (generation === revision.current) {
-        if (result.policies) {setPolicies(result.policies); setSelected('');}
+        if (result.policies) {
+          setPolicies(result.policies); setSelected('');
+          if (navigation?.policyId && navigation.taskId === task) {
+            const found = result.policies.find(p => p.id === navigation.policyId);
+            if (!found || found.task_id !== task || !found.enabled) {
+              setMessage(!found ? 'Requested Loop policy is missing or no longer matches this Task. Nothing was previewed or activated.' : !found.enabled ? 'Requested Loop policy is disabled. Nothing was previewed or activated.' : 'Requested Loop policy no longer matches this Task. Nothing was previewed or activated.');
+              return;
+            }
+            setSelected(found.id);
+            setFocusedPolicy(found.id);
+          }
+        }
         if (result.preview) setPreview(result.preview);
       }
       setMessage(`${result.status} (${result.code}). ${result.recovery}${result.receipt ? ' Receipt received; inspect persisted sessions to confirm progress.' : ''}`);
@@ -87,13 +104,13 @@ export function WorkLoop({taskId, connected, inspected, navigation}: {navigation
   Object.values(records).forEach(r => r.sessions.forEach(s => sessions.set(s.session_id, s)));
   Object.values(receipts).forEach(s => sessions.set(s.session_id, s));
   return <section ref={region} tabIndex={-1} aria-label="Bounded Loop through local MCP" aria-busy={busy}>
-    {navigation && <section ref={navigationRegion} tabIndex={-1} aria-label="Requested Loop inspection"><p>Requested Task: {navigation.taskId} · Loop: {navigation.sessionId}. Choose Inspect local Loop sessions to read and focus this exact session. Cached records may be stale; navigation grants no ownership.</p></section>}
+    {navigation && <section ref={navigationRegion} tabIndex={-1} aria-label="Requested Loop inspection"><p>Requested Task: {navigation.taskId} · {navigation.policyId ? `Policy: ${navigation.policyId}. Choose Inspect through local MCP, then Find matching Loops through local MCP to select this exact policy.` : `Loop: ${navigation.sessionId}. Choose Inspect local Loop sessions to read and focus this exact session.`} Cached records may be stale; navigation grants no ownership.</p></section>}
     <h4>Bounded Loop through local MCP</h4>
     <p>Enabled means configured only. Discovery and preview never activate work. Explicit activation may incur provider costs. External-client connection and live-provider operation remain unverified.</p>
     {!connected && <p>Disconnected. Session records may be stale. Reconnect to request Stop through the retained owner.</p>}
     <button type="button" disabled={!inspected || !connected || busy} onClick={() => void perform('list')}>Find matching Loops through local MCP</button>
-    <label>Local enabled Loop <select value={selected} disabled={busy || !connected || !inspected} onChange={e => {invalidate(); setSelected(e.target.value);}}>
-      <option value="">Choose a Loop</option>{policies.filter(p => p.enabled).map(p => <option key={p.id} value={p.id}>{p.name} · {p.id}</option>)}
+    <label>Local enabled Loop <select ref={policyControl} value={selected} disabled={busy || !connected || !inspected} onChange={e => {invalidate(); setSelected(e.target.value);}}>
+      <option value="">Choose a Loop</option>{policies.filter(p => p.enabled && p.task_id === taskId).map(p => <option key={p.id} value={p.id}>{p.name} · {p.id}</option>)}
     </select></label>
     <button type="button" disabled={!selected || busy || !connected || !inspected || recovery.includes(taskId || '')} onClick={() => void perform('preview')}>Preview local Loop</button>
     <button type="button" disabled={!taskId || !connected || busy} onClick={() => void perform('inspect')}>Inspect local Loop sessions</button>

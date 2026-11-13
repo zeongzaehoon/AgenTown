@@ -2934,3 +2934,28 @@ Run `cd frontend && npm test -- src/OverviewLoops.test.tsx src/WorkLoop.test.tsx
 with frontend dependencies available. Supervisor change-based verification and
 browser validation are pending for this implementation snapshot. Live provider
 calls are skipped under the current user policy, not passed.
+
+### Open a saved Loop device’s linked work
+
+Launch `agentown-web --database PATH` with the database containing saved work and
+Loop policies. In Company overview → Saved Loop policy devices, use **Open linked
+work · local MCP** (Enter or Space also works). The separate device/Configuration
+action continues to open the exact policy editor. Existing work and configuration
+drafts remain intact. Missing linked work disables the work action; disconnected
+or stale snapshots are labeled and never imply execution.
+
+The requested Task and policy IDs appear in the focused Requested Loop inspection
+region. Navigation clears prior inspection, preview and execution consent and
+makes no preview, activation or stop request. Choose **Inspect through local MCP**,
+then **Find matching Loops through local MCP**. Discovery selects and focuses only
+the requested enabled policy ID, even when names repeat. If the policy was removed,
+disabled or moved to another Task, the screen explains that it is unavailable;
+no similarly named policy is substituted. Select **Preview local Loop**, inspect
+its exact saved input, limits, provider and model, then explicitly authorize that
+preview before activation. Recorded-session navigation remains a separate explicit
+inspection flow. Rapid navigation discards obsolete inspection/discovery responses.
+
+Deterministic checks for this slice (with frontend dependencies installed):
+`cd frontend && npx tsc --noEmit && npx vitest run src/LoopDevices.test.tsx src/WorkLoop.test.tsx src/OverviewLoops.test.tsx src/WorkInspection.test.tsx`.
+Supervisor browser/change-based verification is pending for C80-T1; live provider
+calls are skipped under the user’s live-test policy, not counted as passed.
