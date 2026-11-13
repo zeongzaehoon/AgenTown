@@ -94,7 +94,7 @@ class LocalMcpExecution:
                 dispatched = True
                 await send(dict(jsonrpc='2.0', id=2, method='tools/call', params=self._tool_call(selected)))
                 result = await receive(2)
-                return self._receipt(result, selected)
+                return await self._verified_receipt(result, selected, send, receive)
         except Exception:
             return self.result_type('uncertain' if dispatched else 'unavailable',
                                                'delivery_uncertain' if dispatched else 'transport_unavailable')
@@ -115,6 +115,9 @@ class LocalMcpExecution:
                 reaped.result()
                 if interrupted:
                     raise asyncio.CancelledError()
+
+    async def _verified_receipt(self, result, selected, send, receive):
+        return self._receipt(result, selected)
 
     def _tool_call(self, selected):
         return {'name': 'execute_text_work_v1', 'arguments': {

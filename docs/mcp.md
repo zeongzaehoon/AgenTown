@@ -1193,3 +1193,17 @@ leases in its database snapshot**; its Task argument selects returned history,
 not Task-isolated mutation. It never starts a Run or provider call. See
 [the recovery API procedure](text-execution.md#explicit-expired-attempt-recovery-through-local-mcp)
 for delivery uncertainty and no-replay behavior.
+
+### Apply a Skill through the local product API
+
+Start `agentown-web --database /absolute/path/product.sqlite --provider anthropic --model YOUR_CONFIGURED_MODEL` with the installed local `agentown-mcp` command available in the same environment. Use an existing assigned text Task and an enabled Skill in that database. The adapter launches the installed command; it does not use a second database or accept client credentials. Provider configuration comes from the server environment. Discovery and preview work without provider configuration and make no provider call.
+
+At `http://127.0.0.1:8765`, send same-origin JSON POST requests (include `Origin: http://127.0.0.1:8765` and `Content-Type: application/json`):
+
+1. `/api/connections/v1/skills/list` with `{}` explicitly calls `list_skills_v1`.
+2. `/api/connections/v1/skills/preview` with `{"task_id":"TASK_UUID","skill_id":"SKILL_UUID"}` calls `preview_skill_work_v1`. A confirmed response's `data` contains `schema_version`, `preview_id`, `task_id`, `skill_id`, `input` and `expected_runs`. Show the full effective `input` before requesting consent.
+3. `/api/connections/v1/skills/execute` accepts exactly `task_id`, `skill_id`, `preview_id`, `input`, `expected_runs` copied from that preview, plus `"execution_consent":true`. Omit `schema_version`. This calls `execute_skill_work_v1` once with server-selected provider/model and declared source `agentown-local-product`. No provider, model, source or credential request fields are accepted.
+
+Before dispatch, the API requires the complete consent tuple to match a confirmed preview returned by this running server. A mismatch or unknown preview returns `admission_rejected` without a provider call, Run admission or preview consumption. The server retains its most recent 128 confirmed previews in memory; after restart or eviction, obtain a fresh preview and consent again. Execution reuses Rust's atomic single-use preview consumption and attempt-count admission. Changed Skills, stale counts and consumed previews require refreshed inspection and a fresh preview. A completed response includes `data.execution` and `data.skill`; the adapter verifies the returned input and reads `get_work_history_v1(read_only=true)` to verify Task, Run, Skill, preview and source identities. The recorded Skill provenance includes the admitted instructions, effective input and preview ID. They remain observable in work history and `/api/state` after restart. Provider success remains quality-unverified.
+
+`configuration_unavailable` rejects execution without dispatch. `transport_unavailable` means dispatch was not reached; `delivery_uncertain` means delivery may have occurred, including timeout, lost results or failure to confirm provenance after execution. Inspect persisted history before any fresh explicit action. Never automatically replay an uncertain request. Busy admission stays occupied until child-process cleanup completes. Deterministic fixtures exercise these contracts; live provider calls remain skipped under the current policy. Installed command/wheel and browser verification belong to the supervisor gate.

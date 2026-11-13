@@ -55,7 +55,7 @@ class LocalBoundary:
         await self.app(scope, receive, secured)
 
 
-def create_app(database, model=None, *, port=8765, provider=None, provider_name="anthropic", execution_port=None, recovery_port=None):
+def create_app(database, model=None, *, port=8765, provider=None, provider_name="anthropic", execution_port=None, recovery_port=None, skill_port=None):
     database = str(database)
     # Injection is for tests only. The CLI uses the selected configured provider.
     configuration = None
@@ -82,12 +82,20 @@ def create_app(database, model=None, *, port=8765, provider=None, provider_name=
     local_recovery = recovery_port if recovery_port is not None else LocalMcpRecovery(database)
     reconcile_selected_work = ReconcileSelectedWork(local_recovery)
 
+    from .application.apply_selected_skill import ApplySelectedSkill, SelectedSkillRequest
+    from .local_mcp_skill import LocalMcpSkill
+    local_skill = skill_port if skill_port is not None else LocalMcpSkill(
+        database, provider_name, model, configured=configuration is None)
+    apply_selected_skill = ApplySelectedSkill(local_skill)
+
     @asynccontextmanager
     async def lifespan(app):
         try:
             yield
         finally:
             await diagnostic.close()
+            if skill_port is None:
+                await local_skill.close()
             if recovery_port is None:
                 await local_recovery.close()
             if execution_port is None:
@@ -168,6 +176,23 @@ def create_app(database, model=None, *, port=8765, provider=None, provider_name=
         except (ValueError, TypeError, UnicodeError):
             return response({"error": "Send canonical task_id, nonnegative integer expected_runs and boolean resubmission_consent only."}, 400)
         return response(await execute_selected_work.execute(selected))
+
+    async def connection_skill(request):
+        operation = request.path_params["operation"]
+        fields = {
+            "list": set(), "preview": {"task_id", "skill_id"},
+            "execute": {"task_id", "skill_id", "preview_id", "expected_runs", "input", "execution_consent"},
+        }
+        try:
+            data = await body(request)
+            if operation not in fields or set(data) != fields[operation]:
+                raise ValueError("Unexpected Skill fields")
+            selected = SelectedSkillRequest(operation=operation, **data)
+        except RequestTooLarge:
+            return response({"error": "Skill request exceeds 120,000 bytes."}, 413)
+        except (ValueError, TypeError, UnicodeError):
+            return response({"error": "Send only the documented Skill fields, canonical IDs and explicit execution_consent: true."}, 400)
+        return response(await apply_selected_skill.execute(selected))
 
     async def connection_shared_data(request):
         return await connection_diagnostic(request, shared_data=True)
@@ -399,6 +424,7 @@ def create_app(database, model=None, *, port=8765, provider=None, provider_name=
     app = Starlette(lifespan=lifespan, routes=configuration_routes(database, body, response) + [Route("/", home), Route("/api/state", state, methods=["POST"]),
         Route("/api/loops/v1", loop_api, methods=["GET"]),
         Route("/api/loops/v1/{action}", loop_api, methods=["POST"]),
+        Route("/api/connections/v1/skills/{operation}", connection_skill, methods=["POST"]),
         Route("/api/connections/v1", connections, methods=["POST"]),
         Route("/api/connections/v1/reconcile-work", connection_reconcile_work, methods=["POST"]),
         Route("/api/connections/v1/execute-work", connection_execute_work, methods=["POST"]),

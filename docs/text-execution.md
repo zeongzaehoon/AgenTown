@@ -458,3 +458,5 @@ before giving fresh execution consent. For an uncertain-delivery demonstration,
 interrupt the local server after submitting; the screen retains selected-work
 recovery access and never automatically resends. A lost response alone cannot
 prove whether reconciliation persisted.
+
+Selected saved work can also use an enabled Skill through the installed local MCP adapter. Launch `agentown-web --database /absolute/path/product.sqlite` with the normal server provider/model settings, explicitly discover Skills, preview the saved Task with the chosen Skill, show the effective input, and submit that preview with explicit execution consent. See [the local Skill API requests](mcp.md#apply-a-skill-through-the-local-product-api). The response confirms persisted Run/Skill provenance; stale or consumed previews cannot be reused. Lost delivery is uncertain and must never trigger an automatic replay. This API slice does not add frontend controls. Live provider validation is skipped, not passed.
