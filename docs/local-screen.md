@@ -4073,3 +4073,62 @@ The supervisor frontend profile passed 32 frontend test files and 1,159 tests,
 the production build, and 505 Python tests with 2 skipped. Installed-browser
 and installation/process-recovery gates were deferred by this profile. Live LLM
 calls are skipped, not passed, under the user policy.
+
+### Keyboard orientation when saved work leaves matches (C111-T1)
+
+Launch `agentown-web --database PATH --port 8765`, open
+`http://127.0.0.1:8765`, and navigate to **Work & results**. No provider or live
+LLM call is needed. For a deterministic browser reproduction, paste this console
+fixture (reload restores normal workspace reads; it never writes saved data):
+
+```js
+window.matchFetch = window.fetch.bind(window);
+window.matchSnapshot = await (await window.matchFetch('/api/state')).json();
+window.matchSnapshot.employees = [{id: 'keyboard-e', name: 'Writer'}];
+window.matchSnapshot.work = ['keyboard-a', 'keyboard-b'].map(id => ({
+  id, input: 'Keyboard request', status: 'pending',
+  assignees: ['keyboard-e'], attempts: []
+}));
+window.fetch = (path, init) => path === '/api/state'
+  ? Promise.resolve(Response.json(window.matchSnapshot))
+  : window.matchFetch(path, init);
+window.leaveMatchLater = (id, assignment = false) => setTimeout(() => {
+  const work = window.matchSnapshot.work.find(work => work.id === id);
+  if (assignment) work.assignees = [];
+  else work.status = 'cancelled';
+}, 5000);
+```
+
+1. Wait for polling, choose **View assigned work: Writer · ID: keyboard-e**,
+   select **Pending work** under Current outcome, and search for `Keyboard`.
+   Open request `keyboard-a`, then enter employee/work drafts without saving.
+2. Run `window.leaveMatchLater('keyboard-a')`, return to the document and Tab
+   to **Open request: Keyboard request · ID: keyboard-a** before five seconds
+   elapse. The accepted poll moves focus to **Search saved work**. A polite
+   status names the request and ID, says it left Matching requests, and explains
+   that this does not mean deletion. Selected detail, filters and drafts remain.
+   Tab continues through the filter controls to remaining matches.
+3. Repeat with `window.leaveMatchLater('keyboard-b', true)` while its request
+   button is focused. Reassignment leaves no matches; the same search control
+   receives focus and the status explains the empty filtered view.
+4. Reload/reinstall the fixture. Reverse `window.matchSnapshot.work` while a
+   matching button is focused: focus follows its stable ID despite equal labels.
+   Move focus to the draft, Saved work selector, or surviving request before
+   another request leaves: that control keeps focus. Reject workspace reads:
+   the stale list stays focused without a departure announcement. Superseded
+   responses are covered by the deterministic interaction tests.
+
+Scoped checks: `cd frontend && npx tsc --noEmit` and
+`npx vitest run src/App.test.tsx --configLoader runner -t 'matching-request focus|matching refresh preserves'`.
+Tests assert focus/status, accepted outcome and assignment changes, empty matches,
+stable-ID reordering, outside/surviving controls, failed/superseded reads, retained
+selection/filters/drafts, and workspace-only requests without mutation/execution.
+Supervisor verification passed 32 frontend test files and 1,164 tests,
+TypeScript checking, the production build, and 505 Python tests with 2 skipped.
+Installed-browser and installation/process-recovery gates were deferred by this
+profile. Live LLM calls remain skipped under user policy.
+
+Implementation scoped validation: TypeScript checking passed; the five focused
+App interaction cases passed (92 unrelated tests skipped), including Tab from
+the recovered search control to Clear search. Existing shared dependencies were
+used temporarily; no dependency installation or browser run was performed.

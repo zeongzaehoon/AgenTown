@@ -133,6 +133,9 @@ export function App() {
   const [viewEmployee, setViewEmployee] = useState('');
   const [outcome, setOutcome] = useState<WorkOutcome | 'all'>('all');
   const searchRef = useRef<HTMLInputElement>(null);
+  const focusedRequest = useRef<{id: string; input: string; element: HTMLButtonElement} | null>(null);
+  const [matchingAnnouncement, setMatchingAnnouncement] = useState('');
+  const matchingContext = useRef({state, search, outcome, viewEmployee});
   const [employee, setEmployee] = useState<string | null>(null);
   const [name, setName] = useState('');
   const [input, setInput] = useState('');
@@ -161,6 +164,33 @@ export function App() {
   const matches = state?.work.filter(w => (!viewEmployee || w.assignees.includes(viewEmployee)) && w.input.toLowerCase().includes(search.toLowerCase()) && (outcome === 'all' || classifyWork(w).outcome === outcome)) ?? [];
   const selectedExcluded = !!work && !matches.some(w => w.id === work.id);
   const assignee = employee === null ? state?.employees[0]?.id ?? '' : state?.employees.some(e => e.id === employee) ? employee : '';
+
+  useEffect(() => {
+    const trackFocus = (event: FocusEvent) => {
+      if (event.target !== focusedRequest.current?.element) focusedRequest.current = null;
+    };
+    document.addEventListener('focusin', trackFocus);
+    return () => document.removeEventListener('focusin', trackFocus);
+  }, []);
+  useLayoutEffect(() => {
+    const previous = matchingContext.current;
+    matchingContext.current = {state, search, outcome, viewEmployee};
+    const focused = focusedRequest.current;
+    if (!focused) return;
+    // Filter edits are user navigation, not a refresh removing a control.
+    if (previous.search !== search || previous.outcome !== outcome || previous.viewEmployee !== viewEmployee) {
+      focusedRequest.current = null;
+      return;
+    }
+    if (previous.state === state) return;
+    const surviving = matches.find(request => request.id === focused.id);
+    if (surviving) { focused.input = surviving.input; return; }
+    focusedRequest.current = null;
+    if (!focused.element.isConnected && document.activeElement === document.body) {
+      searchRef.current?.focus();
+      setMatchingAnnouncement(`Saved request “${focused.input.slice(0, 55)}” · ID: ${focused.id} left Matching requests after the workspace refreshed. This does not mean it was deleted. ${matches.length ? 'Other matching requests remain.' : 'No requests match the current filters.'} Your filters and selected detail are retained.`);
+    }
+  }, [state, search, outcome, viewEmployee]);
 
   const inputError = serverInputError || (inputTouched ? workInputError(input, assignee) : '');
   const hasUnsavedDraft = input.length > 0;
@@ -403,7 +433,8 @@ export function App() {
           <p role="status">{viewEmployee ? `Assigned work for ${state?.employees.find(e => e.id === viewEmployee)?.name ?? 'an unavailable employee'} · Employee ID: ${viewEmployee}. ${connected ? '' : 'Using stale assignments from the last successful refresh.'}` : 'Showing work for all employees.'}</p>
           {!!viewEmployee && <button type="button" onClick={() => { setViewEmployee(''); searchRef.current?.focus(); }}>Return to all employees</button>}
           <p>Employee navigation only changes this view. It does not save, assign or execute work.</p>
-          <ul aria-label="Matching requests">{matches.map(w => <li key={w.id}><button type="button" onClick={() => { setSelected(w.id); historyRef.current?.focus(); }}>Open request: {w.input.slice(0, 55)} · ID: {w.id}</button></li>)}</ul>
+          <ul aria-label="Matching requests">{matches.map(w => <li key={w.id}><button type="button" onFocus={event => { focusedRequest.current = {id: w.id, input: w.input, element: event.currentTarget}; }} onClick={() => { setSelected(w.id); historyRef.current?.focus(); }}>Open request: {w.input.slice(0, 55)} · ID: {w.id}</button></li>)}</ul>
+          <p role="status" aria-live="polite" aria-atomic="true">{matchingAnnouncement}</p>
           <p id="search-count" role="status" aria-live="polite" aria-atomic="true">{state ? `${matches.length} of ${state.work.length} saved requests match.` : 'Saved history has not loaded yet.'}</p>
           {!!state?.work.length && !matches.length && <p>No saved work matches your employee, search and outcome filters. This employee may have no assigned work. Change either filter, change the employee selection, return to all employees or choose Show all loaded work to reset all filters.</p>}
           {selectedExcluded && <p id="selection-help">The selected work is outside these matches. Its detail remains selected below. Select a match to change it.</p>}

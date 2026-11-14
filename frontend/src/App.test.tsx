@@ -1272,3 +1272,82 @@ test.each(['Select office character', 'View assigned work'])('accepted employee 
   expect((screen.getByLabelText('Employee name') as HTMLInputElement).value).toBe('Keep employee draft');
   expect(f.calls.every(call => call.path === '/api/state')).toBe(true);
 });
+
+test.each(['outcome', 'assignment'])('accepted %s change recovers matching-request focus and retains detail, filters and drafts', async change => {
+  vi.spyOn(window, 'setInterval').mockImplementation(() => 0);
+  const f = fixture({...initial(), employees: [{id: 'e', name: 'Writer'}, {id: 'other', name: 'Other'}], work: [
+    {id: 'w', input: 'Saved text', status: 'pending', assignees: ['e'], attempts: []},
+    {id: 'keep', input: 'Saved text', status: 'pending', assignees: ['e'], attempts: []},
+  ]});
+  render(<App />); await connected();
+  fireEvent.click(screen.getByRole('button', {name: 'View assigned work: Writer · ID: e'}));
+  fireEvent.change(screen.getByLabelText('Current outcome'), {target: {value: 'pending'}});
+  fireEvent.change(screen.getByLabelText('Search saved work'), {target: {value: 'Saved'}});
+  fireEvent.change(screen.getByLabelText('What would you like help with?'), {target: {value: 'Keep work draft'}});
+  fireEvent.change(screen.getByLabelText('Employee name'), {target: {value: 'Keep employee draft'}});
+  const request = (id: string) => screen.getByRole('button', {name: `Open request: Saved text · ID: ${id}`});
+  const focused = request('w'); focused.focus();
+  // Reorder equal labels with stable IDs: preserve the actual focused node.
+  f.state.work.reverse(); refresh();
+  await waitFor(() => expect(within(screen.getByRole('list', {name: 'Matching requests'})).getAllByRole('button')[0]).toBe(request('keep')));
+  expect(document.activeElement).toBe(focused);
+  f.disconnect(); refresh();
+  await waitFor(() => expect(document.querySelector('#connection')!.textContent).toContain('Disconnected'));
+  expect(document.activeElement).toBe(focused);
+  expect(screen.queryByText(/left Matching requests after/)).toBeNull();
+  f.reconnect();
+  const fetcher = globalThis.fetch;
+  let resolveOld!: (response: Response) => void;
+  let hold = true;
+  vi.stubGlobal('fetch', (path: string, options: RequestInit) => path === '/api/state' && hold
+    ? new Promise<Response>(resolve => { resolveOld = resolve; }) : fetcher(path, options));
+  refresh(); hold = false; refresh(); await connected();
+  await act(async () => resolveOld(new Response(JSON.stringify({...f.state, work: []}))));
+  expect(document.activeElement).toBe(focused);
+  expect(screen.queryByText(/left Matching requests after/)).toBeNull();
+  const changeWork = (id: string) => {
+    const work = f.state.work.find(work => work.id === id)!;
+    if (change === 'assignment') work.assignees = ['other'];
+    else work.status = 'cancelled';
+  };
+  changeWork('w'); refresh();
+  await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('Search saved work')));
+  const announcement = screen.getByText(/Saved request “Saved text” · ID: w left Matching requests after/);
+  expect(announcement.getAttribute('role')).toBe('status');
+  expect(announcement.getAttribute('aria-live')).toBe('polite');
+  expect(announcement.textContent).toContain('This does not mean it was deleted. Other matching requests remain.');
+  expect(screen.getByText('Work ID: w')).toBeTruthy();
+  expect((screen.getByLabelText('Saved work') as HTMLSelectElement).value).toBe('');
+  expect((screen.getByLabelText('Current outcome') as HTMLSelectElement).value).toBe('pending');
+  expect((screen.getByLabelText('Search saved work') as HTMLInputElement).value).toBe('Saved');
+  expect(screen.getByText(/Assigned work for Writer · Employee ID: e/)).toBeTruthy();
+  expect((screen.getByLabelText('What would you like help with?') as HTMLTextAreaElement).value).toBe('Keep work draft');
+  expect((screen.getByLabelText('Employee name') as HTMLInputElement).value).toBe('Keep employee draft');
+  request('keep').focus(); changeWork('keep'); refresh();
+  await waitFor(() => expect(screen.getByText(/ID: keep left Matching requests after/).textContent).toContain('No requests match the current filters.'));
+  expect(document.activeElement).toBe(screen.getByLabelText('Search saved work'));
+  expect(within(screen.getByRole('list', {name: 'Matching requests'})).queryAllByRole('button')).toHaveLength(0);
+  await userEvent.setup().keyboard('{Tab}');
+  expect(document.activeElement).toBe(screen.getByRole('button', {name: 'Clear search'}));
+  expect(f.calls.every(call => call.path === '/api/state')).toBe(true);
+});
+
+test.each(['surviving request', 'outside draft', 'saved-work selector'])('matching refresh preserves focus on %s', async destination => {
+  vi.spyOn(window, 'setInterval').mockImplementation(() => 0);
+  const f = fixture({...initial(), employees: [{id: 'e', name: 'Writer'}], work: [
+    {id: 'w', input: 'Saved text', status: 'pending', assignees: ['e'], attempts: []},
+    {id: 'keep', input: 'Other text', status: 'pending', assignees: ['e'], attempts: []},
+  ]});
+  render(<App />); await connected();
+  fireEvent.change(screen.getByLabelText('Current outcome'), {target: {value: 'pending'}});
+  screen.getByRole('button', {name: 'Open request: Saved text · ID: w'}).focus();
+  const control = destination === 'surviving request' ? screen.getByRole('button', {name: 'Open request: Other text · ID: keep'})
+    : screen.getByLabelText(destination === 'outside draft' ? 'What would you like help with?' : 'Saved work');
+  control.focus();
+  f.state.work[0].status = 'cancelled'; refresh();
+  await waitFor(() => expect(screen.queryByRole('button', {name: 'Open request: Saved text · ID: w'})).toBeNull());
+  expect(document.activeElement).toBe(control);
+  expect(screen.queryByText(/left Matching requests after/)).toBeNull();
+  expect(screen.getByText('Work ID: w')).toBeTruthy();
+  expect(f.calls.every(call => call.path === '/api/state')).toBe(true);
+});
