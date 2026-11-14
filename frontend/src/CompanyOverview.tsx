@@ -22,7 +22,9 @@ const employeeOutcomeActions: {outcome: EmployeeOutcomeNavigation['outcome']; la
   {outcome: 'other', label: 'Other recorded work'},
 ];
 
-export function CompanyOverview({workspace, connected, error, onOpenWork, selectedEmployee = '', onSelectEmployee, onOpenHook, onOpenLoop, onOpenSkill, onOpenClient, onOpenTeam, onSelectTeamMember, onOpenSession, onOpenHookWork, onOpenSkillWork, onOpenFailedWork, onOpenEmployeeOutcome}: {
+export function CompanyOverview({workspace, connected, error, onOpenWork, selectedEmployee = '', onSelectEmployee, onOpenHook, onOpenLoop, onOpenSkill, onOpenClient, onOpenTeam, onSelectTeamMember, onOpenSession, onOpenHookWork, onOpenSkillWork, onOpenFailedWork, onOpenEmployeeOutcome, onGiveWork, assigningWork = false}: {
+  onGiveWork?: (employeeId: string) => void;
+  assigningWork?: boolean;
   onOpenEmployeeOutcome?: (request: EmployeeOutcomeNavigation) => void;
   onOpenFailedWork?: (employeeId: string) => void;
   onOpenSkillWork?: (request: SkillNavigation) => void;
@@ -101,6 +103,7 @@ export function CompanyOverview({workspace, connected, error, onOpenWork, select
       <section className="company-office" aria-labelledby="office-title">
         <h3 id="office-title">Employee office</h3>
         <p>Choose a character to view assigned work. Desks show recorded assignments, not live presence.</p>
+        <p id="give-work-help">Give work selects an employee and focuses your work draft. Saving and execution are separate actions.{!connected && " Giving work is unavailable while disconnected. Refresh connection first."}</p>
         {!employees.length && <p>The office is empty.</p>}
         <div className="office-floor">
           {desks.map(({employee, activity, callerActive, blocked}, index) => <div className="office-desk" key={employee.id}>
@@ -115,6 +118,12 @@ export function CompanyOverview({workspace, connected, error, onOpenWork, select
               <strong>{employee.name}</strong><span>ID: {employee.id}</span>
               {selectedEmployee === employee.id && <span>Selected</span>}
             </button>
+            <button type="button" disabled={!connected || !onGiveWork || assigningWork}
+              aria-label={`Give work: ${employee.name} · ID: ${employee.id}`} aria-controls="work-form" aria-describedby="give-work-help"
+              onFocus={event => {
+                focusedEmployee.current = {id: employee.id, name: employee.name, element: event.currentTarget};
+                setRemovalAnnouncement('');
+              }} onClick={() => { if (connected && employees.some(current => current.id === employee.id)) onGiveWork?.(employee.id); }}>Give work</button>
             <p>{!connected && 'Stale snapshot · '}{activity}</p>
             {!!blocked && <p>{blocked} blocked requests</p>}
             {!!callerActive && <p>{callerActive} caller-reported active · no provider request</p>}

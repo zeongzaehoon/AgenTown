@@ -559,7 +559,7 @@ def test_employee_to_result_browser(tmp_path, installed_package):
                 card = page.get_by_role('button', name=f'View assigned work: Navigation Alex · ID: {employee_id}', exact=True)
                 card.focus()
                 page.keyboard.press('Enter' if index == 0 else 'Space')
-                expect(card).to_be_focused()
+                expect(page.get_by_role('heading', name='3. Work & results', exact=True)).to_be_focused()
                 expect(card).to_have_attribute('aria-pressed', 'true')
                 expect(page.locator('#history option:not([value=""])')).to_have_count(1)
                 page.get_by_role('button', name=f'Open request: Navigation request {index} · ID: {work_id}', exact=True).click()

@@ -274,3 +274,21 @@ test.each([
   expect(open).toHaveBeenLastCalledWith({employeeId: 'a', outcome});
   expect(screen.getByText(/Disconnected — showing stale company data/)).toBeTruthy();
 });
+
+
+test.each(['{Enter}', ' '])('Give work forwards employee ID by keyboard (%s)', async key => {
+  const give = vi.fn(); const select = vi.fn(); const open = vi.fn();
+  const props = {workspace: workspace(), connected: true, error: '', onOpenWork: open, onSelectEmployee: select, onGiveWork: give};
+  const view = render(<CompanyOverview {...props} />);
+  const user = userEvent.setup();
+  const control = screen.getByRole('button', {name: 'Give work: Alex · ID: b'});
+  control.focus(); await user.keyboard(key);
+  expect(give.mock.calls).toEqual([['b']]);
+  expect(select).not.toHaveBeenCalled(); expect(open).not.toHaveBeenCalled();
+  view.rerender(<CompanyOverview {...props} connected={false} />);
+  expect((control as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(control); expect(give).toHaveBeenCalledTimes(1);
+  expect(screen.getByText(/Giving work is unavailable while disconnected/)).toBeTruthy();
+  view.rerender(<CompanyOverview {...props} workspace={{...workspace(), employees: []}} />);
+  expect(screen.queryByRole('button', {name: /^Give work:/})).toBeNull();
+});

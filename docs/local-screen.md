@@ -4641,3 +4641,44 @@ production build, and 505 Python tests with 2 skipped. Independent review
 inspected the matching verification artifacts and found no blocking issues.
 Installed-browser and recovery gates were deferred by this profile. Live LLM
 calls remain skipped, not passed.
+
+## Give work from the employee office (C122-T1)
+
+Launch `agentown-web --database /absolute/path/product.sqlite`, or open the
+packaged desktop workspace. This uses the existing employee and work form;
+no credentials or live provider calls are needed.
+
+1. Create two employees with the same name and distinct IDs. Select saved work,
+   expand a result, and enter both an employee-name draft and a work draft.
+2. In **Company overview → Employee office**, Tab to **Give work: Alex · ID: …**
+   and press Enter or Space. **Assign to** now selects that exact ID, with both
+   name and ID visible in its option. Focus moves to **What would you like help
+   with?**. All entered text, selected saved detail and expanded results remain.
+   Repeat with the other ID. Choosing an employee character or workload heading
+   still browses saved work without changing the assignment input.
+3. Check network traffic: Give work sends no save, assignment or execution
+   request. **Save work** remains a separate explicit action; executing saved
+   work is another explicit action.
+4. Disconnect and refresh. Give work and Save work are disabled, with a visible
+   explanation to refresh the connection. Reconnect with the selected employee
+   removed from the workspace: **Assign to** shows **Select an employee**, a
+   status names the unavailable ID, and saving stays disabled until a current
+   employee is explicitly selected. The work text remains available.
+
+Run the deterministic interaction cases with:
+
+```sh
+cd frontend
+npm test -- src/CompanyOverview.test.tsx src/App.test.tsx
+```
+
+The Give work cases cover Enter/Space, duplicate names and exact IDs, input
+focus, both drafts, retained saved detail/result expansion, unchanged employee
+navigation, disconnected and removed employees, and state-only requests.
+Supervisor full-profile verification passed 1,328 frontend tests, TypeScript
+checking, the production build, 508 Python tests with 2 skipped, Rust and
+desktop checks, and 2 installed-browser tests covering 38 steps. The browser
+navigation assertion also verifies the accepted **Work & results** focus
+behavior. Independent UI/UX and quality reviews inspected the exact verification
+artifacts and found no blocking issues. Live provider calls remain skipped, not
+passed.

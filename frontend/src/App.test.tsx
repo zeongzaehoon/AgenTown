@@ -464,7 +464,7 @@ test.each([
 ])('%s request validation preserves full pasted draft', async (_label, text, valid) => {
   const state = initial(); state.employees = [{id: 'employee-1', name: 'Writer'}];
   const f = fixture(state); const user = userEvent.setup(); render(<App />);
-  await screen.findByRole('option', {name: 'Writer'});
+  await screen.findByRole('option', {name: 'Writer · ID: employee-1'});
   const editor = screen.getByLabelText('What would you like help with?');
   await user.click(editor); await user.paste(text);
   expect((editor as HTMLTextAreaElement).value).toBe(text);
@@ -483,7 +483,7 @@ test.each([
 test('serialized exact limit, keyboard correction, polling and disconnected draft', async () => {
   const state = initial(); state.employees = [{id: 'employee-1', name: 'Writer'}];
   const f = fixture(state); const user = userEvent.setup(); render(<App />);
-  await screen.findByRole('option', {name: 'Writer'});
+  await screen.findByRole('option', {name: 'Writer · ID: employee-1'});
   const editor = screen.getByLabelText('What would you like help with?');
   const overhead = new TextEncoder().encode(JSON.stringify({input: '', employee: 'employee-1'})).length;
   const exact = '"'.repeat(Math.floor((120000 - overhead) / 2)) + 'a'.repeat((120000 - overhead) % 2);
@@ -514,7 +514,7 @@ test.each(['request_too_large', 'invalid_work_text', 'database'])('server %s rej
     ? new Response(JSON.stringify(state))
     : new Response(JSON.stringify({code, error: code === 'database' ? 'Check database access.' : 'Shorten the request; your draft is unchanged.'}), {status: code === 'request_too_large' ? 413 : 400}));
   vi.stubGlobal('fetch', fetcher); const user = userEvent.setup(); render(<App />);
-  await screen.findByRole('option', {name: 'Writer'});
+  await screen.findByRole('option', {name: 'Writer · ID: employee-1'});
   const editor = screen.getByLabelText('What would you like help with?');
   const text = '\n  한글 😀 <b>literal</b> e\u0301  ';
   await user.click(editor); await user.paste(text);
@@ -1551,5 +1551,62 @@ test.each([
   expect(matchingIds()).toEqual([]);
   expect(outcomeFilter().value).toBe(outcome);
   expect(screen.getByText('Work ID: selected')).toBeTruthy();
+  expect(f.calls.every(call => call.path === '/api/state')).toBe(true);
+});
+
+
+test.each(['{Enter}', ' '])('Give work prepares the exact assignment and preserves drafts and detail (%s)', async key => {
+  vi.spyOn(window, 'setInterval').mockImplementation(() => 0);
+  const f = savedResults();
+  f.state.employees = [{id: 'e', name: 'Alex'}, {id: 'other', name: 'Alex'}];
+  const before = JSON.stringify(f.state);
+  const user = userEvent.setup(); render(<App />); await connected();
+  fireEvent.change(draftInput(), {target: {value: 'Keep work draft'}});
+  fireEvent.change(screen.getByLabelText('Employee name'), {target: {value: 'Keep employee draft'}});
+  await user.click(screen.getByText('Attempt 1 · Result available · Unverified'));
+  const expanded = [...document.querySelectorAll<HTMLDetailsElement>('#detail details')];
+  await waitFor(() => expect(expanded.every(detail => detail.open)).toBe(true));
+  for (const id of ['other', 'e']) {
+    const control = screen.getByRole('button', {name: `Give work: Alex · ID: ${id}`});
+    control.focus(); await user.keyboard(key);
+    expect(document.activeElement).toBe(draftInput());
+    const select = screen.getByLabelText('Assign to') as HTMLSelectElement;
+    expect(select.value).toBe(id);
+    expect(select.selectedOptions[0].textContent).toBe(`Alex · ID: ${id}`);
+    expect(history().value).toBe('w');
+    expect(draftInput().value).toBe('Keep work draft');
+    expect((screen.getByLabelText('Employee name') as HTMLInputElement).value).toBe('Keep employee draft');
+    for (const detail of expanded) { expect(detail.isConnected).toBe(true); expect(detail.open).toBe(true); }
+  }
+  // Ordinary employee navigation keeps its existing assignment untouched.
+  await user.click(screen.getByRole('button', {name: 'Select office character: Alex · ID: other'}));
+  expect((screen.getByLabelText('Assign to') as HTMLSelectElement).value).toBe('e');
+  expect(JSON.stringify(f.state)).toBe(before);
+  expect(f.calls.every(call => call.path === '/api/state')).toBe(true);
+});
+
+test('Give work is unavailable offline and a removed assignee cannot be saved', async () => {
+  vi.spyOn(window, 'setInterval').mockImplementation(() => 0);
+  const f = savedResults();
+  f.state.employees = [{id: 'e', name: 'Alex'}, {id: 'other', name: 'Alex'}];
+  const user = userEvent.setup(); render(<App />); await connected();
+  fireEvent.change(draftInput(), {target: {value: 'Retain text'}});
+  await user.click(screen.getByRole('button', {name: 'Give work: Alex · ID: other'}));
+  f.disconnect(); refresh();
+  await screen.findByText(/Giving work is unavailable while disconnected/);
+  const control = screen.getByRole('button', {name: 'Give work: Alex · ID: e'});
+  expect((control as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(control);
+  fireEvent.submit(document.querySelector('#work-form')!);
+  expect((screen.getByLabelText('Assign to') as HTMLSelectElement).value).toBe('other');
+  expect((screen.getByRole('button', {name: 'Save work'}) as HTMLButtonElement).disabled).toBe(true);
+  f.state.employees = [{id: 'e', name: 'Alex'}];
+  f.reconnect(); refresh(); await connected();
+  await screen.findByText(/Employee ID: other is no longer available/);
+  expect((screen.getByLabelText('Assign to') as HTMLSelectElement).value).toBe('');
+  expect(screen.queryByRole('button', {name: 'Give work: Alex · ID: other'})).toBeNull();
+  expect((screen.getByRole('button', {name: 'Save work'}) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.submit(document.querySelector('#work-form')!);
+  expect(draftInput().value).toBe('Retain text');
   expect(f.calls.every(call => call.path === '/api/state')).toBe(true);
 });
