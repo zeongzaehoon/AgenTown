@@ -39,6 +39,7 @@ export function HookDevices({onOpenHook, onOpenWork, workspace, connected = true
       <span>Configuration {device.enabled ? 'enabled' : 'disabled'}</span>
       {(busy || error) && <span>{busy ? 'Refreshing snapshot' : 'Stale snapshot'}</span>}
     </button>
+      <RecordedHookAttempts device={device} workspace={workspace} connected={connected} />
       {device.target_kind !== 'agent' || !['run_completed', 'run_failed'].includes(device.event)
         ? <p>Local follow-up preview supports employee run-completed and run-failed Hooks only. Team and task-created Hooks remain configuration only.</p>
         : <AssignedWorkChooser device={device} workspace={workspace} connected={connected} busy={busy} stale={!!error} onOpenWork={onOpenWork} />}
@@ -78,5 +79,42 @@ function AssignedWorkChooser({device, workspace, connected, busy, stale, onOpenW
     <button type="button" disabled={!!unavailable || !valid} aria-controls="selected-work-inspection"
       aria-label={`Open assigned work for Hook: ${device.name} · Hook ID: ${device.id}`}
       onClick={() => { if (valid && !unavailable) onOpenWork?.({taskId: choice.taskId, hookId: device.id, employeeId: device.target_id}); }}>Open</button>
+  </div>;
+}
+
+/** Saved Hook identity is independent of current configuration and assignments. */
+function RecordedHookAttempts({device, workspace, connected}: {
+  device: HookRecord; workspace?: Workspace | null; connected: boolean;
+}) {
+  const id = useId();
+  const [expanded, setExpanded] = useState(false);
+  const matches = (workspace?.work ?? []).flatMap(work => work.attempts.flatMap(attempt =>
+    attempt.hook?.hook_id === device.id ? [{work, attempt, saved: attempt.hook}] : []));
+  return <div>
+    <button type="button" aria-expanded={expanded} aria-controls={id}
+      onClick={() => setExpanded(value => !value)}>
+      Recorded attempts for Hook: {device.name} · Hook ID: {device.id}
+    </button>
+    <div id={id} hidden={!expanded}>
+      <p>Read-only loaded history. Opening grants no execution consent.</p>
+      {!workspace ? <p>Workspace unavailable. Refresh connection to load saved history.</p> : <>
+        {!connected && <p>Disconnected — stale saved-work snapshot. Retained records do not confirm current execution state. Refresh connection.</p>}
+        {!matches.length && <p>No matching records in loaded history. Other saved history may contain Hook attempts.</p>}
+        {matches.map(({work, attempt, saved}) => <section key={`${work.id}:${attempt.id}`} aria-label={`Recorded Hook attempt · Task ${work.id} · Run ${attempt.id}`}>
+          <p>Task ID: {work.id} · Run ID: {attempt.id}</p>
+          <p>Saved Hook: {saved.hook_name} · Hook ID: {saved.hook_id}</p>
+          <p>Source Run ID: {saved.source_run_id} · Event: {saved.event} · Source outcome: {saved.source_outcome}</p>
+          <p>Saved employee ID: {saved.agent_id}</p>
+          <p>Saved Skill: {saved.skill_name} · Skill ID: {saved.skill_id}</p>
+          <p>Preview ID: {saved.preview_id} · Provenance Run ID: {saved.run_id}</p>
+          <p>Saved instructions</p><pre>{saved.instructions}</pre>
+          <p>Saved effective input</p><pre>{saved.input}</pre>
+          <p>Execution state: {attempt.state} · Outcome: {attempt.outcome ?? 'Not recorded'}</p>
+          <p>Quality unverified</p>
+          {attempt.output != null ? <><p>Recorded output</p><pre>{attempt.output}</pre></> : <p>No recorded output available.</p>}
+          {attempt.error != null && <p>Recorded error: {attempt.error}</p>}
+        </section>)}
+      </>}
+    </div>
   </div>;
 }

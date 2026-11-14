@@ -3396,3 +3396,45 @@ empty history and disconnected retained records. Supervisor verification passed
 production build and 505 Python tests; 2 Python tests were skipped. The selected
 frontend profile deferred installed-browser and process-recovery gates. Live
 provider tests remain skipped, not passed.
+
+### Inspect recorded Hook follow-ups in Company overview (C94-T2)
+
+Launch `agentown-web --database /absolute/path/product.sqlite3 --port 8765`
+and open <http://127.0.0.1:8765> → Company overview → **Hook trigger devices**.
+Prerequisite: saved Hooks and Workspace Hook attempt provenance in the product
+database. Inspection requires no credentials or new API/persistence contract.
+
+Focus **Recorded attempts for Hook: NAME · Hook ID: ID** and press Enter or
+Space. Matching uses the persisted Hook ID across all loaded saved work, even
+when the Hook is now disabled, its employee/Skill/event/target has changed, or
+work is no longer assigned to that employee. Duplicate names do not establish
+identity. Inspect Task and follow-up Run IDs, saved Hook and source Run/event/
+outcome/employee, saved Skill name/ID/instructions/effective input and preview
+identity, execution state, output/error and **Quality unverified**. Saved
+context remains distinct from current configuration and execution success does
+not imply quality verification.
+
+Opening or closing the disclosure sends no requests, grants no execution consent
+and starts no work. Existing configuration navigation and assigned-work actions
+remain independent. Keep the disclosure focused and expanded while refreshing
+saved history: same-Run changes appear in place without replacing the focused
+button. **Refresh Hook devices** refreshes configuration only; use the existing
+connection/history refresh to load newer attempts. Disclosure state follows Hook
+identity through configuration changes and reordering.
+
+No matching loaded records does not prove the Hook has never run. An unavailable
+Workspace has its own message. Disconnected retained records are labeled a stale
+saved-work snapshot and do not confirm current execution state. Refresh the
+connection to obtain newer history; configuration refresh alone does not make
+saved work current.
+
+Deterministic coverage: `cd frontend && npx vitest run src/HookDevices.test.tsx`
+with installed dependencies. The new interaction test covers saved identity
+separation (including the same Run ID in different Tasks), unrelated direct Skill
+exclusion, changed/disabled configuration, Enter/Space, request-free expansion,
+same-Run updates, focus retention, empty/unavailable history and disconnected
+snapshots. Supervisor frontend verification passed all 32 test files and 1,063 tests, the
+production build, 505 Python tests with 2 skipped, and the harness Rust and
+operational test suites. The selected frontend profile deferred installed-browser
+and installation/process-recovery gates. Live provider tests remain skipped, not
+passed, under the user policy.

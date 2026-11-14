@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, expect, test, vi } from 'vitest';
 import type { Workspace } from './api';
@@ -175,7 +175,8 @@ test('many assigned choices survive polling but assignment, disappearance and ta
   saved = saved.map(hook => hook.id === 'one' ? {...hook, target_id: 'b'} : hook); await refresh();
   await screen.findByLabelText('Assigned work for Hook: Manual · Hook ID: one · Employee ID: b');
   expect(chooser.value).toBe(''); expect(action.disabled).toBe(true);
-  expect(screen.getByText(/Previously chosen work or employee target changed/)).toBeTruthy();
+  // The target label commits before the effect clears the previous choice.
+  expect(await screen.findByText(/Previously chosen work or employee target changed/)).toBeTruthy();
   await userEvent.selectOptions(chooser, 'task-149');
   action.focus(); await userEvent.keyboard(' ');
   expect(open).toHaveBeenLastCalledWith({taskId: 'task-149', hookId: 'one', employeeId: 'b'});
@@ -212,4 +213,68 @@ test('disconnected, refreshing and stale choices cannot navigate and recover wit
   view.rerender(<HookDevices workspace={workspace} />);
   expect(screen.getByText('Assigned-work navigation is unavailable here.')).toBeTruthy();
   expect(action.disabled).toBe(true);
+});
+
+
+test('recorded Hook attempts use saved identity across work and retain focus and context through refresh', async () => {
+  let configured = hooks;
+  const fetcher = vi.fn(async () => new Response(JSON.stringify({hooks: configured})));
+  vi.stubGlobal('fetch', fetcher);
+  const saved = {run_id: 'follow-up', preview_id: 'preview', hook_id: 'one', hook_name: 'Original Hook',
+    event: 'run_failed', agent_id: 'former-employee', source_run_id: 'source', source_outcome: 'failure',
+    skill_id: 'old-skill', skill_name: 'Original Skill', instructions: 'Saved instructions text', input: 'Saved effective text', admitted_at: 1};
+  const attempt = {id: 'follow-up', state: 'active' as const, outcome: null, participants: [], hook: saved};
+  const workspace: Workspace = {employees: [], configuration: null, provider: 'test', model: null, work: [
+    {id: 'task', input: 'Work', status: 'pending', assignees: [], attempts: [attempt,
+      {...attempt, id: 'unrelated', hook: {...saved, hook_id: 'two'}, output: 'Other Hook output'},
+      {id: 'direct', state: 'finished', outcome: 'success', participants: [], skill: saved, output: 'Direct Skill output'}]},
+    {id: 'other-task', input: 'Same work name', status: 'pending', assignees: ['elsewhere'], attempts: [
+      {...attempt, state: 'finished', outcome: 'failure', error: 'Saved timeout'}]},
+  ]};
+  const view = render(<HookDevices workspace={workspace} />);
+  const button = await screen.findByRole('button', {name: 'Recorded attempts for Hook: Manual · Hook ID: one'});
+  const user = userEvent.setup();
+  const before = fetcher.mock.calls.length;
+  button.focus(); await user.keyboard('{Enter}');
+  expect(button.getAttribute('aria-expanded')).toBe('true');
+  expect(document.activeElement).toBe(button);
+  expect(screen.getAllByRole('region', {name: /Recorded Hook attempt/})).toHaveLength(2);
+  const region = screen.getByRole('region', {name: 'Recorded Hook attempt · Task task · Run follow-up'});
+  for (const text of ['Saved Hook: Original Hook · Hook ID: one', 'Saved employee ID: former-employee',
+    'Saved Skill: Original Skill · Skill ID: old-skill', 'Saved instructions text', 'Saved effective text',
+    'Preview ID: preview · Provenance Run ID: follow-up', 'Quality unverified', 'No recorded output available.',
+    'Source Run ID: source · Event: run_failed · Source outcome: failure']) {
+    expect(within(region).getByText(text)).toBeTruthy();
+  }
+  expect(screen.getByText('Recorded error: Saved timeout')).toBeTruthy();
+  expect(screen.queryByRole('region', {name: /Run unrelated/})).toBeNull();
+  expect(screen.queryByText('Direct Skill output')).toBeNull();
+  await user.keyboard(' '); expect(button.getAttribute('aria-expanded')).toBe('false');
+  await user.keyboard(' '); expect(button.getAttribute('aria-expanded')).toBe('true');
+  expect(fetcher).toHaveBeenCalledTimes(before);
+  const refreshed = {...workspace, work: workspace.work.map(work => ({...work, attempts: work.attempts.map(item =>
+    item.id === 'follow-up' ? {...item, state: 'finished' as const, outcome: 'success', output: 'Updated saved output'} : item)}))};
+  view.rerender(<HookDevices workspace={refreshed} />);
+  expect(within(region).getByText('Updated saved output')).toBeTruthy();
+  expect(within(region).getByText('Execution state: finished · Outcome: success')).toBeTruthy();
+  expect(document.activeElement).toBe(button);
+  configured = [hooks[1], {...hooks[0], name: 'Changed', enabled: false, target_kind: 'team', target_id: 'new-team', event: 'task_created', skill_id: 'new-skill'}];
+  fireEvent.click(screen.getByRole('button', {name: 'Refresh Hook devices'}));
+  await screen.findByRole('button', {name: 'Recorded attempts for Hook: Changed · Hook ID: one'});
+  expect(document.activeElement).toBe(button);
+  expect(button.getAttribute('aria-expanded')).toBe('true');
+  expect(within(region).getByText('Saved employee ID: former-employee')).toBeTruthy();
+  expect(within(region).getByText('Saved Skill: Original Skill · Skill ID: old-skill')).toBeTruthy();
+  const second = screen.getByRole('button', {name: 'Recorded attempts for Hook: Manual · Hook ID: two'});
+  second.focus(); await user.keyboard('{Enter}');
+  expect(screen.getByRole('region', {name: 'Recorded Hook attempt · Task task · Run unrelated'})).toBeTruthy();
+  expect(screen.getByText('Other Hook output')).toBeTruthy();
+  view.rerender(<HookDevices workspace={refreshed} connected={false} />);
+  expect(screen.getAllByText(/Disconnected — stale saved-work snapshot/)).toHaveLength(2);
+  expect(within(region).getByText('Updated saved output')).toBeTruthy();
+  view.rerender(<HookDevices workspace={{...workspace, work: []}} />);
+  expect(screen.getAllByText(/No matching records in loaded history/)).toHaveLength(2);
+  view.rerender(<HookDevices workspace={null} connected={false} />);
+  expect(screen.getAllByText(/Workspace unavailable. Refresh connection/)).toHaveLength(2);
+  expect(fetcher).toHaveBeenCalledTimes(before + 1);
 });
