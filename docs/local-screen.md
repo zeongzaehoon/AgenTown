@@ -3665,3 +3665,40 @@ passed all 32 frontend test files and 1,089 tests, the production build, 505
 Python tests with 2 skipped, and the harness Rust and operational suites. The
 selected frontend profile deferred installed-browser and installation/process-
 recovery gates. Live provider validation is skipped, not passed.
+
+### Retained local Loop session freshness after reconnect (C101-T1)
+
+Run `agentown-web --database PATH --port 8765` with existing saved work and
+local Loop records, then open <http://127.0.0.1:8765>. Select saved work →
+**Inspect through local MCP** → **Inspect local Loop sessions**. No provider
+credentials or external client are required to inspect existing records.
+
+Session and attempt observations are current only as of a successful explicit
+inspection in this connection. Open another saved Task and inspect it; each
+retained session keeps its own Task's freshness. Saved inputs, provider/model
+provenance, receipts and attempt results remain visible when observations go stale.
+
+Disconnect and reconnect the local service using the same database. Both Tasks'
+observations remain stale after reconnect; selection is preserved and no inspection,
+activation or resend happens automatically. Choose **Inspect retained session …**
+to refresh that Task only. A failed inspection revokes that Task's freshness while
+retaining its evidence. A response spanning disconnect/reconnect is discarded.
+Current observations are a snapshot, not a promise that execution has stopped.
+
+After activation or uncertain delivery, **I inspected local Loop records** requires
+a successful explicit inspection in the current connection. Reconnect, rejected or
+failed reads, late responses and Stop's internal confirmation read cannot authorize
+this acknowledgement. Inspect explicitly again before acknowledging recovery and
+requesting a fresh preview. Retained emergency **Stop local Loop …** remains
+available when connected under existing ownership and uncertain-Stop guards;
+stale evidence alone does not remove Stop access. No recovery action resends work.
+
+Deterministic interaction checks (with frontend dependencies available):
+`cd frontend && npm test -- src/WorkLoop.test.tsx`.
+Coverage includes two retained Tasks, independent refresh, failed and deferred
+reads, connection transitions, retained results/provenance, Stop ownership guards
+and recovery acknowledgement. Supervisor verification passed all 32 frontend
+test files and 1,092 tests, the production build, 505 Python tests with 2
+skipped, and the harness Rust and operational suites. The selected frontend
+profile deferred installed-browser and installation/process-recovery gates.
+Live provider calls are skipped, not passed.

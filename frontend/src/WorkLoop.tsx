@@ -32,7 +32,21 @@ export function WorkLoop({taskId, connected, inspected, navigation}: {navigation
   const navigationRegion = useRef<HTMLElement>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
-  const [recoveryRead, setRecoveryRead] = useState<string[]>([]);
+  const [inspectionGeneration, setInspectionGeneration] = useState<Record<string, number>>({});
+  // Connection epochs are independent of preview/navigation invalidation.
+  const connectionGeneration = useRef(0);
+  const previousConnection = useRef(connected);
+  useLayoutEffect(() => {
+    if (previousConnection.current !== connected) {
+      previousConnection.current = connected;
+      ++connectionGeneration.current;
+      setInspectionGeneration({});
+    }
+  }, [connected]);
+  function forgetInspection(task: string) {
+    setInspectionGeneration(rows => {const next = {...rows}; delete next[task]; return next;});
+  }
+  function isFresh(task: string) {return connected && inspectionGeneration[task] === connectionGeneration.current;}
   const [recovery, setRecovery] = useState<string[]>([]);
   const pending = useRef<AbortController | null>(null);
   const region = useRef<HTMLElement>(null);
@@ -70,10 +84,12 @@ export function WorkLoop({taskId, connected, inspected, navigation}: {navigation
   }
   async function perform(op: LoopOperation, task = taskId, saved?: LoopSession) {
     if (!task || !connected || pending.current || (op === 'start' && (!preview || !consent || recovery.includes(task)))) return;
+    const connection = connectionGeneration.current;
+    if (op === 'inspect' || op === 'start' || op === 'stop') forgetInspection(task);
     const expected = op === 'preview' ? selected : op === 'start' ? preview! : saved;
     invalidate(); if (op === 'inspect') setFocusedSession(''); const generation = revision.current;
     const active = new AbortController(); operation.current = op; pending.current = active; setBusy(true);
-    if (op === 'start') {setRecovery(rows => [...new Set([...rows, task])]); setRecoveryRead(rows => rows.filter(t => t !== task));}
+    if (op === 'start') setRecovery(rows => [...new Set([...rows, task])]);
     try {
       let result = await localLoop(op, task, active.signal, expected);
       if (op === 'stop' && result.receipt) {
@@ -87,7 +103,7 @@ export function WorkLoop({taskId, connected, inspected, navigation}: {navigation
       if (op === 'stop' && saved && result.status === 'uncertain') setUncertainStops(rows => [...new Set([...rows, saved.session_id])]);
       if (op !== 'start' && op !== 'stop' && generation !== revision.current) return;
       // Mutation provenance is retained even if selection changes during delivery.
-      if (result.receipt) {setReceipts(rows => ({...rows, [result.receipt!.session_id]: result.receipt!})); setRecoveryRead(rows => rows.filter(t => t !== task));}
+      if (result.receipt) {setReceipts(rows => ({...rows, [result.receipt!.session_id]: result.receipt!})); forgetInspection(task);}
       if (result.inspection) {
         {
           const prior = records[task];
@@ -96,6 +112,9 @@ export function WorkLoop({taskId, connected, inspected, navigation}: {navigation
             return old && (JSON.stringify(old.preview) !== JSON.stringify(s.preview) || old.provider !== s.provider || old.model !== s.model);
           })) throw new Error('Saved provenance changed');
           setRecords(rows => ({...rows, [task]: result.inspection!}));
+          if (op === 'inspect' && result.status === 'confirmed' && connection === connectionGeneration.current) {
+            setInspectionGeneration(rows => ({...rows, [task]: connection}));
+          }
           if (op === 'inspect') {
             setUncertainStops(rows => rows.filter(id => !result.inspection!.sessions.some(s => s.session_id === id)));
             if (navigation?.sessionId && navigation.taskId === task && generation === revision.current) {
@@ -104,7 +123,6 @@ export function WorkLoop({taskId, connected, inspected, navigation}: {navigation
               if (!found) {setMessage('Requested Loop session is missing from this Task inspection. Nothing was started or stopped.'); return;}
             }
           }
-          if (op === 'inspect') setRecoveryRead(rows => [...new Set([...rows, task])]);
           setReceipts(rows => {const next = {...rows}; result.inspection!.sessions.forEach(s => {delete next[s.session_id];}); return next;});
         }
       }
@@ -145,7 +163,8 @@ export function WorkLoop({taskId, connected, inspected, navigation}: {navigation
     </select></label>
     <button ref={previewControl} type="button" disabled={!selected || busy || !connected || !inspected || recovery.includes(taskId || '')} onClick={() => void perform('preview')}>Preview local Loop</button>
     <button type="button" disabled={!taskId || !connected || busy} onClick={() => void perform('inspect')}>Inspect local Loop sessions</button>
-    {taskId && recovery.includes(taskId) && <><p>Activation consent consumed. Inspect persisted sessions and attempts before acknowledging recovery and requesting a fresh preview.</p><button type="button" disabled={busy || !connected || !recoveryRead.includes(taskId)} onClick={() => {invalidate(); setRecovery(rows => rows.filter(t => t !== taskId));}}>I inspected local Loop records</button></>}
+    {taskId && <p>Task {taskId}: {isFresh(taskId) ? 'Session and attempt observations current as of explicit inspection in this connection.' : 'Current session and attempt state unknown. Retained observations may be stale; inspect explicitly in this connection.'}</p>}
+    {taskId && recovery.includes(taskId) && <><p>Activation consent consumed. Inspect persisted sessions and attempts before acknowledging recovery and requesting a fresh preview.</p><button type="button" disabled={busy || !connected || !isFresh(taskId)} onClick={() => {if (!isFresh(taskId)) return; invalidate(); setRecovery(rows => rows.filter(t => t !== taskId));}}>I inspected local Loop records</button></>}
     <p role="status">{busy ? 'Waiting for retained local MCP owner…' : message}</p>
     {preview && <section ref={previewRegion} tabIndex={-1} aria-label="Local Loop preview" onKeyDown={e => {if (e.key === 'Escape') {e.preventDefault(); e.stopPropagation(); dismissPreview();}}}>
       <h5>{preview.policy_name}</h5><p>Task: {preview.task_id} · Employee: {preview.agent_id} · Policy: {preview.policy_id}</p>
@@ -159,6 +178,7 @@ export function WorkLoop({taskId, connected, inspected, navigation}: {navigation
     <p>Stop prevents new admissions and attempts local cancellation. Remote completion may remain unknown. Disconnecting or changing selection does not stop a session.</p>
     {[...sessions.values()].map(s => <section tabIndex={-1} id={`local-session-${s.session_id}`} key={s.session_id} aria-label={`Local Loop session ${s.session_id}`}>
       <h5>{s.preview.policy_name} · {s.session_id}</h5><p>Task: {s.preview.task_id}</p>
+      <p>{isFresh(s.preview.task_id) ? 'Session and attempt observations current as of explicit inspection in this connection.' : 'Retained session and attempt observations may be stale. Inspect this Task explicitly in this connection.'}</p>
       <p>{loopLabel(s, records[s.preview.task_id]?.attempts || [])} · Admitted: {s.admitted} / {s.preview.max_iterations}</p>
       <p>{controlText(records[s.preview.task_id]?.control)}</p>
       <button type="button" disabled={busy || !connected} onClick={() => void perform('inspect', s.preview.task_id)}>Inspect retained session {s.session_id}</button>
