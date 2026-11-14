@@ -3639,3 +3639,29 @@ production build, 505 Python tests with 2 skipped, and the harness Rust and
 operational suites. The selected frontend profile deferred installed-browser and
 installation/process-recovery gates. Live provider validation is skipped, not
 passed.
+
+### Configuration connection recovery
+
+Run `agentown-web --database PATH --port 8765` with your local database path and
+open `http://127.0.0.1:8765`. Open **Configuration**. Select saved Skill, Hook and
+Loop records in turn and enter a draft edit. Configuration never executes work.
+
+1. Stop the local server and use **Refresh connection**. Saved values, selected
+   records and drafts remain readable; saving and enabling/disabling are blocked.
+   You can still navigate records and edit drafts.
+2. Restart the same command and use **Refresh connection**. The configuration
+   stale warning and mutation guards remain, even for an empty saved list.
+3. Explicitly choose **Refresh configuration** while connected. Only a successful
+   refresh that does not span a connection transition restores configuration
+   freshness. A failed refresh or a late response from before disconnection
+   cannot unlock saving. Retry the refresh after restoring the connection.
+4. Review saved IDs, fields and enabled states against retained drafts. If a save
+   was interrupted, delivery may be uncertain: after refreshing, also choose
+   **I inspected saved configuration** before explicitly retrying. Changes are
+   never automatically resent. Navigation and drafts remain available throughout.
+
+These recovery steps require no provider credentials. Supervisor verification
+passed all 32 frontend test files and 1,089 tests, the production build, 505
+Python tests with 2 skipped, and the harness Rust and operational suites. The
+selected frontend profile deferred installed-browser and installation/process-
+recovery gates. Live provider validation is skipped, not passed.

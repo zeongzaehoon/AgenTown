@@ -468,7 +468,7 @@ export function App() {
           </>}</div>
         </section></div>
       <footer>Responses are unverified. Read and check the full result before using it.</footer>
-      <Configuration workspace={state} openRecord={configurationRequest} />
+      <Configuration connected={connected} workspace={state} openRecord={configurationRequest} />
       <Connections openClient={clientRequest} workspaceConnected={connected} />
     </main>
   </>;

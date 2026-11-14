@@ -13,17 +13,25 @@ const defaults: Record<ConfigurationKind, Draft> = {
 function draftOf(record: ConfigurationRecord): Draft {
   return Object.fromEntries(Object.entries(record).filter(([key]) => key !== 'id' && key !== 'enabled').map(([key, value]) => [key, String(value)]));
 }
-export function Configuration({workspace, openSkill, openRecord}: {workspace: Workspace | null; openSkill?: {id: string} | null; openRecord?: ConfigurationNavigation | null}) {
+export function Configuration({workspace, connected, openSkill, openRecord}: {workspace: Workspace | null; connected: boolean; openSkill?: {id: string} | null; openRecord?: ConfigurationNavigation | null}) {
   const [open, setOpen] = useState(false);
   const [visited, setVisited] = useState(false);
   useEffect(() => { if (openSkill || openRecord) { setOpen(true); setVisited(true); } }, [openSkill, openRecord]);
   return <section aria-labelledby="configuration-title"><h2 id="configuration-title">Configuration</h2>
     <p>Manage Skills, Hooks and Loop policies. Configuration does not execute work. Enabled means configuration enabled. Apply a Skill only through the saved-work preview and explicit execution controls. Hooks and Loops do not execute automatically.</p>
     <button type="button" aria-expanded={open} aria-controls="configuration-panel" onClick={() => { setOpen(true); setVisited(true); }}>Open configuration</button>
-    <div id="configuration-panel">{visited && <ConfigurationPanel workspace={workspace} openSkill={openSkill} openRecord={openRecord} hidden={!open} onClose={() => setOpen(false)} />}</div>
+    <div id="configuration-panel">{visited && <ConfigurationPanel connected={connected} workspace={workspace} openSkill={openSkill} openRecord={openRecord} hidden={!open} onClose={() => setOpen(false)} />}</div>
   </section>;
 }
-function ConfigurationPanel({workspace, openSkill, openRecord, hidden, onClose}: {hidden: boolean; onClose: () => void;workspace: Workspace | null; openSkill?: {id: string} | null; openRecord?: ConfigurationNavigation | null}) {
+function ConfigurationPanel({workspace, connected, openSkill, openRecord, hidden, onClose}: {connected: boolean; hidden: boolean; onClose: () => void;workspace: Workspace | null; openSkill?: {id: string} | null; openRecord?: ConfigurationNavigation | null}) {
+  const connection = useRef({connected, generation: 0});
+  if (connection.current.connected !== connected) {
+    connection.current = {connected, generation: connection.current.generation + 1};
+  }
+  const generation = connection.current.generation;
+  const [freshGeneration, setFreshGeneration] = useState<number | null>(connected ? 0 : null);
+  const connectionStale = !connected || freshGeneration !== generation;
+  const mutating = useRef(false);
   const [kind, setKind] = useState<ConfigurationKind>('skills');
   const [records, setRecords] = useState<Record<ConfigurationKind, ConfigurationRecord[]> | null>(null);
   const [teams, setTeams] = useState<Team[]>([]);
@@ -43,7 +51,7 @@ function ConfigurationPanel({workspace, openSkill, openRecord, hidden, onClose}:
   const record = records?.[kind].find(item => item.id === selected);
   const key = `${kind}/${selected}`;
   const draft = drafts[key] ?? (record ? draftOf(record) : defaults[kind]);
-  const blocked = busy || stale || !!recovery || !records || (!!selected && !record);
+  const blocked = connectionStale || busy || stale || !!recovery || !records || (!!selected && !record);
   function changeFields(fields: Draft) {
     baselines.current[key] ??= record ? draftOf(record) : defaults[kind];
     setDrafts(previous => ({...previous, [key]: {...draft, ...fields}}));
@@ -54,7 +62,9 @@ function ConfigurationPanel({workspace, openSkill, openRecord, hidden, onClose}:
     return !baseline || Object.keys({...baseline, ...drafts[id]}).some(field => drafts[id][field] !== baseline[field]);
   });
   async function perform(action?: (signal: AbortSignal) => Promise<void>) {
-    if (lock.current) return;
+    if (lock.current || !connected || (action && blocked)) return;
+    const startedGeneration = connection.current.generation;
+    mutating.current = !!action;
     lock.current = true; setBusy(true); setError(''); setNotice('');
     const request = new AbortController(); controller.current = request;
     try {
@@ -65,15 +75,25 @@ function ConfigurationPanel({workspace, openSkill, openRecord, hidden, onClose}:
           configurationRequest<{hooks: ConfigurationRecord[]}>('hooks', '', undefined, request.signal),
           configurationRequest<{loops: ConfigurationRecord[]}>('loops', '', undefined, request.signal), listTeams(request.signal),
         ]);
-        if (request.signal.aborted) return;
-        setRecords({skills: savedSkills(skills), hooks: savedHooks(hooks), loops: savedLoopPolicies(loops)}); setTeams(teamList.teams); setStale(false);
+        if (request.signal.aborted || connection.current.generation !== startedGeneration) return;
+        const snapshot = {skills: savedSkills(skills), hooks: savedHooks(hooks), loops: savedLoopPolicies(loops)};
+        setFreshGeneration(startedGeneration);
+        setRecords(snapshot); setTeams(teamList.teams); setStale(false);
         setRecovery(previous => previous ? 'inspect' : null);
         setNotice('Saved values refreshed. Inspect them before explicitly retrying any uncertain save; refresh never resends changes.');
       }
     } catch (failure) {
       if (!request.signal.aborted) { setStale(true); setRecovery(previous => action || previous ? 'refresh' : null); setError(`${failure instanceof Error ? failure.message : 'Invalid configuration response.'} Disconnected or unavailable. Drafts retained. ${action ? 'Delivery is uncertain. A mutation may have been saved. Refresh configuration and inspect saved values before explicitly retrying.' : 'Refresh configuration to load valid saved values before saving or enabling.'} Nothing is automatically resent.`); }
-    } finally { if (controller.current === request) { lock.current = false; if (!request.signal.aborted) setBusy(false); } }
+    } finally { if (controller.current === request) { mutating.current = false; lock.current = false; if (!request.signal.aborted) setBusy(false); } }
   }
+  useLayoutEffect(() => {
+    if (generation === 0) return;
+    controller.current?.abort();
+    lock.current = false;
+    setBusy(false);
+    if (mutating.current) { setRecovery('refresh'); setStale(true); }
+    mutating.current = false;
+  }, [generation]);
   useEffect(() => { void perform(); return () => { controller.current?.abort(); lock.current = false; }; }, []);
   useLayoutEffect(() => {
     // Fast saves can batch busy=true and busy=false into one render. Check the
@@ -122,12 +142,13 @@ function ConfigurationPanel({workspace, openSkill, openRecord, hidden, onClose}:
     })} />
     <div hidden={hidden}>
     <button type="button" onClick={onClose}>Close configuration</button>
-    <p role="status">{busy ? 'Loading or saving configuration…' : stale ? 'Configuration disconnected: loaded values are stale.' : records ? 'Showing saved configuration.' : 'Configuration unavailable.'}</p>
+    <p role="status">{connectionStale ? 'Configuration connection changed: saved values may be stale. Connect, then refresh configuration before saving or enabling.' : busy ? 'Loading or saving configuration…' : stale ? 'Configuration disconnected: loaded values are stale.' : records ? 'Showing saved configuration.' : 'Configuration unavailable.'}</p>
     {error && <p role="alert">{error}</p>}<p role="status">{notice}</p>
-    <button type="button" disabled={busy} onClick={() => void perform()}>Refresh configuration</button>
+    <button type="button" disabled={busy || !connected} onClick={() => void perform()}>Refresh configuration</button>
     {recovery && <>
       <p role="status">Delivery is uncertain. Refresh configuration, then inspect saved IDs, fields and enabled state before retrying. Drafts are retained; nothing is automatically resent.</p>
-      <button type="button" disabled={busy || stale || recovery !== 'inspect'} onClick={() => {
+      <button type="button" disabled={connectionStale || busy || stale || recovery !== 'inspect'} onClick={() => {
+        if (connectionStale || busy || stale || recovery !== 'inspect') return;
         setRecovery(null); setNotice('Inspection confirmed. Review retained drafts before explicitly submitting again.');
       }}>I inspected saved configuration</button>
     </>}

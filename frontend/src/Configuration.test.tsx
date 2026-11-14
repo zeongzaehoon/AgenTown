@@ -42,7 +42,7 @@ async function open() {
 }
 async function saved(kind: string) { await screen.findByText(`${kind} saved · ID: ${kind.toLowerCase()}s-0`); expect(leaveProtected()).toBe(false); }
 test('create, edit, toggle all types and inspect persisted IDs after remount without execution', async () => {
-  const f = fixture(); const view = render(<StrictMode><Configuration workspace={workspace} /></StrictMode>); await open();
+  const f = fixture(); const view = render(<StrictMode><Configuration connected={true} workspace={workspace} /></StrictMode>); await open();
   expect(screen.getByText('No saved skills yet.')).toBeTruthy();
   expect((screen.getByRole('button', {name: 'Create Skill'}) as HTMLButtonElement).disabled).toBe(true);
   change('Name', 'Writer'); change('Instructions', 'Write clearly.');
@@ -67,7 +67,7 @@ test('create, edit, toggle all types and inspect persisted IDs after remount wit
     fireEvent.click(screen.getByRole('button', {name: 'Disable configuration'}));
     await screen.findByRole('button', {name: 'Enable configuration'});
   }
-  view.unmount(); render(<Configuration workspace={workspace} />); await open();
+  view.unmount(); render(<Configuration connected={true} workspace={workspace} />); await open();
   for (const kind of ['skills', 'hooks', 'loops']) {
     change('Record type', kind); change('Saved record', `${kind}-0`);
     const snapshot = JSON.parse(screen.getByLabelText('Saved values').textContent!);
@@ -79,7 +79,7 @@ test('create, edit, toggle all types and inspect persisted IDs after remount wit
   expect(f.fetcher.mock.calls.every(([path]) => path.startsWith('/api/config/v1/') || path === '/api/teams')).toBe(true);
 });
 test('failure preserves drafts and saved snapshot; refresh unlocks only explicit retry', async () => {
-  const f = fixture(); render(<Configuration workspace={workspace} />); await open();
+  const f = fixture(); render(<Configuration connected={true} workspace={workspace} />); await open();
   change('Name', 'Keep draft'); change('Instructions', 'Keep instructions'); f.offline(true);
   fireEvent.click(screen.getByRole('button', {name: 'Create Skill'}));
   await screen.findByRole('alert'); expect(leaveProtected()).toBe(true); expect(screen.getByText(/loaded values are stale/)).toBeTruthy();
@@ -99,7 +99,7 @@ test('failure preserves drafts and saved snapshot; refresh unlocks only explicit
   expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('Unsaved edit');
 });
 test('initial disconnected state recovers without inventing empty records', async () => {
-  const f = fixture(); f.offline(true); render(<Configuration workspace={null} />);
+  const f = fixture(); f.offline(true); render(<Configuration connected={true} workspace={null} />);
   fireEvent.click(screen.getByRole('button', {name: 'Open configuration'})); await screen.findByRole('alert');
   expect(screen.queryByText('No saved skills yet.')).toBeNull();
   f.offline(false); fireEvent.click(screen.getByRole('button', {name: 'Refresh configuration'})); await screen.findByText('No saved skills yet.');
@@ -109,14 +109,14 @@ test('loading is announced and never presented as empty', async () => {
   fixture();
   const original = globalThis.fetch;
   vi.stubGlobal('fetch', vi.fn((path: string, init: RequestInit) => path.endsWith('/skills') ? new Promise<Response>(done => { resolve = done; }) : original(path, init)));
-  render(<Configuration workspace={workspace} />); fireEvent.click(screen.getByRole('button', {name: 'Open configuration'}));
+  render(<Configuration connected={true} workspace={workspace} />); fireEvent.click(screen.getByRole('button', {name: 'Open configuration'}));
   expect(screen.getByText('Loading or saving configuration…')).toBeTruthy(); expect(screen.queryByText('No saved skills yet.')).toBeNull();
   await act(async () => resolve(response({skills: []})));
   await screen.findByText('No saved skills yet.');
 });
 
 test('keyboard opens the labeled workspace and saves with focus returned to selection', async () => {
-  fixture(); const user = userEvent.setup(); render(<Configuration workspace={workspace} />);
+  fixture(); const user = userEvent.setup(); render(<Configuration connected={true} workspace={workspace} />);
   await user.tab(); expect(document.activeElement).toBe(screen.getByRole('button', {name: 'Open configuration'}));
   await user.keyboard('{Enter}'); await screen.findByText('Showing saved configuration.');
   await user.click(screen.getByLabelText('Name')); await user.type(screen.getByLabelText('Name'), 'Keyboard skill');
@@ -149,7 +149,7 @@ for (const kind of kinds) {
     test(`${kind} malformed initial load is unavailable and recovers only on refresh: ${JSON.stringify(bad)}`, async () => {
       const f = fixture();
       f.transform((value, mutation, requested) => !mutation && requested === kind ? bad : value);
-      render(<Configuration workspace={workspace} />);
+      render(<Configuration connected={true} workspace={workspace} />);
       fireEvent.click(screen.getByRole('button', {name: 'Open configuration'}));
       await screen.findByRole('alert');
       expect(screen.queryByText('No saved skills yet.')).toBeNull();
@@ -164,7 +164,7 @@ for (const kind of kinds) {
   }
   test(`${kind} malformed refresh retains the complete snapshot, selections and drafts`, async () => {
     const f = fixture(); for (const key of kinds) f.rows[key] = [savedRows[key]];
-    render(<Configuration workspace={workspace} />); await open();
+    render(<Configuration connected={true} workspace={workspace} />); await open();
     for (const key of kinds) { change('Record type', key); change('Saved record', savedRows[key].id); fillDraft(key); }
     // Earlier valid lists in this response must not partially replace state.
     f.rows.skills = [{...savedRows.skills, name: 'Unexpected replacement'}];
@@ -184,7 +184,7 @@ for (const kind of kinds) {
     for (const invalid of ['null', 'array', 'fields', ...(action === 'create' ? [] : ['identity'])]) {
       test(`${kind} ${action} rejects ${invalid} response and requires keyboard refresh and explicit action`, async () => {
         const f = fixture(); for (const key of kinds) f.rows[key] = [savedRows[key]];
-        const user = userEvent.setup(); render(<Configuration workspace={workspace} />); await open();
+        const user = userEvent.setup(); render(<Configuration connected={true} workspace={workspace} />); await open();
         change('Record type', kind);
         if (action !== 'create') change('Saved record', savedRows[kind].id);
         fillDraft(kind);
@@ -231,7 +231,7 @@ for (const kind of kinds) {
         const f = fixture();
         for (const key of kinds) f.rows[key] = [{...savedRows[key], enabled: action === 'disable' || action === 'update'}];
         const original = {...f.rows[kind][0]};
-        const user = userEvent.setup(); render(<Configuration workspace={workspace} />); await open();
+        const user = userEvent.setup(); render(<Configuration connected={true} workspace={workspace} />); await open();
         change('Record type', kind);
         if (action !== 'create') change('Saved record', original.id);
         fillDraft(kind);
@@ -270,7 +270,7 @@ for (const kind of kinds) {
   }
   test(`${kind} accepts Rust-normalized names, preserves enabled edits and exact instruction whitespace`, async () => {
     const f = fixture(); for (const key of kinds) f.rows[key] = [savedRows[key]];
-    render(<Configuration workspace={workspace} />); await open(); change('Record type', kind); fillDraft(kind);
+    render(<Configuration connected={true} workspace={workspace} />); await open(); change('Record type', kind); fillDraft(kind);
     change('Name', '\u0085  Normalized name \u2003');
     if (kind === 'skills') change('Instructions', '  Keep whitespace\n');
     fireEvent.click(screen.getByRole('button', {name: `Create ${label}`}));
@@ -293,7 +293,7 @@ for (const kind of kinds) {
         const f = fixture();
         for (const type of kinds) f.rows[type] = [{...savedRows[type], enabled: action === 'disable'}];
         const original = {...f.rows[kind][0]};
-        const user = userEvent.setup(); render(<Configuration workspace={workspace} />); await open();
+        const user = userEvent.setup(); render(<Configuration connected={true} workspace={workspace} />); await open();
         // Keep an unrelated record draft throughout confirmation and recovery.
         const other = kind === 'skills' ? 'hooks' : 'skills';
         change('Record type', other); fillDraft(other);
@@ -340,7 +340,7 @@ for (const kind of kinds) {
     }
     test(`${kind} ${action} waits for persisted confirmation and blocks duplicate submission`, async () => {
       const f = fixture(); for (const type of kinds) f.rows[type] = [{...savedRows[type], enabled: action === 'disable'}];
-      render(<Configuration workspace={workspace} />); await open(); change('Record type', kind);
+      render(<Configuration connected={true} workspace={workspace} />); await open(); change('Record type', kind);
       if (action !== 'create') change('Saved record', savedRows[kind].id);
       fillDraft(kind);
       let release!: () => void;
@@ -364,3 +364,83 @@ for (const kind of kinds) {
     });
   }
 }
+
+test.each(['skills', 'hooks', 'loops'] as const)('%s saved snapshot and focused draft survive disconnect; only a connected refresh unlocks', async kind => {
+  const f = fixture();
+  const records: Record<string, ConfigurationRecord> = {
+    skills: {id: 's', name: 'Writer', instructions: 'Saved instructions', enabled: false},
+    hooks: {id: 'h', name: 'Hook', skill_id: 's', target_kind: 'agent', target_id: 'a', event: 'task_created', enabled: false},
+    loops: {id: 'l', name: 'Loop', task_id: 'w', max_iterations: 2, interval_seconds: 60, enabled: false},
+  };
+  for (const type of ['skills', 'hooks', 'loops'] as const) f.rows[type].push(records[type]);
+  const view = render(<Configuration connected={true} workspace={workspace} />); await open();
+  change('Record type', kind); change('Saved record', records[kind].id); change('Name', 'Retained draft');
+  const name = screen.getByLabelText('Name'); name.focus();
+  const snapshot = screen.getByLabelText('Saved values').textContent;
+  const mutations = () => f.fetcher.mock.calls.filter(([, init]) => init.method !== 'GET').length;
+  const before = mutations();
+  view.rerender(<Configuration connected={false} workspace={workspace} />);
+  expect(document.activeElement).toBe(name);
+  expect(screen.getByLabelText('Saved values').textContent).toBe(snapshot);
+  expect((name as HTMLInputElement).value).toBe('Retained draft');
+  fireEvent.submit(name.closest('form')!);
+  fireEvent.click(screen.getByRole('button', {name: 'Enable configuration'}));
+  view.rerender(<Configuration connected={true} workspace={workspace} />);
+  expect(screen.getByText(/saved values may be stale/)).toBeTruthy();
+  expect((screen.getByRole('button', {name: 'Save changes'}) as HTMLButtonElement).disabled).toBe(true);
+  f.offline(true); fireEvent.click(screen.getByRole('button', {name: 'Refresh configuration'})); await screen.findByRole('alert');
+  expect(screen.getByText(/saved values may be stale/)).toBeTruthy();
+  fireEvent.submit(name.closest('form')!); expect(mutations()).toBe(before);
+  f.offline(false); fireEvent.click(screen.getByRole('button', {name: 'Refresh configuration'}));
+  await screen.findByText('Showing saved configuration.');
+  expect((screen.getByRole('button', {name: 'Save changes'}) as HTMLButtonElement).disabled).toBe(false);
+  expect((name as HTMLInputElement).value).toBe('Retained draft');
+  expect(mutations()).toBe(before);
+});
+
+test.each([false, true])('late refresh across disconnection cannot unlock an empty snapshot (reconnect before response: %s)', async reconnectEarly => {
+  const f = fixture(); const view = render(<Configuration connected={true} workspace={workspace} />); await open();
+  change('Name', 'Draft'); change('Instructions', 'Keep');
+  const original = f.fetcher.getMockImplementation()!;
+  let release!: () => void;
+  const pending = new Promise<void>(resolve => { release = resolve; });
+  f.fetcher.mockImplementation(async (path, init) => { await pending; return original(path, init); });
+  fireEvent.click(screen.getByRole('button', {name: 'Refresh configuration'}));
+  view.rerender(<Configuration connected={false} workspace={workspace} />);
+  if (reconnectEarly) view.rerender(<Configuration connected={true} workspace={workspace} />);
+  await act(async () => { release(); await pending; });
+  if (!reconnectEarly) view.rerender(<Configuration connected={true} workspace={workspace} />);
+  expect(screen.getByText(/saved values may be stale/)).toBeTruthy();
+  expect(screen.getByText('No saved skills yet.')).toBeTruthy();
+  fireEvent.submit(screen.getByLabelText('Name').closest('form')!);
+  expect(f.fetcher.mock.calls.every(([, init]) => init.method === 'GET')).toBe(true);
+  expect((screen.getByRole('button', {name: 'Create Skill'}) as HTMLButtonElement).disabled).toBe(true);
+  f.fetcher.mockImplementation(original);
+  fireEvent.click(screen.getByRole('button', {name: 'Refresh configuration'})); await screen.findByText('Showing saved configuration.');
+  expect((screen.getByRole('button', {name: 'Create Skill'}) as HTMLButtonElement).disabled).toBe(false);
+});
+
+test('save response spanning disconnection keeps the draft and requires refresh plus inspection', async () => {
+  const f = fixture(); const view = render(<Configuration connected={true} workspace={workspace} />); await open();
+  change('Name', 'Uncertain'); change('Instructions', 'Retain me');
+  const original = f.fetcher.getMockImplementation()!;
+  let release!: () => void;
+  const pending = new Promise<void>(resolve => { release = resolve; });
+  f.fetcher.mockImplementation(async (path, init) => {
+    const result = await original(path, init);
+    if (init.method !== 'GET') await pending;
+    return result;
+  });
+  fireEvent.click(screen.getByRole('button', {name: 'Create Skill'}));
+  view.rerender(<Configuration connected={false} workspace={workspace} />);
+  view.rerender(<Configuration connected={true} workspace={workspace} />);
+  await act(async () => { release(); await pending; });
+  expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('Uncertain');
+  expect(screen.queryByText(/Skill saved · ID/)).toBeNull();
+  f.fetcher.mockImplementation(original);
+  fireEvent.click(screen.getByRole('button', {name: 'Refresh configuration'})); await screen.findByText('Showing saved configuration.');
+  expect((screen.getByRole('button', {name: 'Create Skill'}) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(screen.getByRole('button', {name: 'I inspected saved configuration'}));
+  expect((screen.getByRole('button', {name: 'Create Skill'}) as HTMLButtonElement).disabled).toBe(false);
+  expect(f.fetcher.mock.calls.filter(([, init]) => init.method !== 'GET')).toHaveLength(1);
+});

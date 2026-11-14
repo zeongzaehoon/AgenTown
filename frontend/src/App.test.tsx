@@ -1206,3 +1206,32 @@ test.each(['Skill', 'Hook', 'Loop'] as const)('Company %s preview dismissal pres
   expect(fetcher.mock.calls.some(([path]) => /\/(execute|start|stop)$/.test(path))).toBe(false);
   expect(fetcher.mock.calls.filter(([path, options]) => path.startsWith('/api/config/') && options?.method !== 'GET')).toHaveLength(0);
 });
+
+test('Configuration retains an empty snapshot and draft through workspace recovery until explicitly refreshed', async () => {
+  vi.spyOn(window, 'setInterval').mockImplementation(() => 0);
+  const f = fixture(); render(<App />); await connected();
+  fireEvent.click(screen.getByRole('button', {name: 'Open configuration'}));
+  await screen.findByText('Showing saved configuration.');
+  const panel = document.querySelector('#configuration-panel') as HTMLElement;
+  const name = within(panel).getByLabelText('Name');
+  fireEvent.change(name, {target: {value: 'Retained Skill'}});
+  fireEvent.change(within(panel).getByLabelText('Instructions'), {target: {value: 'Retained instructions'}});
+  name.focus();
+  const fetcher = vi.mocked(fetch);
+  const mutations = () => fetcher.mock.calls.filter(([path, init]) => String(path).startsWith('/api/config/v1/') && init?.method !== 'GET').length;
+  const before = mutations();
+  f.disconnect(); refresh();
+  await waitFor(() => expect(document.querySelector('#connection')!.textContent).toContain('Disconnected'));
+  expect(document.activeElement).toBe(name);
+  expect(within(panel).getByText('No saved skills yet.')).toBeTruthy();
+  fireEvent.submit(name.closest('form')!);
+  f.reconnect(); refresh(); await connected();
+  expect(within(panel).getByText(/saved values may be stale/)).toBeTruthy();
+  expect((within(panel).getByRole('button', {name: 'Create Skill'}) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.submit(name.closest('form')!); expect(mutations()).toBe(before);
+  fireEvent.click(within(panel).getByRole('button', {name: 'Refresh configuration'}));
+  await within(panel).findByText('Showing saved configuration.');
+  expect((name as HTMLInputElement).value).toBe('Retained Skill');
+  expect((within(panel).getByRole('button', {name: 'Create Skill'}) as HTMLButtonElement).disabled).toBe(false);
+  expect(mutations()).toBe(before);
+});
