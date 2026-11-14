@@ -231,6 +231,19 @@ function Setup({workspaceConnected, openClient, active}: {active: boolean; works
   const [feedback, setFeedback] = useState('');
   const [copying, setCopying] = useState(false);
   const heading = useRef<HTMLHeadingElement | null>(null);
+  const setupContent = useRef<HTMLDivElement | null>(null);
+  const refreshFocus = useRef<HTMLElement | null>(null);
+  const [focusNotice, setFocusNotice] = useState('');
+  // Capture focus at acceptance, so moving elsewhere during the request wins.
+  // Recover only after React has actually removed that element.
+  useLayoutEffect(() => {
+    const previous = refreshFocus.current;
+    refreshFocus.current = null;
+    if (active && previous && !previous.isConnected && document.activeElement === document.body) {
+      heading.current?.focus();
+      setFocusNotice('The setup control you were using is no longer available. Review the refreshed setup or choose another client.');
+    }
+  }, [data, active]);
   useLayoutEffect(() => {
     if (openClient) { setClientId(openClient.id); setFeedback(''); }
   }, [openClient]);
@@ -248,6 +261,9 @@ function Setup({workspaceConnected, openClient, active}: {active: boolean; works
       const next = await api<unknown>('/api/connections/v1', {}, request.signal);
       if (request.signal.aborted) return;
       if (!isConnectionSetup(next)) throw new Error('Unsupported setup');
+      const focused = document.activeElement;
+      refreshFocus.current = focused instanceof HTMLElement && setupContent.current?.contains(focused) ? focused : null;
+      setFocusNotice('');
       setData(next); setError(false); freshness.finish(started, true);
     } catch { if (!request.signal.aborted) { setError(true); freshness.finish(started, false); } }
     finally { if (!request.signal.aborted) setLoading(false); }
@@ -302,8 +318,9 @@ function Setup({workspaceConnected, openClient, active}: {active: boolean; works
     }
   }
   const clientName = workstationClients.find(c => c.id === clientId)?.name ?? client?.name ?? clientId;
-  return <>
+  return <div ref={setupContent}>
     <h3 tabIndex={-1} ref={heading}>{clientName} setup</h3>
+    <p role="status" aria-live="polite" aria-atomic="true">{focusNotice}</p>
     <p>Opening setup does not connect a client or execute provider work.</p>
     <p>Workspace: {workspaceConnected ? 'Connected' : 'Disconnected — loaded work may be stale'}. This does not establish an external client connection.</p>
     <button type="button" disabled={loading} onClick={() => void refresh()}>Refresh setup</button>
@@ -353,5 +370,5 @@ function Setup({workspaceConnected, openClient, active}: {active: boolean; works
       <label htmlFor="connection-instructions">Setup instructions</label>
       <textarea id="connection-instructions" readOnly rows={16} value={instructions} />
     </>}
-  </>;
+  </div>;
 }

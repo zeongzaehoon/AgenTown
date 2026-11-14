@@ -798,3 +798,86 @@ test.each(['setup', 'diagnostic', 'shared-data'])('%s responses spanning disconn
   await user.click(button);
   await waitFor(() => expect(screen.queryByText(disclosure)).toBeNull());
 });
+
+const focusRecoveryNotice = 'The setup control you were using is no longer available. Review the refreshed setup or choose another client.';
+
+test.each(['Configuration fragment', 'Platform', 'Setup instructions', 'Check local server'])(
+  'accepted delayed setup removal recovers focused %s to the workstation heading', async label => {
+    let finish!: (response: Response) => void;
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(new Response(JSON.stringify(setup)))
+      .mockImplementationOnce(() => new Promise<Response>(resolve => {finish = resolve;})));
+    const user = userEvent.setup();
+    render(<Connections workspaceConnected openClient={{id: 'codex'}} />);
+    await screen.findByLabelText('Client');
+    await user.click(screen.getByRole('button', {name: 'Refresh setup'}));
+    const focused = label === 'Check local server' ? screen.getByRole('button', {name: label}) : screen.getByLabelText(label);
+    focused.focus();
+    expect(document.activeElement).toBe(focused);
+    await act(async () => {finish(new Response(JSON.stringify({...setup, clients: [setup.clients[1]]})));});
+    expect(document.activeElement).toBe(screen.getByRole('heading', {name: 'Codex setup'}));
+    const notice = screen.getByText(focusRecoveryNotice);
+    expect(notice.getAttribute('aria-live')).toBe('polite');
+    expect((screen.getByLabelText('Client') as HTMLSelectElement).value).toBe('codex');
+    expect(screen.getByText(/Selected client setup unavailable/).textContent).toContain('Connected: Unverified');
+    expect(screen.queryByLabelText('Configuration fragment')).toBeNull();
+    await user.tab();
+    expect(document.activeElement).toBe(screen.getByRole('button', {name: 'Refresh setup'}));
+  },
+);
+
+test.each(['surviving', 'outside', 'selector', 'moved outside'])(
+  'accepted delayed setup refresh preserves %s focus', async location => {
+    let finish!: (response: Response) => void;
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(new Response(JSON.stringify(setup)))
+      .mockImplementationOnce(() => new Promise<Response>(resolve => {finish = resolve;})));
+    const user = userEvent.setup();
+    render(<><input aria-label="Outside draft" /><Connections workspaceConnected openClient={{id: 'codex'}} /></>);
+    await screen.findByLabelText('Client');
+    await user.click(screen.getByRole('button', {name: 'Refresh setup'}));
+    const outside = screen.getByLabelText('Outside draft');
+    const focused = location === 'selector' ? screen.getByLabelText('Client')
+      : location === 'outside' ? outside : screen.getByLabelText('Configuration fragment');
+    focused.focus();
+    if (location === 'moved outside') outside.focus();
+    const clients = location === 'surviving' ? [{...setup.clients[0], name: 'Renamed Codex'}] : [setup.clients[1]];
+    await act(async () => {finish(new Response(JSON.stringify({...setup, clients})));});
+    expect(document.activeElement).toBe(location === 'moved outside' ? outside : focused);
+    expect(screen.queryByText(focusRecoveryNotice)).toBeNull();
+    expect((screen.getByLabelText('Client') as HTMLSelectElement).value).toBe('codex');
+  },
+);
+
+test.each(['failure', 'malformed', 'superseded'])(
+  'rejected %s setup response never recovers focus or removes controls', async outcome => {
+    let finish!: (response: Response) => void;
+    let reject!: (error: Error) => void;
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(new Response(JSON.stringify(setup)))
+      .mockImplementationOnce(() => new Promise<Response>((resolve, fail) => {finish = resolve; reject = fail;}))
+      .mockResolvedValue(new Response(JSON.stringify(setup))));
+    const user = userEvent.setup();
+    render(<Connections workspaceConnected openClient={{id: 'codex'}} />);
+    await screen.findByLabelText('Client');
+    const refresh = screen.getByRole('button', {name: 'Refresh setup'});
+    await user.click(refresh);
+    const focused = screen.getByLabelText('Configuration fragment');
+    focused.focus();
+    if (outcome === 'superseded') {
+      // Dispatch both refreshes within one commit, before the loading button disables.
+      // Finish this request first; then supersede a new deferred request below.
+      await act(async () => {finish(new Response(JSON.stringify(setup)));});
+      const fetcher = vi.mocked(fetch);
+      fetcher.mockImplementationOnce(() => new Promise<Response>(resolve => {finish = resolve;}));
+      act(() => {refresh.click(); refresh.click();});
+      await screen.findByText('Setup service available.');
+      focused.focus();
+    }
+    await act(async () => {
+      if (outcome === 'failure') reject(new Error('offline'));
+      else finish(new Response(JSON.stringify(outcome === 'malformed' ? {...setup, clients: []} : {...setup, clients: [setup.clients[1]]})));
+    });
+    expect(document.activeElement).toBe(focused);
+    expect(screen.getByLabelText('Configuration fragment')).toBe(focused);
+    expect(screen.queryByText(focusRecoveryNotice)).toBeNull();
+    if (outcome !== 'superseded') expect(screen.getByText(/Previously loaded instructions may be stale/)).toBeTruthy();
+  },
+);

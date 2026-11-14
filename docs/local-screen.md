@@ -4132,3 +4132,47 @@ Implementation scoped validation: TypeScript checking passed; the five focused
 App interaction cases passed (92 unrelated tests skipped), including Tab from
 the recovered search control to Clear search. Existing shared dependencies were
 used temporarily; no dependency installation or browser run was performed.
+
+### Workstation setup refresh focus recovery (C112-T1)
+
+Launch with the existing `agentown-web` flow and open the Codex workstation setup.
+No credentials or live client connection are needed. For a deterministic delayed
+removal, install this temporary fixture in the browser console after setup loads:
+
+```js
+window.originalSetupFetch = window.fetch;
+window.fetch = async (input, init) => {
+  const response = await window.originalSetupFetch(input, init);
+  if (String(input) !== '/api/connections/v1') return response;
+  const setup = await response.json();
+  setup.clients = setup.clients.filter(client => client.id !== 'codex');
+  await new Promise(resolve => setTimeout(resolve, 3000));
+  return new Response(JSON.stringify(setup), {status: 200,
+    headers: {'Content-Type': 'application/json'}});
+};
+```
+
+Choose **Refresh setup**, then focus **Configuration fragment**, **Platform**,
+**Setup instructions**, or **Check local server** before the response arrives.
+When the selected setup disappears, focus moves to **Codex setup** and a polite
+status explains that the control is unavailable. The client selector retains
+Codex with an unavailable option; connection and exercise remain unverified.
+Tab from the heading reaches Refresh setup, then the client selector.
+
+Repeat while focus is on **Client** or an outside draft: focus must stay there.
+To test surviving controls, change the fixture to remove `claude-code` instead;
+Codex controls keep focus. Moving outside during the delay also preserves focus.
+Reject the refresh or return an invalid empty `clients` array: loaded guidance
+stays visible with the failure/stale disclosure and no focus recovery message.
+Restore with `window.fetch = window.originalSetupFetch` and refresh explicitly.
+
+Deterministic interaction coverage is in `frontend/src/Connections.test.tsx`,
+including delayed removals of several controls, surviving/outside/selector focus,
+invalid and failed responses, and superseded responses. Existing workstation
+navigation tests remain unchanged. Scoped command when dependencies are present:
+`npx vitest run src/Connections.test.tsx src/Workstations.test.tsx` and
+`npx tsc --noEmit` from `frontend/`. Supervisor full-profile verification passed
+32 frontend test files and 1,175 tests, TypeScript checking, the production
+build, 508 Python tests with 2 skipped, the Rust and desktop gates, and 2
+installed Chromium browser tests covering 38 interaction steps. Live LLM calls
+are skipped under the current user policy, not passed.
