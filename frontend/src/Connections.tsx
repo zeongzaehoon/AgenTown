@@ -74,7 +74,27 @@ const diagnosticRecovery = {
   busy: 'Wait for the current check to finish, then try again.',
   missing_tools: 'Repair or reinstall AgenTown, keeping your database. Restart AgenTown, then check again.',
 };
-function LocalDiagnostic() {
+// A response can refresh evidence only within the connected period in which
+// the user requested it. Reconnection never refreshes retained observations.
+function useEvidenceFreshness(connected: boolean) {
+  const [stale, setStale] = useState(!connected);
+  const connection = useRef({connected, generation: 0});
+  useLayoutEffect(() => {
+    if (connection.current.connected !== connected) {
+      connection.current = {connected, generation: connection.current.generation + 1};
+    }
+    if (!connected) setStale(true);
+  }, [connected]);
+  function begin() { return {...connection.current}; }
+  function finish(start: {connected: boolean; generation: number}, successful: boolean) {
+    setStale(!successful || !start.connected || !connection.current.connected ||
+      start.generation !== connection.current.generation);
+  }
+  return {stale, begin, finish};
+}
+
+function LocalDiagnostic({workspaceConnected}: {workspaceConnected: boolean}) {
+  const freshness = useEvidenceFreshness(workspaceConnected);
   const [pending, setPending] = useState(false);
   const [outcome, setOutcome] = useState<keyof typeof diagnosticMessages | null>(null);
   const lock = useRef(false);
@@ -83,16 +103,23 @@ function LocalDiagnostic() {
   async function check() {
     if (lock.current) return;
     lock.current = true;
+    const started = freshness.begin();
     const controller = new AbortController();
     request.current = controller;
-    setPending(true); setOutcome(null);
+    setPending(true);
     try {
       const result = await api<unknown>('/api/connections/v1/diagnostic', {}, controller.signal);
       if (!isDiagnostic(result)) throw new Error('Unsupported diagnostic response');
-      if (!controller.signal.aborted) setOutcome(result.status === 'failed' && result.code === 'missing_tools' ? 'missing_tools' : result.status);
+      if (!controller.signal.aborted) {
+        setOutcome(result.status === 'failed' && result.code === 'missing_tools' ? 'missing_tools' : result.status);
+        freshness.finish(started, result.status === 'passed');
+      }
     } catch (error) {
       // Do not expose transport errors or subprocess output in the interface.
-      if (!controller.signal.aborted) setOutcome(error instanceof RequestTimeoutError ? 'timeout' : 'failed');
+      if (!controller.signal.aborted) {
+        setOutcome(error instanceof RequestTimeoutError ? 'timeout' : 'failed');
+        freshness.finish(started, false);
+      }
     } finally {
       lock.current = false;
       if (!controller.signal.aborted) setPending(false);
@@ -100,6 +127,7 @@ function LocalDiagnostic() {
   }
   return <section aria-label="Local server diagnostic" aria-busy={pending}>
     <h3>Check local server</h3>
+    {outcome && freshness.stale && <p role="status">Previous local server diagnostic observation — potentially stale. Reconnect and explicitly check local server again to refresh this evidence.</p>}
     <p>Checks the installed server and selected database used by the setup artifact. Initializes MCP and discovers workflow tools without running them or calling a provider.</p>
     <button type="button" disabled={pending} onClick={() => void check()}>Check local server</button>
     <div role="status" aria-live="polite" aria-atomic="true">
@@ -128,7 +156,8 @@ const sharedMessages = {
   failed: 'Shared-data check failed.',
   malformed: 'Shared-data check returned an invalid response.',
 };
-function SharedDataCheck() {
+function SharedDataCheck({workspaceConnected}: {workspaceConnected: boolean}) {
+  const freshness = useEvidenceFreshness(workspaceConnected);
   const [pending, setPending] = useState(false);
   const [outcome, setOutcome] = useState<keyof typeof sharedMessages | null>(null);
   const [counts, setCounts] = useState<{employees: number; work: number} | null>(null);
@@ -138,17 +167,22 @@ function SharedDataCheck() {
   async function check() {
     if (lock.current) return;
     lock.current = true;
+    const started = freshness.begin();
     const controller = new AbortController();
     request.current = controller;
-    setPending(true); setOutcome(null); setCounts(null);
+    setPending(true);
     try {
       const result = await api<unknown>('/api/connections/v1/shared-data', {}, controller.signal);
       if (controller.signal.aborted) return;
-      if (!isSharedData(result)) { setOutcome('malformed'); return; }
+      if (!isSharedData(result)) { setOutcome('malformed'); freshness.finish(started, false); return; }
       setOutcome(result.status);
+      freshness.finish(started, result.status === 'passed');
       if (result.status === 'passed') setCounts({employees: result.employee_count, work: result.work_count});
     } catch (error) {
-      if (!controller.signal.aborted) setOutcome(error instanceof RequestTimeoutError ? 'timeout' : 'failed');
+      if (!controller.signal.aborted) {
+        setOutcome(error instanceof RequestTimeoutError ? 'timeout' : 'failed');
+        freshness.finish(started, false);
+      }
     } finally {
       lock.current = false;
       if (!controller.signal.aborted) setPending(false);
@@ -156,6 +190,7 @@ function SharedDataCheck() {
   }
   return <section aria-label="Shared employee and work access" aria-busy={pending}>
     <h3>Check shared data</h3>
+    {outcome && freshness.stale && <p role="status">Previous shared-data observation and counts — potentially stale. Reconnect and explicitly check shared data again to refresh this evidence.</p>}
     <p>Use the installed local server and selected database to read employees and saved work. Only counts are shown. This separate check calls list_agents and list_tasks; it does not change data, inspect history, execute work, call a provider, or read client settings or credentials.</p>
     <button type="button" disabled={pending} onClick={() => void check()}>Check shared data</button>
     <div role="status" aria-live="polite" aria-atomic="true">
@@ -187,6 +222,7 @@ export function Connections({workspaceConnected, openClient}: {workspaceConnecte
 }
 
 function Setup({workspaceConnected, openClient, active}: {active: boolean; workspaceConnected: boolean; openClient?: OpenClientRequest | null}) {
+  const freshness = useEvidenceFreshness(workspaceConnected);
   const [data, setData] = useState<ConnectionSetup | null>(null);
   const [clientId, setClientId] = useState<string>(openClient?.id ?? 'codex');
   const [platformId, setPlatformId] = useState('macos');
@@ -204,6 +240,7 @@ function Setup({workspaceConnected, openClient, active}: {active: boolean; works
   const controller = useRef<AbortController | null>(null);
   const copyingLock = useRef(false);
   async function refresh() {
+    const started = freshness.begin();
     controller.current?.abort();
     const request = new AbortController(); controller.current = request;
     setLoading(true);
@@ -211,8 +248,8 @@ function Setup({workspaceConnected, openClient, active}: {active: boolean; works
       const next = await api<unknown>('/api/connections/v1', {}, request.signal);
       if (request.signal.aborted) return;
       if (!isConnectionSetup(next)) throw new Error('Unsupported setup');
-      setData(next); setError(false);
-    } catch { if (!request.signal.aborted) setError(true); }
+      setData(next); setError(false); freshness.finish(started, true);
+    } catch { if (!request.signal.aborted) { setError(true); freshness.finish(started, false); } }
     finally { if (!request.signal.aborted) setLoading(false); }
   }
   useEffect(() => { void refresh(); return () => controller.current?.abort(); }, []);
@@ -270,7 +307,8 @@ function Setup({workspaceConnected, openClient, active}: {active: boolean; works
     <p>Opening setup does not connect a client or execute provider work.</p>
     <p>Workspace: {workspaceConnected ? 'Connected' : 'Disconnected — loaded work may be stale'}. This does not establish an external client connection.</p>
     <button type="button" disabled={loading} onClick={() => void refresh()}>Refresh setup</button>
-    <p role="status" aria-live="polite" aria-atomic="true">{loading ? 'Loading setup…' : error ? `Setup service disconnected or unavailable. ${data ? 'Previously loaded instructions may be stale.' : 'No setup instructions are available.'} Check the local server and refresh setup.` : 'Setup service available.'}</p>
+    <p role="status" aria-live="polite" aria-atomic="true">{loading ? 'Loading setup…' : error ? `Setup service disconnected or unavailable. ${data ? 'Previously loaded instructions may be stale.' : 'No setup instructions are available.'} Check the local server and refresh setup.` : freshness.stale ? 'Setup service freshness unverified. Refresh setup while connected.' : 'Setup service available.'}</p>
+    {data && freshness.stale && <p role="status">Previous setup observation — instructions and installation hints may be stale. Reconnect and explicitly refresh setup to refresh this evidence.</p>}
     {data && !client && <p role="status">Selected client setup unavailable. Refresh setup to try again. Detected: Unknown. Configured: Unknown. Connected: Unverified. Exercised: Unverified.</p>}
     {!data && <p>Detected: Unknown. Configured: Unknown. Connected: Unverified. Exercised: Unverified.</p>}
     {data && <>
@@ -305,7 +343,7 @@ function Setup({workspaceConnected, openClient, active}: {active: boolean; works
         <li><h4>Inspect and verify in {client.name}</h4>
           <p className="connection-guidance">{platform.inspection}</p>
           <p>Ask the client: Using AgenTown, list employees and saved work. Inspect the selected Task and its attempt history. Do not execute work.</p>
-          <LocalDiagnostic /><SharedDataCheck />
+          <LocalDiagnostic workspaceConnected={workspaceConnected} /><SharedDataCheck workspaceConnected={workspaceConnected} />
         </li>
         <li><h4>Recover if setup fails</h4><p className="connection-guidance">{data.recovery}</p></li>
       </ol>}

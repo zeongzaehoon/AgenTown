@@ -150,6 +150,11 @@ test('clipboard denial and disconnected setup retain selection and instructions 
   expect(screen.getByText(/Workspace: Disconnected/)).toBeTruthy();
   offline = false;
   await user.click(screen.getByRole('button', {name: 'Refresh setup'}));
+  await screen.findByText('Setup service freshness unverified. Refresh setup while connected.');
+  expect(screen.getByText(/Previous setup observation/)).toBeTruthy();
+  view.rerender(<Connections workspaceConnected />);
+  expect(screen.getByText(/Previous setup observation/)).toBeTruthy();
+  await user.click(screen.getByRole('button', {name: 'Refresh setup'}));
   await waitFor(() => expect(screen.getByText('Setup service available.')).toBeTruthy());
   expect(screen.getByText('Client readiness: Unknown')).toBeTruthy();
 });
@@ -702,4 +707,94 @@ test.each(['denied', 'unavailable'])('ChatGPT clipboard %s preserves selectable 
   await user.click(screen.getByRole('button', {name: 'Copy setup instructions'}));
   expect(copy).toHaveBeenLastCalledWith(field.value);
   await screen.findByText('Setup instructions copied. Client readiness remains unknown.');
+});
+
+test('connection recovery keeps independent previous observations until explicit successful reruns', async () => {
+  let fail = false;
+  const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+    if (fail) throw new Error('offline');
+    const path = String(input);
+    return new Response(JSON.stringify(path.endsWith('/diagnostic')
+      ? {schema_version: 1, status: 'passed', code: 'ok', message: 'ok', recovery: ''}
+      : path.endsWith('/shared-data')
+        ? {schema_version: 1, status: 'passed', code: 'ok', message: 'ok', recovery: '', employee_count: 2, work_count: 3}
+        : recoverySetup));
+  });
+  vi.stubGlobal('fetch', fetcher);
+  const user = userEvent.setup();
+  const view = render(<Connections workspaceConnected openClient={{id: 'codex'}} />);
+  await screen.findByLabelText('Client');
+  await user.selectOptions(screen.getByLabelText('Platform'), 'windows');
+  await user.click(screen.getByRole('button', {name: 'Check local server'}));
+  await screen.findByText('Local server diagnostic passed');
+  await user.click(screen.getByRole('button', {name: 'Check shared data'}));
+  await screen.findByText('Employees: 2. Saved work: 3.');
+  const fragment = (screen.getByLabelText('Configuration fragment') as HTMLTextAreaElement).value;
+  const refresh = screen.getByRole('button', {name: 'Refresh setup'});
+  refresh.focus();
+  const calls = fetcher.mock.calls.length;
+  view.rerender(<Connections workspaceConnected={false} />);
+  await screen.findByText(/Previous setup observation/);
+  expect(screen.getByText(/Previous local server diagnostic observation/)).toBeTruthy();
+  expect(screen.getByText(/Previous shared-data observation and counts/)).toBeTruthy();
+  view.rerender(<Connections workspaceConnected />);
+  expect(fetcher.mock.calls.length).toBe(calls);
+  expect(document.activeElement).toBe(refresh);
+  expect((screen.getByLabelText('Platform') as HTMLSelectElement).value).toBe('windows');
+  expect((screen.getByLabelText('Configuration fragment') as HTMLTextAreaElement).value).toBe(fragment);
+  const clipboard = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue();
+  await user.click(screen.getByRole('button', {name: 'Copy configuration'}));
+  expect(clipboard).toHaveBeenLastCalledWith(fragment);
+  fail = true;
+  await user.click(refresh);
+  await screen.findByText(/Setup service disconnected/);
+  expect(screen.getByText(/Previous setup observation/)).toBeTruthy();
+  fail = false;
+  await user.click(refresh);
+  await waitFor(() => expect(screen.queryByText(/Previous setup observation/)).toBeNull());
+  expect(screen.getByText(/Previous local server diagnostic observation/)).toBeTruthy();
+  expect(screen.getByText(/Previous shared-data observation and counts/)).toBeTruthy();
+  fail = true;
+  await user.click(screen.getByRole('button', {name: 'Check local server'}));
+  await screen.findByText('Local server diagnostic failed.');
+  expect(screen.getByText(/Previous local server diagnostic observation/)).toBeTruthy();
+  fail = false;
+  await user.click(screen.getByRole('button', {name: 'Check local server'}));
+  await waitFor(() => expect(screen.queryByText(/Previous local server diagnostic observation/)).toBeNull());
+  expect(screen.getByText(/Previous shared-data observation and counts/)).toBeTruthy();
+  await user.click(screen.getByRole('button', {name: 'Check shared data'}));
+  await waitFor(() => expect(screen.queryByText(/Previous shared-data observation and counts/)).toBeNull());
+  expect(fetcher.mock.calls.every(([path]) => String(path).startsWith('/api/connections/v1'))).toBe(true);
+});
+
+test.each(['setup', 'diagnostic', 'shared-data'])('%s responses spanning disconnection remain previous observations', async surface => {
+  let resolve: ((response: Response) => void) | undefined;
+  let defer = false;
+  const result = (path: string) => path.endsWith('/diagnostic')
+    ? {schema_version: 1, status: 'passed', code: 'ok', message: 'ok', recovery: ''}
+    : path.endsWith('/shared-data')
+      ? {schema_version: 1, status: 'passed', code: 'ok', message: 'ok', recovery: '', employee_count: 4, work_count: 5}
+      : setup;
+  const fetcher = vi.fn((input: RequestInfo | URL) => {
+    const path = String(input);
+    if (defer) return new Promise<Response>(done => { resolve = done; });
+    return Promise.resolve(new Response(JSON.stringify(result(path))));
+  });
+  vi.stubGlobal('fetch', fetcher);
+  const user = userEvent.setup();
+  const view = render(<Connections workspaceConnected openClient={{id: 'codex'}} />);
+  await screen.findByLabelText('Client');
+  defer = true;
+  const button = screen.getByRole('button', {name: surface === 'setup' ? 'Refresh setup' : surface === 'diagnostic' ? 'Check local server' : 'Check shared data'});
+  await user.click(button);
+  const calls = fetcher.mock.calls.length;
+  view.rerender(<Connections workspaceConnected={false} />);
+  view.rerender(<Connections workspaceConnected />);
+  expect(fetcher.mock.calls.length).toBe(calls);
+  await act(async () => { resolve!(new Response(JSON.stringify(result(surface === 'setup' ? '/api/connections/v1' : `/api/connections/v1/${surface}`)))); });
+  const disclosure = surface === 'setup' ? /Previous setup observation/ : surface === 'diagnostic' ? /Previous local server diagnostic observation/ : /Previous shared-data observation and counts/;
+  expect(await screen.findByText(disclosure)).toBeTruthy();
+  defer = false;
+  await user.click(button);
+  await waitFor(() => expect(screen.queryByText(disclosure)).toBeNull());
 });

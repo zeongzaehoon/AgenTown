@@ -3603,3 +3603,39 @@ verification passed all 32 frontend test files and 1,078 tests, the production
 build, 505 Python tests with 2 skipped, and the harness Rust and operational
 suites. The selected frontend profile deferred installed-browser and installation/
 process-recovery gates. Live provider validation is skipped, not passed.
+
+### Connections evidence after workspace recovery (C99-T1)
+
+Run `agentown-web --database PATH --port 8765`, open
+<http://127.0.0.1:8765> → Company → a client workstation → Connections.
+Use an existing product database; credentials are unnecessary. Select a client
+and platform, load setup, then explicitly choose **Check local server** and
+**Check shared data**. These local checks do not execute work or call providers.
+
+Stop the server and wait for workspace disconnection. Retained setup instructions
+and installation hints, diagnostic outcomes, and shared-data outcomes/counts
+show separate **Previous … observation** warnings. Restart the same server and
+database. Reconnection alone must retain all warnings, selected client/platform,
+readable and copyable configuration, and keyboard focus. External configuration
+remains unknown and connection/exercise remain unverified.
+
+Explicitly **Refresh setup**: success clears only the setup warning. Each check
+requires its own successful explicit rerun to clear its warning. A failed recovery
+keeps the warning. With deferred test responses, disconnect/reconnect during each
+request: eventual success must still show previous evidence. Requests started
+while disconnected also cannot establish current evidence. Recovery never
+starts checks or execution automatically.
+
+Focused checks with frontend dependencies available:
+
+```sh
+cd frontend
+npx tsc --noEmit
+npx vitest run src/Connections.test.tsx src/Workstations.test.tsx
+```
+
+Supervisor verification passed all 32 frontend test files and 1,082 tests, the
+production build, 505 Python tests with 2 skipped, and the harness Rust and
+operational suites. The selected frontend profile deferred installed-browser and
+installation/process-recovery gates. Live provider validation is skipped, not
+passed.
