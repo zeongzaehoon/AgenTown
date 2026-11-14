@@ -248,3 +248,90 @@ test.each(['held', 'failed', 'disabled', 'changed', 'late configuration', 'late 
   await user.keyboard('{Enter}');
   expect(props.submit).toHaveBeenCalledTimes(1);
 });
+
+// Resolve configuration explicitly while keeping user-event and waitFor timers real.
+test.each(['removed', 'disabled', 'Skill disabled', 'Skill removed', 'unmatched', 'unchanged', 'obsolete'].flatMap(change => ['launch', 'native blur', 'selector', 'outside'].map(focus => ({change, focus}))))(
+  'delayed Hook eligibility refresh: $change with $focus focus', async ({change, focus}) => {
+    let poll: (() => void) | undefined;
+    const realInterval = globalThis.setInterval;
+    vi.spyOn(globalThis, 'setInterval').mockImplementation((callback, delay, ...args) => {
+      if (delay === 800) { poll = callback as () => void; return 1 as unknown as ReturnType<typeof setInterval>; }
+      return realInterval(callback, delay, ...args);
+    });
+    const props = setup();
+    const original = globalThis.fetch;
+    let hold = false;
+    const pending: Array<{path: string; resolve: (response: Response) => void}> = [];
+    const requests = vi.fn(async (path: string, options?: RequestInit) => {
+      if (hold) return new Promise<Response>(resolve => pending.push({path, resolve}));
+      return original(path, options);
+    });
+    vi.stubGlobal('fetch', requests);
+    const user = userEvent.setup();
+    const view = render(<><button>Outside availability</button><HookExecution {...props} /></>);
+    await screen.findByRole('option', {name: /Follow up · h/});
+    const selector = screen.getByLabelText('Employee Hook');
+    await user.selectOptions(selector, 'h');
+    const launch = screen.getByRole('button', {name: 'Preview Hook with saved work'}) as HTMLButtonElement;
+    const outside = screen.getByRole('button', {name: 'Outside availability'});
+    expect(launch.disabled).toBe(false);
+    launch.focus();
+    hold = true;
+    act(() => poll?.());
+    expect(pending.length).toBe(2);
+    // Move during the request: response-time focus must win over request-time focus.
+    const target = focus === 'selector' ? selector : focus === 'outside' ? outside : launch;
+    target.focus();
+    const nativeBlur = vi.fn();
+    if (focus === 'native blur') {
+      // Simulate native focus loss at React's disabled attribute commit.
+      // jsdom ignores blur() once the button is disabled, so blur just before the write.
+      const setAttribute = launch.setAttribute.bind(launch);
+      vi.spyOn(launch, 'setAttribute').mockImplementation((name, value) => {
+        if (name === 'disabled' && document.activeElement === launch) {
+          launch.blur();
+          nativeBlur();
+          expect(document.activeElement).toBe(document.body);
+        }
+        setAttribute(name, value);
+      });
+    }
+    if (change === 'obsolete') {
+      view.rerender(<><button>Outside availability</button><HookExecution {...props} connected={false} /></>);
+      outside.focus();
+    }
+    await act(async () => {
+      for (const request of pending.splice(0)) {
+        const body = await (await original(request.path)).json();
+        if (request.path.endsWith('/hooks')) {
+          if (change === 'removed' || change === 'obsolete') body.hooks = [];
+          if (change === 'disabled') body.hooks = body.hooks.map((record: object) => ({...record, enabled: false}));
+          if (change === 'unmatched') body.hooks = body.hooks.map((record: object) => ({...record, target_id: 'other'}));
+        } else {
+          if (change === 'Skill removed') body.skills = [];
+          if (change === 'Skill disabled') body.skills = body.skills.map((record: object) => ({...record, enabled: false}));
+        }
+        request.resolve(new Response(JSON.stringify(body)));
+      }
+    });
+    if (change === 'obsolete') {
+      expect(document.activeElement).toBe(outside);
+      expect(screen.getByRole('status').textContent).toMatch(/Disconnected/);
+    } else if (change === 'unchanged') {
+      expect(launch.disabled).toBe(false);
+      expect(document.activeElement).toBe(target);
+      expect(screen.getByRole('status').textContent).not.toMatch(/no longer available/);
+    } else {
+      expect(launch.disabled).toBe(true);
+      if (focus === 'native blur') expect(nativeBlur).toHaveBeenCalledTimes(1);
+      expect(document.activeElement).toBe(focus === 'launch' || focus === 'native blur' ? selector : target);
+      if (focus === 'launch' || focus === 'native blur') {
+        expect(screen.getByRole('status').textContent).toMatch(/no longer available.*No execution was requested/);
+        expect(screen.getByRole('status').getAttribute('aria-live')).toBe('polite');
+      }
+    }
+    expect(screen.queryByRole('region', {name: 'Hook execution preview'})).toBeNull();
+    expect(requests.mock.calls.every(([path]) => path.endsWith('/skills') || path.endsWith('/hooks'))).toBe(true);
+    expect(props.submit).not.toHaveBeenCalled();
+  }
+);

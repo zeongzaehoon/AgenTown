@@ -1,5 +1,5 @@
 import { validSkillPreview } from './execution-preview';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { api, type SkillPreview, type Work, type Workspace } from './api';
 import { configurationRequest, savedSkills, type SkillRecord } from './configuration-api';
 
@@ -25,6 +25,20 @@ export function SkillExecution({work, workspace, connected, draft, disabled, sub
   const lock = useRef(false);
   const button = useRef<HTMLButtonElement>(null);
   const region = useRef<HTMLElement>(null);
+  const selector = useRef<HTMLSelectElement>(null);
+  const refreshFocusedButton = useRef(false);
+  // Inspect focus at acceptance, then recover only after React commits disabled state.
+  useLayoutEffect(() => {
+    const recover = refreshFocusedButton.current;
+    refreshFocusedButton.current = false;
+    const active = document.activeElement;
+    const browserBlurredDisabledButton = active === document.body || active === null;
+    if (recover && (active === button.current || browserBlurredDisabledButton) && button.current?.disabled) {
+      if (selector.current && !selector.current.disabled) selector.current.focus();
+      else region.current?.focus();
+      setMessage('The selected Skill is no longer available for preview after configuration refreshed. Choose an eligible Skill before previewing. No execution was requested.');
+    }
+  });
   function recoverFocus() { if (button.current && !button.current.disabled) button.current.focus(); else region.current?.focus(); }
   const previewFocused = useRef(false);
   const snapshot = JSON.stringify([work, workspace.configuration, workspace.provider, workspace.model, draft, selected, skills, connected, generation, available, disabled]);
@@ -53,7 +67,7 @@ export function SkillExecution({work, workspace, connected, draft, disabled, sub
       try {
         const response = await configurationRequest<unknown>('skills', '', undefined, controller.signal);
         const records = savedSkills(response);
-        if (live && connection.current.generation === generation) { setSkills(records); setSelected(id => records.some(s => s.id === id) ? id : ''); setFreshGeneration(generation); setConfigurationError(false); setLoaded(true); setMessage('Configuration refreshed. Preview again before executing.'); }
+        if (live && connection.current.generation === generation) { refreshFocusedButton.current = document.activeElement === button.current && !button.current?.disabled; setSkills(records); setSelected(id => records.some(s => s.id === id) ? id : ''); setFreshGeneration(generation); setConfigurationError(false); setLoaded(true); setMessage('Configuration refreshed. Preview again before executing.'); }
       } catch { if (live && connection.current.generation === generation) { ++revision.current; setConfigurationError(true); setFreshGeneration(null); } }
       finally { pending = false; }
     }
@@ -88,7 +102,7 @@ export function SkillExecution({work, workspace, connected, draft, disabled, sub
     <h4>Apply a Skill</h4>
     <p>Optional. Enabled is a configuration setting, not execution. Preview combines the saved work with one Skill; it does not call a provider. Ordinary execution below uses no Skill.</p>
     <label htmlFor="execution-skill">Enabled Skill</label>
-    <select id="execution-skill" value={selected} disabled={busy || disabled} onChange={event => setSelected(event.target.value)}>
+    <select ref={selector} id="execution-skill" value={selected} disabled={busy || disabled} onChange={event => setSelected(event.target.value)}>
       <option value="">Choose a Skill</option>
       {skills.filter(s => s.enabled).map(s => <option key={s.id} value={s.id}>{s.name} · {s.id}</option>)}
     </select>

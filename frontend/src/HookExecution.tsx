@@ -1,5 +1,5 @@
 import { validHookPreview } from './execution-preview';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { api, type HookPreview, type Work, type Workspace } from './api';
 import { configurationRequest, savedSkills, savedHooks, type HookRecord, type SkillRecord } from './configuration-api';
 
@@ -27,6 +27,20 @@ export function HookExecution({work, workspace, connected, draft, disabled, subm
   const lock = useRef(false);
   const button = useRef<HTMLButtonElement>(null);
   const region = useRef<HTMLElement>(null);
+  const selector = useRef<HTMLSelectElement>(null);
+  const refreshFocusedButton = useRef(false);
+  // Inspect focus at acceptance, then recover only after React commits disabled state.
+  useLayoutEffect(() => {
+    const recover = refreshFocusedButton.current;
+    refreshFocusedButton.current = false;
+    const active = document.activeElement;
+    const browserBlurredDisabledButton = active === document.body || active === null;
+    if (recover && (active === button.current || browserBlurredDisabledButton) && button.current?.disabled) {
+      if (selector.current && !selector.current.disabled) selector.current.focus();
+      else region.current?.focus();
+      setMessage('The selected Hook is no longer available for preview after configuration refreshed. Choose an eligible Hook before previewing. No execution was requested.');
+    }
+  });
   function recoverFocus() { if (button.current && !button.current.disabled) button.current.focus(); else region.current?.focus(); }
   const previewFocused = useRef(false);
   const snapshot = JSON.stringify([work, workspace.configuration, workspace.provider, workspace.model, draft, selected, hooks, skills, connected, generation, available, disabled]);
@@ -56,7 +70,7 @@ export function HookExecution({work, workspace, connected, draft, disabled, subm
         const [value, records] = await Promise.all([configurationRequest<unknown>('skills', '', undefined, controller.signal), configurationRequest<unknown>('hooks', '', undefined, controller.signal)]);
         const skills = savedSkills(value);
         const hooks = savedHooks(records);
-        if (live && connection.current.generation === generation) { setSkills(skills); setHooks(hooks); setSelected(id => hooks.some(h => h.id === id) ? id : ''); setFreshGeneration(generation); setConfigurationError(false); setLoaded(true); setMessage('Configuration refreshed. Preview again before executing.'); }
+        if (live && connection.current.generation === generation) { refreshFocusedButton.current = document.activeElement === button.current && !button.current?.disabled; setSkills(skills); setHooks(hooks); setSelected(id => hooks.some(h => h.id === id) ? id : ''); setFreshGeneration(generation); setConfigurationError(false); setLoaded(true); setMessage('Configuration refreshed. Preview again before executing.'); }
       } catch { if (live && connection.current.generation === generation) { ++revision.current; setConfigurationError(true); setFreshGeneration(null); } }
       finally { pending = false; }
     }
@@ -94,7 +108,7 @@ export function HookExecution({work, workspace, connected, draft, disabled, subm
     <h4>Apply an employee Hook</h4>
     <p>Optional. Hooks never dispatch automatically. Preview uses the latest terminal attempt and saved work; no provider is called. Consent creates only one attempt, with no Loop activation.</p>
     <label htmlFor="execution-hook">Employee Hook</label>
-    <select id="execution-hook" value={selected} disabled={busy || disabled} onChange={event => setSelected(event.target.value)}>
+    <select ref={selector} id="execution-hook" value={selected} disabled={busy || disabled} onChange={event => setSelected(event.target.value)}>
       <option value="">Choose a Hook</option>
       {hooks.map(h => <option key={h.id} value={h.id} disabled={!eligible(h)}>{h.name} · {h.id} · {!h.enabled ? 'Disabled' : !skills.some(s => s.id === h.skill_id && s.enabled) ? 'Skill unavailable or disabled' : !eligible(h) ? 'Unmatched' : h.event}</option>)}
     </select>

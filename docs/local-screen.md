@@ -4309,3 +4309,70 @@ tests, TypeScript checking, the production build, and 505 Python tests with 2
 skipped. Installed-browser and installation/process-recovery gates were deferred
 by this profile. Live provider tests are skipped, not passed, under the current
 user policy.
+
+## Skill and employee Hook eligibility focus (C116-T1)
+
+Launch the documented local product with
+`agentown-web --database /tmp/configuration-workspace.sqlite3 --port 8765` and
+open http://127.0.0.1:8765. Use existing saved work and an enabled Skill. For
+Hooks, select existing work with a terminal attempt and an enabled employee
+Hook matching its assignee and event, whose required Skill is enabled. No new
+provider configuration or provider call is needed. Do not open a preview or
+press execution consent during this check.
+
+For a reversible delayed configuration read, install this browser-console
+fixture after selecting saved work (reload removes it). It changes read responses
+only; it does not save configuration. Set `id` to the selected Skill or Hook ID:
+
+```js
+window.eligibilityFixture = {kind: 'skills', id: 'SELECTED_ID', mode: 'unchanged', delay: 3000};
+const eligibilityFetch = window.fetch.bind(window);
+window.fetch = async (input, init) => {
+  const response = await eligibilityFetch(input, init);
+  const path = String(input);
+  if (init?.method && init.method !== 'GET') return response;
+  const fixture = {...window.eligibilityFixture};
+  if (!path.endsWith('/api/config/v1/' + fixture.kind)) return response;
+  const body = await response.clone().json();
+  await new Promise(resolve => setTimeout(resolve, fixture.delay));
+  body[fixture.kind] = body[fixture.kind].flatMap(record => {
+    if (record.id !== fixture.id) return [record];
+    if (fixture.mode === 'removed') return [];
+    if (fixture.mode === 'disabled') return [{...record, enabled: false}];
+    if (fixture.mode === 'unmatched') return [{...record, target_id: 'unmatched-fixture'}];
+    return [record];
+  });
+  return new Response(JSON.stringify(body), {headers: {'Content-Type': 'application/json'}});
+};
+```
+
+Choose the eligible entry, set `mode` to `removed` or `disabled`, and Tab to
+**Preview Skill with saved work** or **Preview Hook with saved work** before the
+next delayed response arrives. The accepted response disables that button;
+`document.activeElement` becomes **Enabled Skill** or **Employee Hook**. Its
+existing polite status says the selected Skill/Hook is no longer available for
+preview, asks for an eligible choice, and states that no execution was requested.
+The labelled section is the fallback if its selector cannot be used. For a Hook,
+repeat with `kind: 'skills'` and its required Skill ID, and with `kind: 'hooks'`,
+the Hook ID and `mode: 'unmatched'`.
+
+Reload between cases to restore original reads. Repeat while focus stays on the
+selector or moves outside this section during the delay: focus stays there.
+`mode: 'unchanged'` preserves the focused, enabled launch button. Disconnect
+before a held response resolves: obsolete responses must preserve outside focus
+and the disconnected status. Inspect network activity: only configuration reads,
+no preview request and no execution submission should occur.
+
+Deterministic coverage in `SkillExecution.test.tsx` and `HookExecution.test.tsx`
+uses “delayed … eligibility refresh” cases with explicitly released responses.
+These assert focus, polite availability feedback, unchanged and obsolete
+responses, outside/selector preservation, and zero preview/execution submissions.
+The native-blur regression intercepts React's `setAttribute('disabled', …)`
+commit, blurs the focused launch control immediately before the attribute write
+(jsdom ignores `blur()` after disabling), and asserts body focus before checking
+selector recovery and polite status. This proves that focus loss actually occurred.
+This exercises browsers that drop focus when a focused button becomes disabled.
+Supervisor frontend-profile verification passed 32 frontend files and 1,264
+tests, TypeScript checking, the production build, and 505 Python tests with 2
+skipped. Fresh browser evidence was deferred by this scoped verification
+profile. Live provider calls are skipped, not passed, under the user policy.
