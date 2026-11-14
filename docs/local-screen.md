@@ -4542,3 +4542,52 @@ endpoints. Supervisor frontend verification passed 1,316 frontend tests,
 TypeScript checking, the production build, and 505 Python tests with 2 skipped.
 Installed-browser and recovery gates were deferred by this profile. Live
 provider calls are skipped, not passed.
+
+
+## Open other recorded work by employee (C120-T1)
+
+Launch `agentown-web --database /absolute/path/product.sqlite` with saved
+employee assignments, or open the packaged app using its saved workspace.
+No provider configuration or live call is needed to browse records.
+
+1. Prepare an employee A with a blocked request shared with employee B, a
+   cancelled request, and a request whose latest finished attempt has no output,
+   error or classified outcome (even if an older attempt failed). A's **Other
+   recorded work** count should be 3 and B's count 1. A blocked request whose
+   latest attempt has a result belongs to results and is excluded from this count.
+2. Keep a different request selected, enter unsaved employee/work drafts and a
+   conflicting search. Tab to the employee card's **Other recorded work** action
+   and press Enter or Space. Focus moves to **Work & results**, search clears,
+   and Current outcome selects **Other recorded work**. Tab reaches search next.
+3. Observe A's three matching request IDs (shared blocked, cancelled and latest
+   result-less attempt), or B's one shared ID, matching each card count. Duplicate
+   assignee IDs must not duplicate a request. Drafts and selected detail remain;
+   excluded detail explicitly says it is outside these matches. The outcome
+   selector can also select this category directly and combine it with search.
+4. Disconnect and refresh: retained assignments remain browsable with stale-data
+   notices. An idle employee's zero-count action opens an explicit empty list.
+   Reconnect after those latest attempts change to failures and refresh: the
+   count and matching list become zero without clearing the chosen filters or
+   selected detail. Do not execute work solely to exercise this navigation.
+5. Observe network traffic: navigation issues no save, assignment, retry or
+   execution request; it only updates the local view.
+
+Runnable deterministic coverage:
+
+```sh
+cd frontend
+npm test -- src/CompanyOverview.test.tsx src/App.test.tsx
+```
+
+The “action forwards typed identity” component cases include `other` with
+Enter/Space and zero stale matches. The “employee other navigation retains
+detail and drafts” App cases assert the exact matching IDs `shared`, `own`,
+`recorded` for A and `shared` for B, count agreement, latest-attempt precedence,
+drafts/detail, keyboard focus, disconnected browsing, empty/refreshed outcomes
+and state-only requests. The outcome-selector test also selects `other` with
+search. These are deterministic fixtures, not live execution evidence.
+
+Supervisor frontend verification passed 1,319 frontend tests, TypeScript
+checking, the production build, and 505 Python tests with 2 skipped.
+Installed-browser and recovery gates were deferred by this profile. Live
+provider validation remains skipped, not passed.

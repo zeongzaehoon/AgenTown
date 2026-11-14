@@ -14,11 +14,12 @@ const categories: {key: WorkOutcome; label: string}[] = [
   {key: 'other', label: 'Other recorded work'},
 ];
 
-export type EmployeeOutcomeNavigation = {employeeId: string; outcome: 'pending' | 'active' | 'results'};
+export type EmployeeOutcomeNavigation = {employeeId: string; outcome: 'pending' | 'active' | 'results' | 'other'};
 const employeeOutcomeActions: {outcome: EmployeeOutcomeNavigation['outcome']; label: string}[] = [
   {outcome: 'pending', label: 'View pending work'},
   {outcome: 'active', label: 'View active work'},
   {outcome: 'results', label: 'View unverified results'},
+  {outcome: 'other', label: 'Other recorded work'},
 ];
 
 export function CompanyOverview({workspace, connected, error, onOpenWork, selectedEmployee = '', onSelectEmployee, onOpenHook, onOpenLoop, onOpenSkill, onOpenClient, onOpenTeam, onSelectTeamMember, onOpenSession, onOpenHookWork, onOpenSkillWork, onOpenFailedWork, onOpenEmployeeOutcome}: {

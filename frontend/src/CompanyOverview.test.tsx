@@ -256,6 +256,7 @@ test('failed-work action remains available for an empty stale workload and forwa
 
 test.each([
   ['pending', 'View pending work'], ['active', 'View active work'], ['results', 'View unverified results'],
+  ['other', 'Other recorded work'],
 ] as const)('%s action forwards typed identity and remains browsable with zero stale matches', async (outcome, label) => {
   const open = vi.fn();
   const user = userEvent.setup();

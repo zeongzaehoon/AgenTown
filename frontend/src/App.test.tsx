@@ -811,7 +811,7 @@ test('outcomes combine with literal search, include other states in All and rese
   fireEvent.change(searchInput(), {target: {value: 'PLAN'}});
   screen.getByRole('button', {name: 'Clear search'}).focus();
   await user.tab(); expect(document.activeElement).toBe(outcomeFilter());
-  for (const [value, ids] of [['pending', ['pending']], ['active', ['active']], ['results', []], ['failed', ['failed']]] as const) {
+  for (const [value, ids] of [['pending', ['pending']], ['active', ['active']], ['results', []], ['failed', ['failed']], ['other', ['other']]] as const) {
     await user.selectOptions(outcomeFilter(), value);
     expect(matchingIds()).toEqual(ids);
     expect(document.querySelector('#search-count')!.textContent).toBe(`${ids.length} of 5 saved requests match.`);
@@ -1420,17 +1420,24 @@ test.each([
   ['pending', 'View pending work', '{Enter}'], ['pending', 'View pending work', ' '],
   ['active', 'View active work', '{Enter}'], ['active', 'View active work', ' '],
   ['results', 'View unverified results', '{Enter}'], ['results', 'View unverified results', ' '],
+  ['other', 'Other recorded work', '{Enter}'], ['other', 'Other recorded work', ' '],
 ] as const)('employee %s navigation retains detail and drafts, clears conflicts and browses stale/empty matches (%s, %s)', async (outcome, label, key) => {
   const active = {id: 'caller', state: 'active' as const, outcome: null, participants: ['a']};
   const result = {id: 'result', state: 'finished' as const, outcome: 'reported_success', output: '', participants: ['a']};
   const failure = {id: 'failure', state: 'finished' as const, outcome: 'failure', error: 'timeout', participants: ['a']};
-  const attempts = outcome === 'pending' ? [] : outcome === 'active' ? [result, active] : [failure, result];
+  const attempts = outcome === 'pending' || outcome === 'other' ? [] : outcome === 'active' ? [result, active] : [failure, result];
   const f = fixture({...initial(), employees: [{id: 'a', name: 'Alex'}, {id: 'b', name: 'Alex'}, {id: 'idle', name: 'Idle'}], work: [
-    {id: 'selected', input: 'Keep selected detail', status: 'blocked', assignees: ['a'], attempts: []},
-    {id: 'shared', input: 'Shared matching work', status: 'pending', assignees: ['a', 'a', 'b'], attempts},
-    {id: 'own', input: 'Own matching work', status: 'pending', assignees: ['a'], attempts},
+    {id: 'selected', input: 'Keep selected detail', status: outcome === 'other' ? 'pending' : 'blocked', assignees: ['a'], attempts: []},
+    {id: 'shared', input: 'Shared matching work', status: outcome === 'other' ? 'blocked' : 'pending', assignees: ['a', 'a', 'b'], attempts},
+    {id: 'own', input: 'Own matching work', status: outcome === 'other' ? 'cancelled' : 'pending', assignees: ['a'], attempts},
     {id: 'excluded', input: 'Latest failure', status: 'pending', assignees: ['a'], attempts: [result, failure]},
   ]});
+  if (outcome === 'other') {
+    f.state.work.push({id: 'recorded', input: 'Latest attempt without result', status: 'pending', assignees: ['a'],
+      attempts: [failure, {...result, id: 'recorded', outcome: null, output: null}]});
+    // A blocked Task with a latest result belongs to results, not other.
+    f.state.work.push({id: 'blocked-result', input: 'Blocked with latest result', status: 'blocked', assignees: ['a'], attempts: [failure, result]});
+  }
   const saved = JSON.stringify(f.state);
   const user = userEvent.setup();
   render(<App />); await connected();
@@ -1439,7 +1446,7 @@ test.each([
   fireEvent.change(searchInput(), {target: {value: 'conflicting search'}});
   fireEvent.change(outcomeFilter(), {target: {value: 'failed'}});
   const action = (id: string, name = 'Alex') => screen.getByRole('button', {name: `${label}: ${name} · ID: ${id}`});
-  expect(action('a').textContent).toBe(`${label} (2)`);
+  expect(action('a').textContent).toBe(`${label} (${outcome === 'other' ? 3 : 2})`);
   expect(action('b').textContent).toBe(`${label} (1)`);
   action('b').focus(); await user.keyboard(key);
   const heading = screen.getByRole('heading', {name: '3. Work & results'});
@@ -1453,7 +1460,7 @@ test.each([
   await waitFor(() => expect(document.querySelector('#connection')!.textContent).toContain('Disconnected'));
   action('a').focus(); await user.keyboard(key);
   expect(document.activeElement).toBe(heading);
-  expect(matchingIds()).toEqual(['shared', 'own']);
+  expect(matchingIds()).toEqual(outcome === 'other' ? ['shared', 'own', 'recorded'] : ['shared', 'own']);
   expect(screen.getByText(/Using stale assignments from the last successful refresh/)).toBeTruthy();
   expect(screen.getByText(/Disconnected — showing stale company data/)).toBeTruthy();
   if (outcome === 'active') expect(screen.getAllByText(/caller-reported active · no provider request/).length).toBeGreaterThan(0);
@@ -1470,11 +1477,16 @@ test.each([
   expect(screen.getByText('Work ID: selected')).toBeTruthy();
   expect(screen.getByText(/The selected work is outside these matches/)).toBeTruthy();
   expect((screen.getByLabelText('What would you like help with?') as HTMLTextAreaElement).value).toBe('Unsaved draft');
+  if (outcome === 'other') {
+    action('a').focus(); await user.keyboard(key);
+    expect(matchingIds()).toEqual(['shared', 'own', 'recorded']);
+  }
   // A fresh accepted snapshot can remove all matches without resetting the chosen filters.
   f.state.work = f.state.work.map(work => ({...work, attempts: [failure]}));
   f.reconnect(); refresh();
   await waitFor(() => expect(document.querySelector('#connection')!.textContent).toContain('Connected'));
   await waitFor(() => expect(action('a').textContent).toBe(`${label} (0)`));
+  expect(matchingIds()).toEqual([]);
   action('a').focus(); await user.keyboard(key);
   expect(matchingIds()).toEqual([]);
   expect(outcomeFilter().value).toBe(outcome);

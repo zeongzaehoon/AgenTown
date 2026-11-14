@@ -428,8 +428,9 @@ export function App() {
             <option value="active">Active attempts</option>
             <option value="results">Available results</option>
             <option value="failed">Failed or interrupted work</option>
+            <option value="other">Other recorded work</option>
           </select>
-          <p id="outcome-help">Combines with search using the latest recorded attempt. Results remain unverified; active attempts may be caller-reported. All outcomes also includes other recorded states. When disconnected, filters use the last loaded history.</p>
+          <p id="outcome-help">Combines with search using the latest recorded attempt. Results remain unverified; active attempts may be caller-reported. Other recorded work includes blocked, cancelled and records without a classified result. When disconnected, filters use the last loaded history.</p>
           <button type="button" onClick={() => { setViewEmployee(''); setSearch(''); setOutcome('all'); searchRef.current?.focus(); }}>Show all loaded work</button>
           <p role="status">{viewEmployee ? `Assigned work for ${state?.employees.find(e => e.id === viewEmployee)?.name ?? 'an unavailable employee'} · Employee ID: ${viewEmployee}. ${connected ? '' : 'Using stale assignments from the last successful refresh.'}` : 'Showing work for all employees.'}</p>
           {!!viewEmployee && <button type="button" onClick={() => { setViewEmployee(''); searchRef.current?.focus(); }}>Return to all employees</button>}
