@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { reconcileSelectedWork, type WorkRecoveryResponse } from './work-recovery-api';
 
 export function WorkRecovery({taskId, connected, onRequest, onInspect}: {
@@ -11,13 +11,34 @@ export function WorkRecovery({taskId, connected, onRequest, onInspect}: {
   const [uncertain, setUncertain] = useState(false);
   const [consumed, setConsumed] = useState(false);
   const request = useRef<AbortController | null>(null);
+  const flow = useRef<HTMLElement>(null);
+  const ownsFocus = useRef(false);
+  useEffect(() => {
+    const followFocus = (event: FocusEvent) => {
+      const target = event.target as Node;
+      // Disabling submission can leave focus on the body or a focusable parent
+      // inspection region without user navigation.
+      if (target === document.body || (flow.current && target.contains(flow.current))) return;
+      if (request.current) ownsFocus.current = flow.current?.contains(event.target as Node) ?? false;
+    };
+    document.addEventListener('focusin', followFocus);
+    return () => document.removeEventListener('focusin', followFocus);
+  }, []);
   const checkbox = useRef<HTMLInputElement>(null);
   const inspect = useRef<HTMLButtonElement>(null);
   useLayoutEffect(() => () => {request.current?.abort(); request.current = null;}, []);
   useLayoutEffect(() => {if (review) checkbox.current?.focus();}, [review]);
-  useLayoutEffect(() => {if (consumed && !pending) inspect.current?.focus();}, [consumed, pending]);
+  useLayoutEffect(() => {
+    const active = document.activeElement;
+    const automaticFallback = active === document.body || !!(active && flow.current && active.contains(flow.current));
+    if (consumed && !pending && ownsFocus.current &&
+      (automaticFallback || flow.current?.contains(active))) {
+      inspect.current?.focus();
+    }
+  }, [consumed, pending]);
   async function recover() {
     if (!connected || !consent || consumed || request.current) return;
+    ownsFocus.current = flow.current?.contains(document.activeElement) ?? false;
     const active = new AbortController(); request.current = active;
     setPending(true); setConsumed(true); setConsent(false); onRequest();
     try {
@@ -26,7 +47,7 @@ export function WorkRecovery({taskId, connected, onRequest, onInspect}: {
     } catch {if (request.current === active) setUncertain(true);}
     finally {if (request.current === active) {request.current = null; setPending(false);}}
   }
-  return <section aria-label="Recover expired attempts" aria-busy={pending}>
+  return <section ref={flow} aria-label="Recover expired attempts" aria-busy={pending}>
     <h4>Recover expired attempts</h4>
     <p>Selected Task ID: {taskId}</p>
     <button type="button" disabled={!connected || pending} onClick={() => {setReview(true); setConsent(false); setConsumed(false); setResult(null); setUncertain(false);}}>Review recovery scope</button>

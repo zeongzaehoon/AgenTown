@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { WorkReadiness } from './work-inspection-api';
 import { executeSelectedWork, type WorkExecutionResponse } from './work-execution-api';
 
@@ -10,12 +10,33 @@ export function WorkExecution({readiness, onInspect}: {readiness: WorkReadiness;
   const [result, setResult] = useState<WorkExecutionResponse | null>(null);
   const [error, setError] = useState('');
   const request = useRef<AbortController | null>(null);
+  const flow = useRef<HTMLElement>(null);
+  const ownsFocus = useRef(false);
+  useEffect(() => {
+    const followFocus = (event: FocusEvent) => {
+      const target = event.target as Node;
+      // Disabling submission can leave focus on the body or a focusable parent
+      // inspection region without user navigation.
+      if (target === document.body || (flow.current && target.contains(flow.current))) return;
+      if (request.current) ownsFocus.current = flow.current?.contains(event.target as Node) ?? false;
+    };
+    document.addEventListener('focusin', followFocus);
+    return () => document.removeEventListener('focusin', followFocus);
+  }, []);
   const recovery = useRef<HTMLButtonElement>(null);
   useLayoutEffect(() => () => {request.current?.abort(); request.current = null;}, []);
-  useLayoutEffect(() => { if (consumed && !pending) recovery.current?.focus(); }, [consumed, pending]);
+  useLayoutEffect(() => {
+    const active = document.activeElement;
+    const automaticFallback = active === document.body || !!(active && flow.current && active.contains(flow.current));
+    if (consumed && !pending && ownsFocus.current &&
+      (automaticFallback || flow.current?.contains(active))) {
+      recovery.current?.focus();
+    }
+  }, [consumed, pending]);
   const eligible = readiness.eligibility === 'eligible' && !readiness.active_attempt;
   async function execute() {
     if (!eligible || !consent || consumed || request.current) return;
+    ownsFocus.current = flow.current?.contains(document.activeElement) ?? false;
     const active = new AbortController(); request.current = active;
     setConsumed(true); setConsent(false); setPending(true);
     try {
@@ -29,7 +50,7 @@ export function WorkExecution({readiness, onInspect}: {readiness: WorkReadiness;
       }
     }
   }
-  return <section aria-label="Execute inspected ordinary text" aria-busy={pending}>
+  return <section ref={flow} aria-label="Execute inspected ordinary text" aria-busy={pending}>
     <h4>Execute inspected ordinary text</h4>
     <p>Review the exact saved input and assigned employee above. This sends one request using the server’s configured provider and model and may incur cost.</p>
     {!eligible && <p>Execution unavailable for this observation. Inspect again after resolving the assignment or active attempt.</p>}

@@ -4376,3 +4376,90 @@ Supervisor frontend-profile verification passed 32 frontend files and 1,264
 tests, TypeScript checking, the production build, and 505 Python tests with 2
 skipped. Fresh browser evidence was deferred by this scoped verification
 profile. Live provider calls are skipped, not passed, under the user policy.
+
+## Request completion focus ownership (C117-T1)
+
+Launch `agentown-web --database /tmp/focus-completion.sqlite3 --port 8765`
+and open `http://127.0.0.1:8765`. Create an employee and save/assign text work
+if this database is empty. Select that work and inspect through local MCP.
+Live provider calls remain skipped. Use this browser-console fixture before
+submitting either execution or expired-attempt recovery; it intercepts both
+mutation routes, so neither mutation reaches the server:
+
+```js
+const originalFocusFetch = window.fetch.bind(window);
+window.focusOutcome = 'confirmed'; // also: rejected, uncertain, timeout
+window.focusRequests = 0;
+window.finishFocusRequest = null;
+window.fetch = async (input, init) => {
+  const path = String(input);
+  const execution = path.endsWith('/execute-work');
+  if (!execution && !path.endsWith('/reconcile-work')) return originalFocusFetch(input, init);
+  window.focusRequests++;
+  const {task_id} = JSON.parse(init.body);
+  const outcome = window.focusOutcome;
+  return new Promise(resolve => {
+    window.finishFocusRequest = () => {
+      if (outcome === 'timeout') return; // client deadline ends the wait
+      const confirmed = outcome === 'confirmed';
+      const status = execution && confirmed ? 'completed' : outcome;
+      const code = confirmed ? (execution ? 'execution_recorded' : 'reconciliation_confirmed')
+        : outcome === 'rejected' ? (execution ? 'execution_busy' : 'recovery_busy') : 'delivery_uncertain';
+      const value = {schema_version: 1, requested_task_id: task_id, status, code,
+        recovery: 'Deterministic fixture receipt. Inspect explicitly; nothing was executed.'};
+      if (execution) value.execution = confirmed ? {
+        schema_version: 1, run_id: '22222222-2222-4222-8222-222222222222',
+        input: 'Fixture input', provider: 'fixture', model: 'fixture',
+        deadline_unix_ms: 100, output: 'Fixture result, not a provider response',
+        error: null, quality: 'unverified'
+      } : null;
+      else Object.assign(value, {
+        evidence: {source: 'installed_local_mcp', tool: 'get_work_history_v1',
+          read_only: false, mutation_scope: 'snapshot_expired_leases', external_client_verified: false},
+        inspection: confirmed ? {task: {id: task_id, title: 'Fixture saved work',
+          status: 'pending', assignees: []}, attempts: [], readiness: null} : null
+      });
+      resolve(new Response(JSON.stringify(value), {headers: {'Content-Type': 'application/json'}}));
+    };
+  });
+};
+```
+
+For execution, check its authorization, Tab to **Execute once through local
+MCP**, and press Enter. For recovery, choose **Review recovery scope**, check
+its authorization, Tab to **Reconcile expired attempts once**, and press Enter.
+Consent becomes unchecked, submission locks, and the waiting status appears.
+Keep focus in that request flow and invoke `finishFocusRequest()` from the
+console. Focus returns to **Inspect before another execution** or **Inspect
+after recovery**, including browsers that blur a submit button when disabled.
+Check `document.activeElement` and the visible focus outline.
+
+Repeat each flow with `focusOutcome` set before submission to each of the four
+outcomes. Confirmed receipts display a recorded/confirmed status; rejected and
+uncertain receipts display alerts. Timeout waits 75 seconds for execution or
+15 seconds for recovery and displays uncertain-delivery advice. Timeout does
+not establish cancellation or failure of a real request.
+
+Repeat while moving focus to an outside usable control, such as an unsaved
+request field, during the pending request. Completion must keep that focus.
+Even focusing outside and then blurring must not return focus to the request.
+`focusRequests` increases once per explicit submission; repeated activation,
+completion and rerender must not replay it. Inspection and fresh authorization
+are required for another execution. Changing selection or disconnecting during
+the wait invalidates the flow; a late fixture receipt must not restore it or
+move focus. Restore fetch with `window.fetch = originalFocusFetch` or reload.
+
+Deterministic regressions:
+`cd frontend && npx vitest run src/WorkExecution.test.tsx src/WorkRecovery.test.tsx`
+and `npx tsc --noEmit`. The new matrix includes deferred receipts, client
+timeouts, retained submit focus, native blur at React's disabled-attribute
+commit (asserting body focus before the write and dispatching body focusin),
+outside focus (including a synchronous move during the submission commit),
+consumed consent, single submission and no replay. Existing
+selection/disconnect tests remain.
+The repair ignores only automatic body/ancestor fallback; a usable outside
+control receiving focus during the disabled-attribute commit relinquishes
+request focus ownership immediately. Both deferred outcome matrices cover this
+case. Periodic full verification passed 1,304 frontend tests, TypeScript
+checking, the production build, 508 Python tests with 2 skipped, and 2 browser
+checks. Live provider validation is skipped, not passed.

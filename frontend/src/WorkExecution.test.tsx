@@ -120,3 +120,58 @@ test.each(['active', 'unassigned', 'missing'])('%s readiness cannot grant execut
   expect((execute() as HTMLButtonElement).disabled).toBe(true);
   expect(fetcher).toHaveBeenCalledTimes(1);
 });
+
+
+test.each(['confirmed', 'rejected', 'uncertain', 'timeout'].flatMap(outcome =>
+  ['submit', 'native blur', 'outside', 'outside then blur', 'outside during commit'].map(focus => ({outcome, focus}))))(
+  'deferred completion $outcome with $focus focus', async ({outcome, focus}) => {
+    let finish!: (response: Response) => void;
+    const fetcher = vi.fn().mockResolvedValueOnce(reply(inspection())).mockImplementationOnce(() => new Promise<Response>(resolve => {finish = resolve;}));
+    vi.stubGlobal('fetch', fetcher);
+    const view = render(<><input aria-label="Outside draft" /><WorkInspection taskId={id} /></>);
+  await userEvent.click(inspect()); await screen.findByRole('checkbox');
+    await userEvent.click(screen.getByRole('checkbox'));
+    const launch = execute();
+    launch.focus();
+    const nativeBlur = vi.fn();
+    const original = launch.setAttribute.bind(launch);
+    const attribute = vi.spyOn(launch, 'setAttribute').mockImplementation((name, value) => {
+      if (focus === 'native blur' && name === 'disabled' && document.activeElement === launch) {
+        launch.blur(); nativeBlur();
+        expect(document.activeElement).toBe(document.body);
+        document.body.dispatchEvent(new FocusEvent('focusin', {bubbles: true}));
+      }
+      original(name, value);
+      if (focus === 'outside during commit' && name === 'disabled') {
+        screen.getByLabelText('Outside draft').focus();
+      }
+    });
+    try {
+      vi.useFakeTimers();
+      await act(async () => {launch.click();});
+      if (focus === 'native blur') expect(nativeBlur).toHaveBeenCalledTimes(1);
+      const outside = screen.getByLabelText('Outside draft');
+      if (focus.startsWith('outside') && focus !== 'outside during commit') outside.focus();
+      if (focus === 'outside during commit') expect(document.activeElement).toBe(outside);
+      if (focus === 'outside then blur') outside.blur();
+      const expectedFocus = document.activeElement;
+      expect((launch as HTMLButtonElement).disabled).toBe(true);
+      expect((screen.getByRole('checkbox') as HTMLInputElement).checked).toBe(false);
+      await act(async () => {launch.click();});
+      expect(fetcher).toHaveBeenCalledTimes(2);
+      await act(async () => {
+        if (outcome === 'timeout') await vi.advanceTimersByTimeAsync(75001);
+        else finish(reply(outcome === 'confirmed' ? recorded() : {schema_version: 1, requested_task_id: id, status: outcome, code: outcome === 'rejected' ? 'execution_busy' : 'delivery_uncertain', recovery: 'Inspect again', execution: null}));
+      });
+      const destination = screen.getByRole('button', {name: 'Inspect before another execution'});
+      expect((destination as HTMLButtonElement).disabled).toBe(false);
+      expect(document.activeElement).toBe(focus.startsWith('outside') ? expectedFocus : destination);
+      expect(screen.queryByText(/Execution requested/)).toBeNull();
+      if (outcome === 'confirmed') expect(screen.getByText(/Transport completed/)).toBeTruthy();
+      else expect(screen.getAllByRole('alert').length).toBeGreaterThan(0);
+      view.rerender(<><input aria-label="Outside draft" /><WorkInspection taskId={id} /></>);
+      await act(async () => {launch.click();});
+      expect(fetcher).toHaveBeenCalledTimes(2);
+      expect((screen.getByRole('checkbox') as HTMLInputElement).checked).toBe(false);
+    } finally {attribute.mockRestore(); vi.useRealTimers();}
+  });
