@@ -82,7 +82,7 @@ export function HookDevices({onOpenHook, onOpenWork, workspace, connected = true
       <RecordedHookAttempts device={device} workspace={workspace} connected={connected} />
       {device.target_kind !== 'agent' || !['run_completed', 'run_failed'].includes(device.event)
         ? <p>Local follow-up preview supports employee run-completed and run-failed Hooks only. Team and task-created Hooks remain configuration only.</p>
-        : <AssignedWorkChooser device={device} workspace={workspace} connected={connected} busy={busy} stale={!!error} onOpenWork={onOpenWork} />}
+        : <AssignedWorkChooser device={device} workspace={workspace} connected={connected} busy={busy} stale={!!error || disconnectedSnapshot} onOpenWork={onOpenWork} />}
     </article>)}</div>
   </section>;
 }
@@ -108,15 +108,25 @@ function AssignedWorkChooser({device, workspace, connected, busy, stale, onOpenW
     : stale ? 'Hook devices are stale. Refresh Hook devices before opening assigned work.'
     : !work.length ? 'No saved work assigned to this employee in the loaded history. Refresh saved history or assign work first.'
     : !onOpenWork ? 'Assigned-work navigation is unavailable here.' : '';
-  return <div className="skill-work-chooser">
+  const chooser = useRef<HTMLDivElement>(null);
+  const explanation = useRef<HTMLParagraphElement>(null);
+  // Capture before React disables a focused control: browsers may blur it during commit.
+  const disabledFocus = unavailable && document.activeElement?.matches('select, button') && chooser.current?.contains(document.activeElement)
+    ? document.activeElement : null;
+  useLayoutEffect(() => {
+    if (disabledFocus && (document.activeElement === disabledFocus || document.activeElement === document.body)) {
+      explanation.current?.focus();
+    }
+  });
+  return <div ref={chooser} className="skill-work-chooser">
     <label htmlFor={id}>Assigned work for Hook: {device.name} · Hook ID: {device.id} · Employee ID: {device.target_id}</label>
     <select id={id} value={valid ? choice.taskId : ''} aria-describedby={`${id}-help`}
       disabled={!!unavailable} onChange={event => { setChoice({taskId: event.target.value, employeeId: device.target_id}); setRemoved(false); }}>
       <option value="">Choose assigned saved work…</option>
       {work.map(item => <option key={item.id} value={item.id}>{item.input.slice(0, 55)} · Task ID: {item.id}</option>)}
     </select>
-    <p id={`${id}-help`}>{unavailable || (removed ? 'Previously chosen work or employee target changed. Choose assigned saved work again.' : 'Choose assigned saved work, then Open. Choosing and opening grant no consent and make no local MCP request.')}</p>
-    <button type="button" disabled={!!unavailable || !valid} aria-controls="selected-work-inspection"
+    <p ref={explanation} tabIndex={-1} id={`${id}-help`}>{unavailable || (removed ? 'Previously chosen work or employee target changed. Choose assigned saved work again.' : 'Choose assigned saved work, then Open. Choosing and opening grant no consent and make no local MCP request.')}</p>
+    <button type="button" disabled={!!unavailable || !valid} aria-controls="selected-work-inspection" aria-describedby={`${id}-help`}
       aria-label={`Open assigned work for Hook: ${device.name} · Hook ID: ${device.id}`}
       onClick={() => { if (valid && !unavailable) onOpenWork?.({taskId: choice.taskId, hookId: device.id, employeeId: device.target_id}); }}>Open</button>
   </div>;

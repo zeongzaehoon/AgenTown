@@ -79,7 +79,7 @@ export function SkillBooks({onOpenSkill, onOpenWork, workspace, connected = true
       {(busy || error) && <span>{busy ? 'Refreshing snapshot' : 'Stale snapshot'}</span>}
     </button>
     <RecordedSkillUse book={book} workspace={workspace} connected={connected} />
-      <SavedWorkChooser book={book} workspace={workspace} connected={connected} busy={busy} stale={!!error} onOpenWork={onOpenWork} />
+      <SavedWorkChooser book={book} workspace={workspace} connected={connected} busy={busy} stale={!!error || disconnectedSnapshot} onOpenWork={onOpenWork} />
     </article>)}</div>
   </section>;
 }
@@ -104,15 +104,25 @@ function SavedWorkChooser({book, workspace, connected, busy, stale, onOpenWork}:
     : stale ? 'Skill books are stale. Refresh Skill books before opening saved work.'
     : !work.length ? 'No saved work in the loaded history. Refresh saved history or save work first.'
     : !onOpenWork ? 'Saved-work navigation is unavailable here.' : '';
-  return <div className="skill-work-chooser">
+  const chooser = useRef<HTMLDivElement>(null);
+  const explanation = useRef<HTMLParagraphElement>(null);
+  // Capture before React disables a focused control: browsers may blur it during commit.
+  const disabledFocus = unavailable && document.activeElement?.matches('select, button') && chooser.current?.contains(document.activeElement)
+    ? document.activeElement : null;
+  useLayoutEffect(() => {
+    if (disabledFocus && (document.activeElement === disabledFocus || document.activeElement === document.body)) {
+      explanation.current?.focus();
+    }
+  });
+  return <div ref={chooser} className="skill-work-chooser">
     <label htmlFor={id}>Saved work for Skill: {book.name} · Skill ID: {book.id}</label>
     <select id={id} value={valid ? taskId : ''} aria-describedby={`${id}-help`}
       disabled={!!unavailable} onChange={event => { setTaskId(event.target.value); setRemoved(false); }}>
       <option value="">Choose saved work…</option>
       {work.map(item => <option key={item.id} value={item.id}>{item.input.slice(0, 55)} · Task ID: {item.id}</option>)}
     </select>
-    <p id={`${id}-help`}>{unavailable || (removed ? 'Previously chosen work is no longer available. Choose saved work again.' : 'Choose saved work, then Open. Choosing and opening grant no consent and make no local MCP request.')}</p>
-    <button type="button" disabled={!!unavailable || !valid} aria-controls="selected-work-inspection"
+    <p ref={explanation} tabIndex={-1} id={`${id}-help`}>{unavailable || (removed ? 'Previously chosen work is no longer available. Choose saved work again.' : 'Choose saved work, then Open. Choosing and opening grant no consent and make no local MCP request.')}</p>
+    <button type="button" disabled={!!unavailable || !valid} aria-controls="selected-work-inspection" aria-describedby={`${id}-help`}
       aria-label={`Open saved work for Skill: ${book.name} · Skill ID: ${book.id}`}
       onClick={() => { if (valid && !unavailable) onOpenWork?.({taskId, skillId: book.id}); }}>Open</button>
   </div>;

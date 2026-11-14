@@ -81,6 +81,8 @@ test('App opens exact IDs repeatedly, retains configuration and work drafts and 
   expect((screen.getByLabelText('Instructions') as HTMLTextAreaElement).value).toBe('New Skill draft');
   fireEvent.click(screen.getByRole('button', {name: 'Open Hook device: Manual · ID: two'}));
   await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('Saved record')));
+  await waitFor(() => expect((screen.getByRole('button', {name: 'Refresh Hook devices'}) as HTMLButtonElement).disabled).toBe(false));
+  await act(async () => fireEvent.click(screen.getByRole('button', {name: 'Refresh Hook devices'})));
   const chooser = screen.getByLabelText('Assigned work for Hook: Manual · Hook ID: one · Employee ID: a');
   const beforeChoice = fetcher.mock.calls.length;
   // A synchronous selection isolates this assertion from App's independent polling.
@@ -197,9 +199,9 @@ test('disconnected, refreshing and stale choices cannot navigate and recover wit
   expect(chooser.disabled).toBe(true); expect(action.disabled).toBe(true);
   fireEvent.click(action); expect(open).not.toHaveBeenCalled();
   view.rerender(<HookDevices workspace={workspace} onOpenWork={open} />);
-  // A disclosure is not a new fetch or a new inspection-navigation guard.
+  // Connection recovery cannot validate the independently loaded configuration.
   expect(screen.getByRole('status', {name: ''}).textContent).toContain('Connection restored');
-  expect(chooser.disabled).toBe(false); expect(action.disabled).toBe(false);
+  expect(chooser.disabled).toBe(true); expect(action.disabled).toBe(true);
   expect(chooser.value).toBe('w');
   expect(fetcher).toHaveBeenCalledTimes(1);
   let reject!: (error: Error) => void;
@@ -497,4 +499,58 @@ test.each([true, false])('failed and old-connection responses cannot override a 
   expect(document.activeElement).toBe(current);
   expect(screen.getByRole('button', {name: 'Open Hook device: Current · ID: one'})).toBe(current);
   expect(screen.getByLabelText('Hook devices removals').textContent).toContain('1 record removed');
+});
+
+
+test.each(['keyboard', 'native blur', 'outside'])('reconnect requires explicit fresh configuration and rejects late responses (%s)', async focus => {
+  const pending: {resolve: (response: Response) => void; reject: (error: Error) => void}[] = [];
+  const fetcher = vi.fn(() => new Promise<Response>((resolve, reject) => pending.push({resolve, reject})));
+  vi.stubGlobal('fetch', fetcher);
+  const workspace: Workspace = {employees: [], configuration: null, provider: 'test', model: null,
+    work: [{id: 'w', input: 'Retained work', assignees: ['a'], status: 'pending', attempts: []}]};
+  const open = vi.fn();
+  const content = (connected: boolean) => <><input aria-label="Outside draft" defaultValue="Keep draft" /><HookDevices workspace={workspace} onOpenWork={open} connected={connected} /></>;
+  const view = render(content(true));
+  const respond = async (index: number) => { await act(async () => pending[index].resolve(new Response(JSON.stringify({hooks: [hooks[0]]})))); };
+  await respond(0);
+  const chooser = screen.getByLabelText('Assigned work for Hook: Manual · Hook ID: one · Employee ID: a') as HTMLSelectElement;
+  const action = screen.getByRole('button', {name: 'Open assigned work for Hook: Manual · Hook ID: one'}) as HTMLButtonElement;
+  const refresh = screen.getByRole('button', {name: 'Refresh Hook devices'});
+  await userEvent.selectOptions(chooser, 'w');
+  await userEvent.tab(); expect(document.activeElement).toBe(action);
+  const outside = screen.getByLabelText('Outside draft');
+  if (focus === 'outside') outside.focus();
+  const nativeBlur = vi.fn();
+  const setAttribute = action.setAttribute.bind(action);
+  const spy = vi.spyOn(action, 'setAttribute').mockImplementation((name, value) => {
+    if (focus === 'native blur' && name === 'disabled' && document.activeElement === action) {
+      action.blur(); nativeBlur(); expect(document.activeElement).toBe(document.body);
+    }
+    setAttribute(name, value);
+  });
+  view.rerender(content(false));
+  if (focus === 'native blur') expect(nativeBlur).toHaveBeenCalledTimes(1);
+  spy.mockRestore();
+  const help = document.getElementById(action.getAttribute('aria-describedby')!)!;
+  expect(document.activeElement).toBe(focus === 'outside' ? outside : help);
+  view.rerender(content(true));
+  expect(action.disabled).toBe(true); expect(chooser.value).toBe('w');
+  expect(help.textContent).toContain('Refresh Hook devices');
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  // A request begun before another disconnect must not clear the freshness gate.
+  fireEvent.click(refresh);
+  view.rerender(content(false)); view.rerender(content(true));
+  await respond(1);
+  expect(action.disabled).toBe(true);
+  fireEvent.click(refresh);
+  await act(async () => pending[2].reject(new Error('Refresh failed')));
+  expect(action.disabled).toBe(true); expect(chooser.value).toBe('w');
+  fireEvent.click(action); expect(open).not.toHaveBeenCalled();
+  fireEvent.click(refresh); await respond(3);
+  expect(action.disabled).toBe(false); expect(chooser.value).toBe('w');
+  expect((outside as HTMLInputElement).value).toBe('Keep draft');
+  expect(open).not.toHaveBeenCalled();
+  action.focus(); await userEvent.keyboard('{Enter}');
+  expect(open).toHaveBeenCalledTimes(1);
+  expect(fetcher).toHaveBeenCalledTimes(4);
 });

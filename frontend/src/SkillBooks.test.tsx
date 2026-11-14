@@ -88,6 +88,8 @@ test('Skill work navigation preserves drafts, clears filters and focuses inspect
     throw new Error(`Unexpected request ${path}`);
   });
   vi.stubGlobal('fetch', fetcher); render(<App />);
+  await waitFor(() => expect((screen.getByRole('button', {name: 'Refresh Skill books'}) as HTMLButtonElement).disabled).toBe(false));
+  await act(async () => fireEvent.click(screen.getByRole('button', {name: 'Refresh Skill books'})));
   const chooser = await screen.findByLabelText('Saved work for Skill: Manual · Skill ID: two');
   const action = screen.getByRole('button', {name: 'Open saved work for Skill: Manual · Skill ID: two'});
   const beforeChoice = fetcher.mock.calls.length;
@@ -164,9 +166,9 @@ test('empty, disconnected, refreshing and stale snapshots explain unavailable Op
   expect(screen.getByText(/Disconnected. Refresh connection before opening/)).toBeTruthy();
   expect(action.disabled).toBe(true);
   view.rerender(<SkillBooks workspace={{...workspace}} onOpenWork={open} />);
-  // A disclosure is not a new fetch or a new inspection-navigation guard.
+  // Connection recovery cannot validate the independently loaded configuration.
   expect(screen.getByRole('status', {name: ''}).textContent).toContain('Connection restored');
-  expect(chooser.disabled).toBe(false); expect(action.disabled).toBe(false);
+  expect(chooser.disabled).toBe(true); expect(action.disabled).toBe(true);
   expect(chooser.value).toBe('w');
   expect(fetcher).toHaveBeenCalledTimes(1);
   let reject!: (error: Error) => void;
@@ -178,6 +180,10 @@ test('empty, disconnected, refreshing and stale snapshots explain unavailable Op
   expect(await screen.findByText(/Skill books are stale. Refresh Skill books before opening/)).toBeTruthy();
   expect(chooser.value).toBe('w'); expect(action.disabled).toBe(true);
   fireEvent.click(action); expect(open).not.toHaveBeenCalled();
+  fetcher.mockResolvedValueOnce(new Response(JSON.stringify({skills: [skills[0]]})));
+  fireEvent.click(screen.getByRole('button', {name: 'Refresh Skill books'}));
+  await screen.findByText('Showing saved Skill books.');
+  expect(chooser.value).toBe('w'); expect(action.disabled).toBe(false);
 });
 
 
@@ -380,4 +386,58 @@ test.each([true, false])('failed and old-connection responses cannot override a 
   expect(document.activeElement).toBe(current);
   expect(screen.getByRole('button', {name: 'Open Skill book: Current · ID: one'})).toBe(current);
   expect(screen.getByLabelText('Skill books removals').textContent).toContain('1 record removed');
+});
+
+
+test.each(['keyboard', 'native blur', 'outside'])('reconnect requires explicit fresh configuration and rejects late responses (%s)', async focus => {
+  const pending: {resolve: (response: Response) => void; reject: (error: Error) => void}[] = [];
+  const fetcher = vi.fn(() => new Promise<Response>((resolve, reject) => pending.push({resolve, reject})));
+  vi.stubGlobal('fetch', fetcher);
+  const workspace: Workspace = {employees: [], configuration: null, provider: 'test', model: null,
+    work: [{id: 'w', input: 'Retained work', assignees: ['a'], status: 'pending', attempts: []}]};
+  const open = vi.fn();
+  const content = (connected: boolean) => <><input aria-label="Outside draft" defaultValue="Keep draft" /><SkillBooks workspace={workspace} onOpenWork={open} connected={connected} /></>;
+  const view = render(content(true));
+  const respond = async (index: number) => { await act(async () => pending[index].resolve(new Response(JSON.stringify({skills: [skills[0]]})))); };
+  await respond(0);
+  const chooser = screen.getByLabelText('Saved work for Skill: Manual · Skill ID: one') as HTMLSelectElement;
+  const action = screen.getByRole('button', {name: 'Open saved work for Skill: Manual · Skill ID: one'}) as HTMLButtonElement;
+  const refresh = screen.getByRole('button', {name: 'Refresh Skill books'});
+  await userEvent.selectOptions(chooser, 'w');
+  await userEvent.tab(); expect(document.activeElement).toBe(action);
+  const outside = screen.getByLabelText('Outside draft');
+  if (focus === 'outside') outside.focus();
+  const nativeBlur = vi.fn();
+  const setAttribute = action.setAttribute.bind(action);
+  const spy = vi.spyOn(action, 'setAttribute').mockImplementation((name, value) => {
+    if (focus === 'native blur' && name === 'disabled' && document.activeElement === action) {
+      action.blur(); nativeBlur(); expect(document.activeElement).toBe(document.body);
+    }
+    setAttribute(name, value);
+  });
+  view.rerender(content(false));
+  if (focus === 'native blur') expect(nativeBlur).toHaveBeenCalledTimes(1);
+  spy.mockRestore();
+  const help = document.getElementById(action.getAttribute('aria-describedby')!)!;
+  expect(document.activeElement).toBe(focus === 'outside' ? outside : help);
+  view.rerender(content(true));
+  expect(action.disabled).toBe(true); expect(chooser.value).toBe('w');
+  expect(help.textContent).toContain('Refresh Skill books');
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  // A request begun before another disconnect must not clear the freshness gate.
+  fireEvent.click(refresh);
+  view.rerender(content(false)); view.rerender(content(true));
+  await respond(1);
+  expect(action.disabled).toBe(true);
+  fireEvent.click(refresh);
+  await act(async () => pending[2].reject(new Error('Refresh failed')));
+  expect(action.disabled).toBe(true); expect(chooser.value).toBe('w');
+  fireEvent.click(action); expect(open).not.toHaveBeenCalled();
+  fireEvent.click(refresh); await respond(3);
+  expect(action.disabled).toBe(false); expect(chooser.value).toBe('w');
+  expect((outside as HTMLInputElement).value).toBe('Keep draft');
+  expect(open).not.toHaveBeenCalled();
+  action.focus(); await userEvent.keyboard('{Enter}');
+  expect(open).toHaveBeenCalledTimes(1);
+  expect(fetcher).toHaveBeenCalledTimes(4);
 });

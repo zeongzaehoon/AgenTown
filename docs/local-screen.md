@@ -4855,3 +4855,34 @@ Run. Run it with `cd frontend && npx vitest run src/recorded-attempt-navigation.
 src/ConnectionActivity.test.tsx` when frontend dependencies are installed.
 Supervisor checks and browser validation are pending for this invocation; live
 provider calls remain skipped, not passed.
+
+### Reconnect before opening work from Skill books and Hook devices (C126-T1)
+
+Launch `agentown-web` with saved Skills, an employee-targeted run-completed or
+run-failed Hook, and work assigned to that employee. In Company, explicitly
+refresh Skill books and Hook devices, then choose saved work in both pickers.
+Type a work draft and edit a Skill configuration draft without saving.
+
+1. Disconnect the local API and choose Refresh connection. Retained work and
+   recorded-use disclosures remain readable. Both work Open actions are disabled.
+   If keyboard focus was in a picker or its Open button, focus moves to its
+   explanation; unrelated focus stays in place.
+2. Restore the API and choose Refresh connection only. Both Open actions must
+   remain disabled with instructions to refresh their respective device snapshot.
+   Choices and drafts remain intact. Reconnection sends no preview or execution.
+3. Choose Refresh Skill books. Only the Skill work action becomes available after
+   success. Fail Refresh Hook devices (for example with an intercepted failing
+   configuration GET); its action stays disabled and retains the chosen Task.
+   Retry successfully to make the Hook work action available.
+4. Start a device refresh, disconnect and reconnect before it settles, then allow
+   the old response to arrive. It must not enable Open. Explicitly refresh again.
+5. Tab from an available picker to Open and use Enter or Space. The exact Task's
+   requested inspection receives focus. No preview, consent or execution is
+   requested automatically; work and configuration drafts survive navigation.
+
+Deterministic component tests cover both devices, failed/successful refreshes,
+late pre-disconnect responses and native focus loss at the disabled commit. App
+coverage checks independent refresh recovery, retained drafts/history and request
+boundaries. Supervisor-selected consolidated checks and browser validation remain
+pending for this implementation snapshot. Live provider calls are skipped under
+the current user policy.

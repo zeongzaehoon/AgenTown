@@ -1242,6 +1242,9 @@ test.each(['Skill', 'Hook', 'Loop'] as const)('Company %s preview dismissal pres
   if (kind === 'Loop') {
     await userEvent.click(await screen.findByRole('button', {name: /^Open linked work for Loop: Repeater/}));
   } else {
+    const refreshDevice = screen.getByRole('button', {name: kind === 'Skill' ? 'Refresh Skill books' : 'Refresh Hook devices'});
+    await waitFor(() => expect((refreshDevice as HTMLButtonElement).disabled).toBe(false));
+    await act(async () => fireEvent.click(refreshDevice));
     const chooser = await screen.findByRole('combobox', {name: new RegExp(kind === 'Skill' ? '^Saved work for Skill:' : '^Assigned work for Hook:')});
     await waitFor(() => expect((chooser as HTMLSelectElement).disabled).toBe(false));
     await userEvent.selectOptions(chooser, task);
@@ -1647,4 +1650,59 @@ test.each([true, false])('Add employee focuses the existing draft without reques
       expect(JSON.stringify(f.state)).toBe(before);
     }
   }
+});
+
+test('Company work navigation waits for each device refresh after reconnect and preserves drafts', async () => {
+  vi.spyOn(window, 'setInterval').mockImplementation(() => 0);
+  const f = fixture({...initial(), employees: [{id: 'a', name: 'Alex'}], work: [
+    {id: 'w', input: 'Saved request', assignees: ['a'], status: 'pending', attempts: []},
+  ]});
+  const fallback = globalThis.fetch;
+  const requests: string[] = [];
+  let failHook = false;
+  vi.stubGlobal('fetch', async (path: string, options: RequestInit) => {
+    requests.push(path);
+    if (path === '/api/config/v1/skills') return new Response(JSON.stringify({skills: [{id: 's', name: 'Manual', instructions: 'Keep instructions', enabled: true}]}));
+    if (path === '/api/config/v1/hooks') {
+      if (failHook) throw new Error('Hook refresh failed');
+      return new Response(JSON.stringify({hooks: [{id: 'h', name: 'Follow up', skill_id: 's', target_kind: 'agent', target_id: 'a', event: 'run_completed', enabled: true}]}));
+    }
+    return fallback(path, options);
+  });
+  render(<App />); await connected();
+  const refreshDevice = async (name: string) => {
+    const button = screen.getByRole('button', {name});
+    await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
+    await act(async () => fireEvent.click(button));
+  };
+  await refreshDevice('Refresh Skill books'); await refreshDevice('Refresh Hook devices');
+  const skill = screen.getByLabelText('Saved work for Skill: Manual · Skill ID: s') as HTMLSelectElement;
+  const hook = screen.getByLabelText('Assigned work for Hook: Follow up · Hook ID: h · Employee ID: a') as HTMLSelectElement;
+  const skillOpen = screen.getByRole('button', {name: 'Open saved work for Skill: Manual · Skill ID: s'}) as HTMLButtonElement;
+  const hookOpen = screen.getByRole('button', {name: 'Open assigned work for Hook: Follow up · Hook ID: h'}) as HTMLButtonElement;
+  await userEvent.selectOptions(skill, 'w'); await userEvent.selectOptions(hook, 'w');
+  fireEvent.change(draftInput(), {target: {value: 'Keep work draft'}});
+  fireEvent.click(screen.getByRole('button', {name: 'Open Skill book: Manual · ID: s'}));
+  await waitFor(() => expect((screen.getByLabelText('Instructions') as HTMLTextAreaElement).value).toBe('Keep instructions'));
+  fireEvent.change(screen.getByLabelText('Instructions'), {target: {value: 'Keep configuration draft'}});
+  f.disconnect(); refresh();
+  await waitFor(() => expect(document.querySelector('#connection')!.textContent).toContain('Disconnected'));
+  f.reconnect(); refresh(); await connected();
+  expect(skillOpen.disabled).toBe(true); expect(hookOpen.disabled).toBe(true);
+  expect(skill.value).toBe('w'); expect(hook.value).toBe('w');
+  expect(screen.getByText('Work ID: w')).toBeTruthy();
+  await refreshDevice('Refresh Skill books');
+  expect(skillOpen.disabled).toBe(false); expect(hookOpen.disabled).toBe(true);
+  failHook = true; await refreshDevice('Refresh Hook devices');
+  expect(hookOpen.disabled).toBe(true);
+  failHook = false; await refreshDevice('Refresh Hook devices');
+  expect(hookOpen.disabled).toBe(false);
+  expect(draftInput().value).toBe('Keep work draft');
+  expect((screen.getByLabelText('Instructions') as HTMLTextAreaElement).value).toBe('Keep configuration draft');
+  skillOpen.focus(); await userEvent.keyboard('{Enter}');
+  expect(document.activeElement).toBe(screen.getByRole('region', {name: 'Requested Skill inspection'}));
+  hookOpen.focus(); await userEvent.keyboard(' ');
+  expect(document.activeElement).toBe(screen.getByRole('region', {name: 'Requested Hook inspection'}));
+  expect(requests.every(path => !path.includes('/connections/') && !path.includes('/execute') && !path.includes('/preview'))).toBe(true);
+  expect(f.calls.every(call => call.path === '/api/state')).toBe(true);
 });
