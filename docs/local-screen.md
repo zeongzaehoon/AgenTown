@@ -3738,3 +3738,42 @@ process-recovery checks.
 Integration validation: TypeScript checking and all 109 tests in
 `LoopExecution.test.tsx` and `execution-receipt.test.tsx` passed in a temporary
 source copy using existing frontend dependencies. No live provider was called.
+
+
+### Saved-work Skill and employee Hook recovery
+
+Launch `agentown-web --database PATH --port 8765` with an existing fixture database,
+then open `http://127.0.0.1:8765`. Use saved work with one assigned employee, an
+enabled Skill, and an enabled employee Hook referencing that Skill. A Hook also
+needs a latest finished attempt whose outcome matches its configured event.
+
+1. Select saved work and an enabled Skill or eligible employee Hook. Tab to
+   **Preview Skill with saved work** or **Preview Hook with saved work** and press
+   Enter. Check the effective input; consent receives keyboard focus. Do not
+   execute when exercising recovery without a provider.
+2. Disconnect the product connection (for example, stop its server and use
+   **Refresh connection**). The preview disappears, consent is cleared, focus
+   recovers to the panel, and disconnected/stale status blocks preview.
+3. Restore the same server/database and refresh the connection. With browser
+   network tools holding configuration reads, the selection remains but preview
+   stays blocked with loading/stale status. A Hook requires successful current
+   reads of both Skills and Hooks. Fail a read to see the refresh error; polling
+   can recover after reads succeed. Responses from before disconnect cannot
+   restore configuration freshness or preview consent.
+4. Disable the selected Skill (or Hook), or change its Hook event/employee in the
+   configuration panel before allowing refresh. Preview remains blocked for
+   ineligible configuration. Re-enable matching records and allow fresh reads.
+5. Focus the preview button and press Enter again. Review the fresh input and
+   use Escape to clear consent and return focus to the preview button. Reconnect
+   never previews, submits, retries, or activates a Loop automatically. Ordinary
+   execution retains its existing explicit history/retry guards.
+
+Deterministic interaction coverage: from `frontend`, run
+`npm test -- src/SkillExecution.test.tsx src/HookExecution.test.tsx`.
+The tests hold only polling intervals and configuration/preview responses,
+cover initial disconnection, held/failed reconnect reads, late responses,
+disabled configuration, retained selections and fresh keyboard consent.
+Supervisor verification passed all 32 frontend test files and 1,111 tests, the
+production build, 505 Python tests with 2 skipped, and the harness Rust and
+operational suites. The selected frontend profile deferred installed-browser and
+installation/process-recovery gates. Live provider calls are skipped, not passed.

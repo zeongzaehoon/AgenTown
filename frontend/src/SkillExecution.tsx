@@ -9,7 +9,14 @@ export function SkillExecution({work, workspace, connected, draft, disabled, sub
   submit: (preview: SkillPreview) => void;
 }) {
   const [skills, setSkills] = useState<Skill[]>([]);
-  const [available, setAvailable] = useState(false);
+  const connection = useRef({connected, generation: 0});
+  if (connection.current.connected !== connected) {
+    connection.current = {connected, generation: connection.current.generation + 1};
+  }
+  const generation = connection.current.generation;
+  const [freshGeneration, setFreshGeneration] = useState<number | null>(null);
+  const [configurationError, setConfigurationError] = useState(false);
+  const available = connected && freshGeneration === generation && !configurationError;
   const [loaded, setLoaded] = useState(false);
   const [selected, setSelected] = useState('');
   const [preview, setPreview] = useState<{value: SkillPreview; snapshot: string} | null>(null);
@@ -20,7 +27,7 @@ export function SkillExecution({work, workspace, connected, draft, disabled, sub
   const region = useRef<HTMLElement>(null);
   function recoverFocus() { if (button.current && !button.current.disabled) button.current.focus(); else region.current?.focus(); }
   const previewFocused = useRef(false);
-  const snapshot = JSON.stringify([work, workspace.configuration, workspace.provider, workspace.model, draft, selected, skills, connected, available, disabled]);
+  const snapshot = JSON.stringify([work, workspace.configuration, workspace.provider, workspace.model, draft, selected, skills, connected, generation, available, disabled]);
   const current = useRef(snapshot);
   const revision = useRef(0);
   if (current.current !== snapshot) { ++revision.current; current.current = snapshot; }
@@ -32,6 +39,11 @@ export function SkillExecution({work, workspace, connected, draft, disabled, sub
     recoverFocus();
   }
   useEffect(() => {
+    setFreshGeneration(null);
+    setConfigurationError(false);
+    lock.current = false;
+    setBusy(false);
+    if (!connected) return;
     let live = true;
     let pending = false;
     const controller = new AbortController();
@@ -41,14 +53,14 @@ export function SkillExecution({work, workspace, connected, draft, disabled, sub
       try {
         const response = await configurationRequest<unknown>('skills', '', undefined, controller.signal);
         const records = savedSkills(response);
-        if (live) { setSkills(records); setSelected(id => records.some(s => s.id === id) ? id : ''); setAvailable(true); setLoaded(true); }
-      } catch { if (live) { ++revision.current; setAvailable(false); setMessage('Skills unavailable. Waiting to reconnect before previewing.'); } }
+        if (live && connection.current.generation === generation) { setSkills(records); setSelected(id => records.some(s => s.id === id) ? id : ''); setFreshGeneration(generation); setConfigurationError(false); setLoaded(true); setMessage('Configuration refreshed. Preview again before executing.'); }
+      } catch { if (live && connection.current.generation === generation) { ++revision.current; setConfigurationError(true); setFreshGeneration(null); } }
       finally { pending = false; }
     }
     void load();
     const timer = setInterval(() => void load(), 800);
     return () => { live = false; controller.abort(); clearInterval(timer); };
-  }, []);
+  }, [connected, generation]);
   useEffect(() => {
     if (preview && !valid) {
       if (previewFocused.current) { recoverFocus(); previewFocused.current = false; }
@@ -60,13 +72,15 @@ export function SkillExecution({work, workspace, connected, draft, disabled, sub
     lock.current = true; setBusy(true); setPreview(null); setMessage('Preparing preview…');
     const captured = snapshot;
     const capturedRevision = revision.current;
+    const capturedGeneration = generation;
     try {
       const value = await api<unknown>(`/api/work/${encodeURIComponent(work.id)}/skill-preview`, {skill_id: selected});
+      if (connection.current.generation !== capturedGeneration) return;
       if (current.current !== captured || revision.current !== capturedRevision) { setMessage('Work or configuration changed. Preview again.'); return; }
       if (!validSkillPreview(value, work, selected)) throw new Error('Preview response is invalid or unsupported. Refresh history and configuration, then preview again.');
       setPreview({value, snapshot: captured}); setMessage('Preview ready. Review the effective input before executing.');
-    } catch (error) { setMessage((error as Error).message); }
-    finally { lock.current = false; setBusy(false); }
+    } catch (error) { if (connection.current.generation === capturedGeneration) setMessage((error as Error).message); }
+    finally { if (connection.current.generation === capturedGeneration) { lock.current = false; setBusy(false); } }
   }
   const executeButton = useRef<HTMLButtonElement>(null);
   useEffect(() => { if (valid) executeButton.current?.focus(); }, [valid]);
@@ -79,7 +93,7 @@ export function SkillExecution({work, workspace, connected, draft, disabled, sub
       {skills.filter(s => s.enabled).map(s => <option key={s.id} value={s.id}>{s.name} · {s.id}</option>)}
     </select>
     <button type="button" ref={button} disabled={busy || !connected || !available || !skills.some(s => s.id === selected && s.enabled) || disabled} onClick={() => void inspect()}>Preview Skill with saved work</button>
-    <p role="status" aria-live="polite">{!available ? loaded ? 'Skills stale. Retained configuration is unavailable for execution. Waiting to reconnect.' : 'Skills unavailable. Waiting for configuration.' : message}</p>
+    <p role="status" aria-live="polite">{!connected ? 'Disconnected. Skills stale. Reconnect to refresh configuration; preview consent is cleared.' : !available ? configurationError ? 'Skills unavailable; retained configuration is stale. Configuration refresh failed; retrying. Preview blocked.' : loaded ? 'Skills stale. Loading current configuration before previewing.' : 'Loading Skills configuration before previewing.' : message}</p>
     {preview && valid && <section aria-label="Skill execution preview" onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); dismissPreview(); } }} onFocusCapture={() => { previewFocused.current = true; }} onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget)) previewFocused.current = false; }}>
       <h4>Effective instructions and saved work</h4><pre>{preview.value.input}</pre>
       <p>This creates one new attempt, preserving earlier results. Unsaved draft text is not submitted.</p>

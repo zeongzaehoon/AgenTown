@@ -4,7 +4,7 @@ import { afterEach, expect, test, vi } from 'vitest';
 import { HookExecution } from './HookExecution';
 import { App } from './App';
 import type { Work, Workspace } from './api';
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 const work: Work = {id: 'w', input: 'Saved request', status: 'pending', assignees: ['e'], attempts: [{id: 'r', state: 'finished', outcome: 'reported_success', participants: ['e']}]};
 const workspace: Workspace = {work: [work], employees: [{id: 'e', name: 'Writer'}], configuration: null, provider: 'fixture', model: 'fixture'};
 const hook = {id: 'h', name: 'Follow up', enabled: true, skill_id: 's', target_kind: 'agent', target_id: 'e', event: 'run_completed'};
@@ -144,4 +144,107 @@ test.each(['cancel', 'escape'])('saved-work Hook %s clears consent locally and r
     expect(fetcher.mock.calls).toHaveLength(requests + 1);
     expect(props.submit).not.toHaveBeenCalled();
   } finally { interval.mockRestore(); }
+});
+
+// Freeze only product polling; keyboard helpers retain real timers.
+test.each(['held', 'failed', 'disabled', 'changed', 'late configuration', 'late preview', 'disabled Hook', 'failed Hook'])('current-connection Hook recovery: %s', async scenario => {
+  let poll: (() => void) | undefined;
+  const realInterval = globalThis.setInterval;
+  vi.spyOn(globalThis, 'setInterval').mockImplementation((callback, delay, ...args) => {
+    if (delay === 800) {
+      poll = callback as () => void;
+      return 1 as unknown as ReturnType<typeof setInterval>;
+    }
+    return realInterval(callback, delay, ...args);
+  });
+  const props = setup();
+  const original = globalThis.fetch;
+  const pending: Array<{path: string; resolve: (response: Response) => void; reject: (error: Error) => void}> = [];
+  let holdConfiguration = false;
+  let holdPreview = false;
+  const requests = vi.fn(async (path: string, options?: RequestInit) => {
+    if ((holdConfiguration && (path.endsWith('/skills') || path.endsWith('/hooks'))) || (holdPreview && path.endsWith('/hook-preview'))) {
+      return new Promise<Response>((resolve, reject) => pending.push({path, resolve, reject}));
+    }
+    const response = await original(path, options);
+    return response;
+  });
+  vi.stubGlobal('fetch', requests);
+  const user = userEvent.setup();
+  const view = render(<HookExecution {...props} connected={false} />);
+  expect(requests).not.toHaveBeenCalled();
+  expect(screen.getByRole('status').textContent).toMatch(/Disconnected/);
+  view.rerender(<HookExecution {...props} />);
+  await screen.findByRole('option', {name: /Follow up · h/});
+  await user.selectOptions(screen.getByLabelText('Employee Hook'), 'h');
+  const button = () => screen.getByRole('button', {name: 'Preview Hook with saved work'}) as HTMLButtonElement;
+  if (scenario === 'late preview') holdPreview = true;
+  await user.click(button());
+  if (scenario !== 'late preview') await screen.findByRole('button', {name: 'Execute once with Hook'});
+  holdConfiguration = true;
+  if (scenario === 'late configuration') {
+    act(() => poll?.());
+    expect(pending).toHaveLength(2);
+  }
+  view.rerender(<HookExecution {...props} connected={false} />);
+  expect(screen.queryByRole('button', {name: 'Execute once with Hook'})).toBeNull();
+  expect(button().disabled).toBe(true);
+  view.rerender(<HookExecution {...props} />);
+  expect((screen.getByLabelText('Employee Hook') as HTMLSelectElement).value).toBe('h');
+  expect(button().disabled).toBe(true);
+  expect(screen.getByRole('status').textContent).toMatch(/Loading/);
+  if (scenario === 'late configuration' || scenario === 'late preview') {
+    // Resolve only the request(s) from the previous connection first.
+    const oldCount = scenario === 'late preview' ? 1 : 2;
+    const old = pending.splice(0, oldCount);
+    await act(async () => { for (const request of old) request.resolve(await original(request.path)); });
+    expect(button().disabled).toBe(true);
+    expect(screen.queryByRole('button', {name: 'Execute once with Hook'})).toBeNull();
+  }
+  if (scenario === 'held') {
+    const first = pending.shift()!;
+    await act(async () => first.resolve(await original(first.path)));
+    expect(button().disabled).toBe(true);
+    expect(screen.getByRole('status').textContent).toMatch(/Loading/);
+  }
+  if (scenario === 'failed' || scenario === 'failed Hook') {
+    await act(async () => { for (const request of pending.splice(0)) {
+      if (scenario === 'failed Hook' && request.path.endsWith('/skills')) request.resolve(await original(request.path));
+      else request.reject(new Error('offline'));
+    } });
+    expect(screen.getByRole('status').textContent).toMatch(/refresh failed/);
+    expect(button().disabled).toBe(true);
+    holdConfiguration = false;
+    act(() => poll?.());
+  } else {
+    await act(async () => {
+      for (const request of pending.splice(0)) {
+        const response = await original(request.path);
+        if (scenario === 'changed' && request.path.endsWith('/skills')) {
+          const body = await response.json();
+          request.resolve(new Response(JSON.stringify({...body, skills: body.skills.map((record: object) => ({...record, name: 'Updated Skill', instructions: 'Updated instructions'}))})));
+        } else if (scenario === 'disabled Hook' && request.path.endsWith('/hooks')) {
+          const body = await response.json();
+          request.resolve(new Response(JSON.stringify({...body, hooks: body.hooks.map((record: object) => ({...record, enabled: false}))})));
+        } else if (scenario === 'disabled' && request.path.endsWith('/skills')) {
+          const body = await response.json();
+          request.resolve(new Response(JSON.stringify({...body, skills: body.skills.map((record: object) => ({...record, enabled: false}))})));
+        } else request.resolve(response);
+      }
+    });
+  }
+  holdConfiguration = false; holdPreview = false;
+  if (scenario === 'disabled' || scenario === 'disabled Hook') {
+    expect(button().disabled).toBe(true);
+    act(() => poll?.());
+  }
+  await waitFor(() => expect(button().disabled).toBe(false));
+  // No preview or execution is replayed by reconnect or polling.
+  expect(screen.queryByRole('button', {name: 'Execute once with Hook'})).toBeNull();
+  expect(props.submit).not.toHaveBeenCalled();
+  button().focus(); await user.keyboard('{Enter}');
+  const consent = await screen.findByRole('button', {name: 'Execute once with Hook'});
+  expect(document.activeElement).toBe(consent);
+  await user.keyboard('{Enter}');
+  expect(props.submit).toHaveBeenCalledTimes(1);
 });
