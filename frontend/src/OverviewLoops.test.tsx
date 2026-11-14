@@ -716,3 +716,84 @@ test.each(['expired', 'failed', 'malformed'])('ordinary retained attempt details
   expect(screen.queryByText(/Stale attempt details/)).toBeNull();
   expect(within(screen.getByRole('region', {name: 'Attempts for Loop s'})).getByText('Recovered ordinary output')).toBeTruthy();
 });
+
+test.each(['ordinary', 'local MCP'])('%s disclosures preserve saved session context across changed work, refresh and unavailable inspection', async owner => {
+  vi.useFakeTimers({toFake: ['setInterval', 'clearInterval']});
+  const user = userEvent.setup();
+  const local = owner === 'local MCP';
+  const sessions = [1, 2].map(n => ({...companySession(n), provider: `saved-provider-${n}`, model: `saved-model-${n}`,
+    preview: {...companySession(n).preview, preview_id: uid(n + 50), policy_name: 'Duplicate policy',
+      input: `Saved input ${n}\nwith another line`, max_iterations: n + 2, interval_seconds: n * 60, expected_runs: n + 4}}));
+  const attempts: LoopInspection['attempts'] = sessions.map((s, i) => ({session_id: s.session_id, run_id: uid(i + 100), ordinal: 1,
+    execution: i === 0 ? {provider: 'attempt-provider', model: 'attempt-model', input: 'Recorded attempt request', output: 'Fixture result', error: null} : null}));
+  let failed = false;
+  let reversed = false;
+  const requests: string[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (path: string) => {
+    requests.push(path);
+    if (local && path === '/api/loops/v1') return new Response(JSON.stringify({...initial(), sessions: [], attempts: []}));
+    expect(path).toBe(local ? '/api/connections/v1/loops/inspect-company' : '/api/loops/v1');
+    if (failed) throw new Error('offline');
+    const saved = reversed ? [...sessions].reverse() : sessions;
+    const reply = companyReply(saved);
+    return new Response(JSON.stringify(local ? {...reply, data: {...reply.data, attempts}} : {...initial(), sessions: saved, attempts}));
+  }));
+  const changedWorkspace = {...workspace, provider: 'current-provider', model: 'current-model', configuration: 'changed configuration',
+    work: [{...workspace.work[0], id: uid(11), input: 'Changed current work'}]};
+  const open = vi.fn();
+  const view = render(<OverviewLoops workspace={changedWorkspace} onOpenWork={open} onOpenSession={open} />);
+  await act(async () => {});
+  const refresh = screen.getByRole('button', {name: local ? 'Inspect company Loops through local MCP' : 'Inspect Loop sessions again'});
+  if (local) await act(async () => {fireEvent.click(refresh);});
+  const toggleName = (n: number) => `Attempt details for ${local ? 'local MCP Loop' : 'Loop'} ${uid(n)}`;
+  const detailsName = (n: number) => `Attempts for ${local ? 'local MCP Loop' : 'Loop'} ${uid(n)}`;
+  const before = [...requests];
+  for (const n of [1, 2]) {
+    const toggle = screen.getByRole('button', {name: toggleName(n)});
+    toggle.focus(); await user.keyboard(n === 1 ? '{Enter}' : ' ');
+    expect(document.activeElement).toBe(toggle);
+    const details = screen.getByRole('region', {name: detailsName(n)});
+    const field = (label: string) => within(details).getByText(label, {selector: 'dt'}).nextElementSibling?.textContent;
+    expect(field('Task ID')).toBe(uid(n + 10));
+    expect(field('Employee ID')).toBe(uid(20));
+    expect(field('Policy ID')).toBe(uid(n + 30));
+    expect(field('Preview ID')).toBe(uid(n + 50));
+    expect(field('Session ID')).toBe(uid(n));
+    expect(field('Saved policy name')).toBe('Duplicate policy');
+    expect(field('Maximum iterations')).toBe(String(n + 2));
+    expect(field('Interval (seconds)')).toBe(String(n * 60));
+    expect(field('Expected prior runs')).toBe(String(n + 4));
+    expect(field('Session provider')).toBe(`saved-provider-${n}`);
+    expect(field('Session model')).toBe(`saved-model-${n}`);
+    expect(within(details).getByText(`Saved input ${n} with another line`).textContent).toBe(`Saved input ${n}\nwith another line`);
+    expect(details.textContent).not.toMatch(/current-provider|current-model|Changed current work|changed configuration/);
+    if (n === 1) {
+      expect(within(details).getByText('Attempt provider: attempt-provider · Attempt model: attempt-model')).toBeTruthy();
+      expect(within(details).getByText('Recorded attempt request')).toBeTruthy();
+      expect(within(details).getByText('Fixture result')).toBeTruthy();
+    } else {
+      expect(within(details).getByText('Attempt provider: Not recorded · Attempt model: Not recorded')).toBeTruthy();
+      expect(within(details).getByText(/Attempt input not recorded/)).toBeTruthy();
+    }
+  }
+  expect(requests).toEqual(before);
+  expect(open).not.toHaveBeenCalled();
+  const toggle = screen.getByRole('button', {name: toggleName(1)});
+  toggle.focus(); reversed = true;
+  view.rerender(<OverviewLoops workspace={{...changedWorkspace, work: [], employees: []}} onOpenWork={open} onOpenSession={open} />);
+  await act(async () => {fireEvent.click(refresh);});
+  expect(document.activeElement).toBe(toggle);
+  expect(toggle.getAttribute('aria-expanded')).toBe('true');
+  expect(within(screen.getByRole('region', {name: detailsName(1)})).getByText('saved-model-1')).toBeTruthy();
+  failed = true;
+  await act(async () => {fireEvent.click(refresh);});
+  const retained = screen.getByRole('region', {name: detailsName(1)});
+  expect(within(retained).getByText(/Stale attempt details/)).toBeTruthy();
+  expect(within(retained).getByText('saved-model-1')).toBeTruthy();
+  expect(document.activeElement).toBe(toggle);
+  const afterFailure = [...requests];
+  await user.keyboard('{Enter}'); await user.keyboard(' ');
+  expect(requests).toEqual(afterFailure);
+  expect(toggle.getAttribute('aria-expanded')).toBe('true');
+  expect(screen.getByRole('button', {name: local ? `Stop local MCP Loop ${uid(1)} from overview` : `Stop Loop ${uid(1)} from overview`}).getAttribute('aria-disabled')).toBe('true');
+});

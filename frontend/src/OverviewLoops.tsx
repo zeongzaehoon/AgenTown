@@ -1,10 +1,10 @@
 import { inspectCompanyLoops, localLoop, sameLocalSession } from './work-loop-api';
 import { canControl, controlText, sourceText, type LoopControl } from './loop-control';
 import { useEffect, useRef, useState } from 'react';
-import { ApiError, api, type Workspace } from './api';
+import { ApiError, api, type Workspace, type Attempt } from './api';
 import { loopLabel } from './LoopExecution';
 import { executionLabel } from './WorkLoop';
-import { confirmedLoop, loopInspection, loopReceipt, type LoopInspection } from './loop-response';
+import { confirmedLoop, loopInspection, loopReceipt, type LoopInspection, type LoopSession } from './loop-response';
 
 export type LoopNavigation = {taskId: string; sessionId: string; policyId?: never} | {taskId: string; policyId: string; sessionId?: never};
 
@@ -99,10 +99,12 @@ export function OverviewLoops({workspace, onOpenWork, onOpenSession}: {onOpenSes
           })}>Attempt details for Loop {session.session_id}</button>
         {expanded.has(session.session_id) && <section id={`overview-attempts-${session.session_id}`} aria-label={`Attempts for Loop ${session.session_id}`}>
           <p>{fresh ? 'Recorded attempts from the last successful inspection.' : 'Stale attempt details. Inspect Loop sessions again for current persisted execution state.'}</p>
+          <SavedSessionContext session={session} />
           <p>Quality unverified</p>
           {!inspection.attempts.some(a => a.session_id === session.session_id) && <p>No recorded attempts for this session. Provider completion unknown.</p>}
           {inspection.attempts.filter(a => a.session_id === session.session_id).map(a => <article key={a.run_id}>
             <p>Attempt {a.ordinal} · Run ID: {a.run_id} · {executionLabel(a.execution)}</p>
+            <RecordedAttemptSettings execution={a.execution} />
             {a.execution?.output != null && <><p>Output</p><pre>{a.execution.output}</pre></>}
             {a.execution?.error && <><p>Error</p><p>{a.execution.error}</p></>}
           </article>)}
@@ -204,10 +206,12 @@ function CompanyMcpLoops({workspace, onOpenSession}: {workspace: Workspace | nul
             })}>Attempt details for local MCP Loop {s.session_id}</button>
           {expanded.has(s.session_id) && <section id={`mcp-attempts-${s.session_id}`} aria-label={`Attempts for local MCP Loop ${s.session_id}`}>
             <p>{fresh ? 'Recorded attempts from the last explicit inspection.' : 'Stale attempt details. Inspect company Loops again for current persisted execution state.'}</p>
+            <SavedSessionContext session={s} />
             <p>Quality unverified</p>
             {!inspection.attempts.some(a => a.session_id === s.session_id) && <p>No recorded attempts for this session. Provider completion unknown.</p>}
             {inspection.attempts.filter(a => a.session_id === s.session_id).map(a => <article key={a.run_id}>
               <p>Attempt {a.ordinal} · Run ID: {a.run_id} · {executionLabel(a.execution)}</p>
+              <RecordedAttemptSettings execution={a.execution} />
               {a.execution?.output != null && <><p>Output</p><pre>{a.execution.output}</pre></>}
               {a.execution?.error && <><p>Error</p><p>{a.execution.error}</p></>}
             </article>)}
@@ -218,4 +222,36 @@ function CompanyMcpLoops({workspace, onOpenSession}: {workspace: Workspace | nul
       })}</ul>
     </>}
   </section>;
+}
+
+
+function SavedSessionContext({session}: {session: LoopSession}) {
+  const saved = session.preview;
+  return <div>
+    <h5>Saved session settings</h5>
+    <p>These values were saved with this session; current work and configuration may differ.</p>
+    <dl>
+      <dt>Task ID</dt><dd>{saved.task_id}</dd>
+      <dt>Employee ID</dt><dd>{saved.agent_id}</dd>
+      <dt>Policy ID</dt><dd>{saved.policy_id}</dd>
+      <dt>Preview ID</dt><dd>{saved.preview_id}</dd>
+      <dt>Session ID</dt><dd>{session.session_id}</dd>
+      <dt>Saved policy name</dt><dd>{saved.policy_name}</dd>
+      <dt>Maximum iterations</dt><dd>{saved.max_iterations}</dd>
+      <dt>Interval (seconds)</dt><dd>{saved.interval_seconds}</dd>
+      <dt>Expected prior runs</dt><dd>{saved.expected_runs}</dd>
+      <dt>Session provider</dt><dd>{session.provider}</dd>
+      <dt>Session model</dt><dd>{session.model}</dd>
+    </dl>
+    <p>Saved session input</p><pre>{saved.input}</pre>
+  </div>;
+}
+
+function RecordedAttemptSettings({execution}: {execution: Partial<Attempt> | null}) {
+  return <div>
+    <h6>Recorded attempt settings</h6>
+    <p>Attempt provider: {execution?.provider ?? 'Not recorded'} · Attempt model: {execution?.model ?? 'Not recorded'}</p>
+    <p>Recorded attempt input</p>
+    {execution?.input !== undefined ? <pre>{execution.input}</pre> : <p>Attempt input not recorded. Saved session settings above do not confirm attempt settings.</p>}
+  </div>;
 }

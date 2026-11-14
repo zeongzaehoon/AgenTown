@@ -3438,3 +3438,42 @@ production build, 505 Python tests with 2 skipped, and the harness Rust and
 operational test suites. The selected frontend profile deferred installed-browser
 and installation/process-recovery gates. Live provider tests remain skipped, not
 passed, under the user policy.
+
+### Inspect saved Loop input and conditions in Company overview (C95-T1)
+
+Launch `agentown-web --database /absolute/path/product.sqlite3 --port 8765`
+and open <http://127.0.0.1:8765> → Company overview → **Bounded Loop activity**.
+Prerequisite: existing persisted Loop inspection records in this product database;
+no credentials or new execution are required.
+
+1. Focus **Attempt details for Loop SESSION** and press Enter or Space. The
+   disclosure shows **Saved session settings**: Task, employee, policy, preview
+   and session IDs, saved policy name, complete saved input, maximum iterations,
+   interval in seconds, expected prior runs, and session provider/model alongside
+   recorded attempt results.
+2. Choose **Inspect company Loops through local MCP**, then focus **Attempt details
+   for local MCP Loop SESSION** and press Enter or Space for the same saved context
+   from the retained local MCP owner. Opening/closing either disclosure sends no
+   request and grants no execution consent.
+3. Compare sessions even when their policy names match. Values come from each
+   session's persisted preview/session records, so editing current work or provider
+   configuration does not change historical context. Missing linked work does not
+   prevent inspection. **Recorded attempt settings** separately show any recorded
+   provider, model and input; missing values say not recorded rather than borrowing
+   session settings.
+4. Keep a disclosure focused and expanded while refreshing inspection. It stays
+   expanded for that session and retains focus. If inspection fails or expires,
+   retained details are marked stale and Stop remains subject to fresh authority.
+   Existing explicit consent and Stop ownership checks still apply.
+
+Focused deterministic check: `cd frontend && npx vitest run src/OverviewLoops.test.tsx`.
+Coverage includes duplicate policy names, distinct persisted inputs/settings,
+changed current work/configuration, unavailable linked work, keyboard disclosure,
+request-free expansion, refresh reordering/focus retention, and stale/unavailable
+inspection. This invocation attempted `npm test -- src/OverviewLoops.test.tsx`; it stopped
+before running tests with `tsc: command not found` because this isolated workspace
+has no frontend dependencies installed. Supervisor verification passed all 32
+frontend test files and 1,065 tests, including 46 OverviewLoops tests, the
+production build, 505 Python tests with 2 skipped, and the harness Rust and
+operational suites. The selected frontend profile deferred installed-browser and
+installation/process-recovery gates. Live provider calls remain skipped, not passed.
