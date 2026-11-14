@@ -4591,3 +4591,53 @@ Supervisor frontend verification passed 1,319 frontend tests, TypeScript
 checking, the production build, and 505 Python tests with 2 skipped.
 Installed-browser and recovery gates were deferred by this profile. Live
 provider validation remains skipped, not passed.
+
+
+## Open all assigned work from an employee (C121-T1)
+
+Launch `agentown-web --database /absolute/path/product.sqlite` with recorded
+employees and work, or open the packaged app using its saved workspace. No
+provider credentials are needed.
+
+1. Use two employees named Alex with distinct IDs, an idle employee, and work
+   shared between the two Alex employees. Include requests with different
+   outcomes. Select a saved request and expand its result. Enter unsaved employee
+   and work drafts, and choose an assignment input.
+2. Enter a conflicting **Search saved work** value and select a restrictive
+   **Current outcome**. Tab to either **Select office character: Alex · ID: …**
+   or the workload heading **View assigned work: Alex · ID: …**. Press Enter or
+   Space. That exact employee ID becomes selected, search clears, and Current
+   outcome becomes **All outcomes**. Focus moves to **Work & results**; Tab
+   reaches search next.
+3. Check that every request assigned to that ID is reachable, including shared
+   work once per employee. Repeat for the other Alex and the idle employee;
+   the idle selection shows explicit empty matches. The selected detail,
+   expanded results, employee/work drafts and assignment input remain intact.
+   When that saved request is outside the employee's matches, **Saved work**
+   shows **Select a matching request** and an explanatory notice; its detail
+   stays selected below. Returning to its employee restores the picker value.
+4. Disconnect the server and refresh. Repeat both controls with Enter and Space.
+   Navigation uses the retained snapshot and shows stale-assignment notices;
+   it does not claim fresh history or execute work.
+5. Inspect network traffic: these actions must issue no save, assignment, retry
+   or execution requests.
+
+Run deterministic coverage with:
+
+```sh
+cd frontend
+npm test -- src/CompanyOverview.test.tsx src/App.test.tsx
+```
+
+The App cases named “opens all assigned work” cover both controls with both
+keys, conflicting filters, duplicate names, shared and zero assignments,
+disconnected snapshots, preserved detail/drafts/assignment input, focus and
+state-only requests. The existing employee navigation case also retains retry
+consent while changing this view. The picker assertion accounts for an excluded
+saved selection while still checking retained detail and expanded results.
+
+Supervisor verification passed 1,323 frontend tests, TypeScript checking, the
+production build, and 505 Python tests with 2 skipped. Independent review
+inspected the matching verification artifacts and found no blocking issues.
+Installed-browser and recovery gates were deferred by this profile. Live LLM
+calls remain skipped, not passed.

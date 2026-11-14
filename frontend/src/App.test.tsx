@@ -875,7 +875,7 @@ test('employee navigation uses IDs, composes filters and preserves drafts, resul
   await user.click(retry());
   const card = screen.getByRole('button', {name: 'Select office character: Alex · ID: other'});
   card.focus(); await user.keyboard('{Enter}');
-  expect(document.activeElement).toBe(card);
+  expect(document.activeElement).toBe(screen.getByRole('heading', {name: '3. Work & results'}));
   expect(card.getAttribute('aria-pressed')).toBe('true');
   expect(matchingIds()).toEqual(['other-work']);
   expect(screen.getByText(/Its detail remains selected/)).toBeTruthy();
@@ -905,6 +905,66 @@ test('employee navigation uses IDs, composes filters and preserves drafts, resul
   expect((screen.getByLabelText('Assign to') as HTMLSelectElement).value).toBe('other');
   expect(JSON.stringify(f.state)).toBe(before);
   expect(f.calls.every(c => c.path === '/api/state')).toBe(true);
+});
+
+test.each([
+  ['Select office character', '{Enter}'], ['Select office character', ' '],
+  ['View assigned work', '{Enter}'], ['View assigned work', ' '],
+])('%s opens all assigned work with %s while preserving detail and drafts', async (presentation, key) => {
+  vi.spyOn(window, 'setInterval').mockImplementation(() => 0);
+  const f = savedResults();
+  f.state.employees = [{id: 'e', name: 'Alex'}, {id: 'other', name: 'Alex'}, {id: 'idle', name: 'Idle'}];
+  f.state.work.push(
+    {id: 'shared', input: 'Shared pending', status: 'pending', assignees: ['e', 'other', 'other'], attempts: []},
+    {id: 'other-work', input: 'Other cancelled', status: 'cancelled', assignees: ['other'], attempts: []},
+  );
+  const before = JSON.stringify(f.state);
+  const user = userEvent.setup(); render(<App />); await connected();
+  fireEvent.change(draftInput(), {target: {value: 'Keep work draft'}});
+  fireEvent.change(screen.getByLabelText('Employee name'), {target: {value: 'Keep employee draft'}});
+  await user.selectOptions(screen.getByLabelText('Assign to'), 'other');
+  await user.click(screen.getByText('Attempt 1 · Result available · Unverified'));
+  const expanded = [...document.querySelectorAll<HTMLDetailsElement>('#detail details')];
+  await waitFor(() => expect(expanded.every(detail => detail.open)).toBe(true));
+  for (const offline of [false, true]) {
+    if (offline) {
+      f.disconnect(); refresh();
+      await waitFor(() => expect(document.querySelector('#connection')!.textContent).toContain('Disconnected'));
+      await screen.findByText(/Using stale assignments/);
+    }
+    for (const [id, name, expected] of [
+      ['other', 'Alex', ['shared', 'other-work']], ['e', 'Alex', ['w', 'shared']], ['idle', 'Idle', []],
+    ] as const) {
+      fireEvent.change(searchInput(), {target: {value: 'No matching search'}});
+      await user.selectOptions(outcomeFilter(), 'failed');
+      expect(matchingIds()).toEqual([]);
+      const control = screen.getByRole('button', {name: `${presentation}: ${name} · ID: ${id}`});
+      control.focus(); await user.keyboard(key);
+      expect(control.getAttribute('aria-pressed')).toBe('true');
+      expect(document.activeElement).toBe(screen.getByRole('heading', {name: '3. Work & results'}));
+      expect((searchInput() as HTMLInputElement).value).toBe('');
+      expect(outcomeFilter().value).toBe('all');
+      expect(matchingIds()).toEqual(expected);
+      if (id === 'idle') expect(screen.getByText(/No saved work matches your employee/)).toBeTruthy();
+      // The picker contains only matching requests; an excluded selection keeps
+      // its detail below while the picker offers a placeholder.
+      const selectedMatches = expected.some(workId => workId === 'w');
+      expect(history().value).toBe(selectedMatches ? 'w' : '');
+      if (!selectedMatches) {
+        expect(history().selectedOptions[0].textContent).toBe('Select a matching request');
+        expect(history().getAttribute('aria-describedby')).toBe('selection-help');
+        expect(screen.getByText(/Its detail remains selected below/)).toBeTruthy();
+      }
+      expect(screen.getByText('Work ID: w')).toBeTruthy();
+      expect(draftInput().value).toBe('Keep work draft');
+      expect((screen.getByLabelText('Employee name') as HTMLInputElement).value).toBe('Keep employee draft');
+      expect((screen.getByLabelText('Assign to') as HTMLSelectElement).value).toBe('other');
+      for (const detail of expanded) { expect(detail.isConnected).toBe(true); expect(detail.open).toBe(true); }
+      await user.tab(); expect(document.activeElement).toBe(searchInput());
+    }
+  }
+  expect(JSON.stringify(f.state)).toBe(before);
+  expect(f.calls.every(call => call.path === '/api/state')).toBe(true);
 });
 
 test('employee assignment polling and disconnected navigation retain selected history and expanded results', async () => {
