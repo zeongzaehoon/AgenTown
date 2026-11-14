@@ -21,7 +21,7 @@ test('read-only inspection transitions independently through active, waiting, st
   });
   vi.stubGlobal('fetch', fetcher);
   const open = vi.fn();
-  const view = render(<OverviewLoops workspace={workspace} onOpenWork={open} />);
+  const view = render(<OverviewLoops connected={true} workspace={workspace} onOpenWork={open} />);
   expect(screen.getByText('Loading Loop inspection…')).toBeTruthy();
   await act(async () => {});
   expect(screen.getByText(/Active — waiting for provider response/)).toBeTruthy();
@@ -31,7 +31,7 @@ test('read-only inspection transitions independently through active, waiting, st
   expect(screen.getByText(/Waiting — next admission controlled/)).toBeTruthy();
   failed = true;
   await act(async () => { await vi.advanceTimersByTimeAsync(800); });
-  view.rerender(<OverviewLoops workspace={{...workspace}} onOpenWork={open} />);
+  view.rerender(<OverviewLoops connected={true} workspace={{...workspace}} onOpenWork={open} />);
   expect(screen.getByText(/showing stale sessions/)).toBeTruthy();
   const button = screen.getByRole('button', {name: /Open work: Saved request/});
   button.focus(); expect(document.activeElement).toBe(button);
@@ -57,7 +57,7 @@ test('unavailable initial inspection, absent linked IDs and late response cleanu
     if (fail) throw new Error('offline');
     return new Response(JSON.stringify(initial()));
   }));
-  const view = render(<OverviewLoops workspace={{...workspace, employees: [], work: []}} onOpenWork={vi.fn()} />);
+  const view = render(<OverviewLoops connected={true} workspace={{...workspace, employees: [], work: []}} onOpenWork={vi.fn()} />);
   await act(async () => {});
   expect(screen.getByText('Loop inspection unavailable. No session data loaded.')).toBeTruthy();
   fail = false;
@@ -71,7 +71,7 @@ test('unavailable initial inspection, absent linked IDs and late response cleanu
   let resolve!: (value: Response) => void;
   const fetcher = vi.fn((_path: string, init?: RequestInit) => { signal = init?.signal as AbortSignal; return new Promise<Response>(r => { resolve = r; }); });
   vi.stubGlobal('fetch', fetcher);
-  const pending = render(<OverviewLoops workspace={workspace} onOpenWork={vi.fn()} />);
+  const pending = render(<OverviewLoops connected={true} workspace={workspace} onOpenWork={vi.fn()} />);
   await act(async () => { await vi.advanceTimersByTimeAsync(1600); });
   expect(fetcher).toHaveBeenCalledTimes(1);
   pending.unmount();
@@ -129,7 +129,7 @@ test('competing owner remains connected for inspection and navigation with unver
   });
   vi.stubGlobal('fetch', fetcher);
   const open = vi.fn();
-  render(<OverviewLoops workspace={workspace} onOpenWork={open} />);
+  render(<OverviewLoops connected={true} workspace={workspace} onOpenWork={open} />);
   const button = await screen.findByRole('button', {name: /Open work:/});
   expect(screen.getByText('Showing recorded Loop sessions.')).toBeTruthy();
   expect(screen.getByLabelText('Overview Loop authority').textContent).toContain('another server owns execution');
@@ -157,7 +157,7 @@ test('explicit stop without linked work ignores a pre-stop poll and requires pos
     return Promise.resolve(new Response(JSON.stringify(initial())));
   });
   vi.stubGlobal('fetch', fetcher);
-  render(<OverviewLoops workspace={null} onOpenWork={vi.fn()} />);
+  render(<OverviewLoops connected={true} workspace={null} onOpenWork={vi.fn()} />);
   await act(async () => {});
   const button = screen.getByRole('button', {name: 'Stop Loop s from overview'});
   button.focus();
@@ -188,7 +188,7 @@ test.each(['race', 'ambiguous'])('%s stop failure never retries and refreshes au
     return new Response(JSON.stringify({error: 'Ownership changed', control: inspection.control}), {status: 409});
   });
   vi.stubGlobal('fetch', fetcher);
-  render(<OverviewLoops workspace={workspace} onOpenWork={vi.fn()} />);
+  render(<OverviewLoops connected={true} workspace={workspace} onOpenWork={vi.fn()} />);
   await act(async () => {});
   const button = screen.getByRole('button', {name: 'Stop Loop s from overview'});
   await act(async () => { fireEvent.click(button); });
@@ -211,7 +211,7 @@ test('terminal, ungranted, stale and unavailable inspection prevents stop', asyn
     return new Response(JSON.stringify(value));
   });
   vi.stubGlobal('fetch', fetcher);
-  render(<OverviewLoops workspace={workspace} onOpenWork={vi.fn()} />);
+  render(<OverviewLoops connected={true} workspace={workspace} onOpenWork={vi.fn()} />);
   await act(async () => {});
   const button = screen.getByRole('button', {name: 'Stop Loop s from overview'});
   for (const state of ['complete', 'stopped', 'failed', 'expired', 'restarted', 'stale']) {
@@ -249,7 +249,7 @@ test.each([null, {sessions: [null]}, {sessions: [{...session, preview: null}]},
   });
   vi.stubGlobal('fetch', fetcher);
   try {
-    render(<OverviewLoops workspace={workspace} onOpenWork={vi.fn()} />);
+    render(<OverviewLoops connected={true} workspace={workspace} onOpenWork={vi.fn()} />);
     await act(async () => {});
     expect(screen.getByText(/No session data loaded/)).toBeTruthy();
     value = initial(); await act(async () => poll());
@@ -272,7 +272,7 @@ test.each([null, {sessions: [null]}, {sessions: [{...session, preview: null}]},
 test.each(['__proto__', 'constructor', 'toString'])('renders prototype-named session state %s without mutations', async state => {
   const fetcher = vi.fn(async (_path: string, _init?: RequestInit) => new Response(JSON.stringify({...initial(), sessions: [{...session, state}]})));
   vi.stubGlobal('fetch', fetcher);
-  render(<OverviewLoops workspace={workspace} onOpenWork={vi.fn()} />);
+  render(<OverviewLoops connected={true} workspace={workspace} onOpenWork={vi.fn()} />);
   expect(await screen.findByText(content => content.startsWith(`Unknown session state: ${state} ·`))).toBeTruthy();
   const stop = screen.getByRole('button', {name: 'Stop Loop s from overview'});
   expect(stop.getAttribute('aria-disabled')).toBe('true');
@@ -287,7 +287,7 @@ test.each(['valid', 'null', 'malformed', 'unsupported', 'wrong-session'])('overv
     const value = kind === 'valid' ? receipt : kind === 'null' ? null : kind === 'malformed' ? {} : kind === 'unsupported' ? {...receipt, schema_version: 2} : {...receipt, session_id: 'wrong'};
     const fetcher = vi.fn(async (path: string) => new Response(JSON.stringify(path.endsWith('/stop') ? value : initial())));
     vi.stubGlobal('fetch', fetcher);
-    render(<OverviewLoops workspace={workspace} onOpenWork={vi.fn()} />);
+    render(<OverviewLoops connected={true} workspace={workspace} onOpenWork={vi.fn()} />);
     await act(async () => {});
     const stop = screen.getByRole('button', {name: 'Stop Loop s from overview'});
     stop.focus();
@@ -311,7 +311,7 @@ test.each(['confirmed', 'failed', 'malformed', 'stale'])('overview separates hel
     return new Response(JSON.stringify(initial()));
   });
   vi.stubGlobal('fetch', fetcher);
-  render(<OverviewLoops workspace={{...workspace, work: []}} onOpenWork={vi.fn()} />);
+  render(<OverviewLoops connected={true} workspace={{...workspace, work: []}} onOpenWork={vi.fn()} />);
   const stop = await screen.findByRole('button', {name: 'Stop Loop s from overview'});
   await act(async () => { fireEvent.click(stop); fireEvent.click(stop); });
   expect(screen.getByLabelText('Overview Loop stop outcome').textContent).toMatch(/response received/);
@@ -330,7 +330,7 @@ test('keyboard navigation carries exact Task and session without mutation', asyn
   vi.stubGlobal('fetch', fetcher);
   const navigate = vi.fn();
   const open = vi.fn();
-  render(<OverviewLoops workspace={workspace} onOpenWork={open} onOpenSession={navigate} />);
+  render(<OverviewLoops connected={true} workspace={workspace} onOpenWork={open} onOpenSession={navigate} />);
   const button = await screen.findByRole('button', {name: /Open work: Saved request/});
   button.focus(); await userEvent.keyboard('{Enter}');
   expect(navigate).toHaveBeenCalledWith({taskId: 't', sessionId: 's'});
@@ -357,7 +357,7 @@ test('explicit company read preserves multiple Tasks and keyboard navigation wit
     return new Response(JSON.stringify(companyReply()));
   }));
   const open = vi.fn();
-  render(<OverviewLoops workspace={{...workspace, work: [{...workspace.work[0], id: uid(11)}]}} onOpenWork={vi.fn()} onOpenSession={open} />);
+  render(<OverviewLoops connected={true} workspace={{...workspace, work: [{...workspace.work[0], id: uid(11)}]}} onOpenWork={vi.fn()} onOpenSession={open} />);
   await act(async () => {});
   expect(requests).toEqual(['/api/loops/v1']);
   const inspect = screen.getByRole('button', {name: 'Inspect company Loops through local MCP'});
@@ -381,7 +381,7 @@ test('company inspection discards superseded responses and distinguishes empty, 
     if (companyCalls === 2) return new Response(JSON.stringify(companyReply([])));
     throw new Error('unavailable');
   }));
-  render(<OverviewLoops workspace={workspace} onOpenWork={vi.fn()} />);
+  render(<OverviewLoops connected={true} workspace={workspace} onOpenWork={vi.fn()} />);
   const inspect = screen.getByRole('button', {name: 'Inspect company Loops through local MCP'});
   await act(async () => {fireEvent.click(inspect);});
   await act(async () => {fireEvent.click(inspect);});
@@ -448,7 +448,7 @@ test.each(['confirmed', 'offline', 'active', 'preview', 'timestamp', 'provider']
       : outcome === 'timestamp' ? {...stopped, started_at: 2} : outcome === 'provider' ? {...stopped, provider: 'other'} : {...stopped, admitted: 2};
     return new Response(JSON.stringify({schema_version: 1, requested_task_id: uid(11), status: 'confirmed', code: 'loops_inspected', recovery: 'Read persisted records', data: companyReply([saved], 'local_authority').data}));
   }));
-  render(<OverviewLoops workspace={{...workspace, work: []}} onOpenWork={vi.fn()} />);
+  render(<OverviewLoops connected={true} workspace={{...workspace, work: []}} onOpenWork={vi.fn()} />);
   const inspect = screen.getByRole('button', {name: 'Inspect company Loops through local MCP'});
   inspect.focus(); await userEvent.keyboard('{Enter}');
   const stop = await screen.findByRole('button', {name: `Stop local MCP Loop ${uid(1)} from overview`});
@@ -484,7 +484,7 @@ test('company Stop requires fresh explicit granted authority and an active sessi
     if (unavailable) throw new Error('offline');
     return new Response(JSON.stringify(companyReply(sessions, state)));
   }));
-  render(<OverviewLoops workspace={workspace} onOpenWork={vi.fn()} />);
+  render(<OverviewLoops connected={true} workspace={workspace} onOpenWork={vi.fn()} />);
   const inspect = screen.getByRole('button', {name: 'Inspect company Loops through local MCP'});
   await act(async () => { fireEvent.click(inspect); });
   const stop = screen.getByRole('button', {name: `Stop local MCP Loop ${uid(1)} from overview`});
@@ -529,7 +529,7 @@ test('company attempt details are session-scoped, keyboard accessible and read r
     const reply = companyReply(sessions);
     return new Response(JSON.stringify({...reply, data: {...reply.data, attempts}}));
   }));
-  render(<OverviewLoops workspace={{...workspace, work: []}} onOpenWork={open} onOpenSession={open} />);
+  render(<OverviewLoops connected={true} workspace={{...workspace, work: []}} onOpenWork={open} onOpenSession={open} />);
   await act(async () => {});
   const inspect = screen.getByRole('button', {name: 'Inspect company Loops through local MCP'});
   await act(async () => { fireEvent.click(inspect); });
@@ -586,7 +586,7 @@ test.each(['expired', 'failed', 'unavailable'])('retained company attempt detail
     const reply = companyReply([companySession(1)]);
     return new Response(JSON.stringify({...reply, data: {...reply.data, attempts: [{session_id: uid(1), run_id: uid(101), ordinal: 1, execution: {output: 'Retained fixture output', error: null}}]}}));
   }));
-  render(<OverviewLoops workspace={{...workspace, work: []}} onOpenWork={vi.fn()} />);
+  render(<OverviewLoops connected={true} workspace={{...workspace, work: []}} onOpenWork={vi.fn()} />);
   const inspect = screen.getByRole('button', {name: 'Inspect company Loops through local MCP'});
   await act(async () => {fireEvent.click(inspect);});
   const toggle = screen.getByRole('button', {name: `Attempt details for local MCP Loop ${uid(1)}`});
@@ -628,7 +628,7 @@ test('ordinary attempt details are session-scoped, keyboard accessible and read 
     expect(init?.body).toBeUndefined();
     return new Response(JSON.stringify({...initial(), sessions, attempts}));
   }));
-  render(<OverviewLoops workspace={{...workspace, work: []}} onOpenWork={open} onOpenSession={open} />);
+  render(<OverviewLoops connected={true} workspace={{...workspace, work: []}} onOpenWork={open} onOpenSession={open} />);
   await act(async () => {});
   const inspect = screen.getByRole('button', {name: 'Inspect Loop sessions again'});
   await act(async () => { fireEvent.click(inspect); });
@@ -691,7 +691,7 @@ test.each(['expired', 'failed', 'malformed'])('ordinary retained attempt details
     if (mode === 'malformed') return new Response('{}');
     return new Response(JSON.stringify({...initial(), attempts: [{session_id: 's', run_id: 'r', ordinal: 1, execution: {output, error: null}}]}));
   }));
-  render(<OverviewLoops workspace={workspace} onOpenWork={vi.fn()} />);
+  render(<OverviewLoops connected={true} workspace={workspace} onOpenWork={vi.fn()} />);
   await act(async () => {});
   const toggle = screen.getByRole('button', {name: 'Attempt details for Loop s'});
   fireEvent.click(toggle); toggle.focus();
@@ -741,7 +741,7 @@ test.each(['ordinary', 'local MCP'])('%s disclosures preserve saved session cont
   const changedWorkspace = {...workspace, provider: 'current-provider', model: 'current-model', configuration: 'changed configuration',
     work: [{...workspace.work[0], id: uid(11), input: 'Changed current work'}]};
   const open = vi.fn();
-  const view = render(<OverviewLoops workspace={changedWorkspace} onOpenWork={open} onOpenSession={open} />);
+  const view = render(<OverviewLoops connected={true} workspace={changedWorkspace} onOpenWork={open} onOpenSession={open} />);
   await act(async () => {});
   const refresh = screen.getByRole('button', {name: local ? 'Inspect company Loops through local MCP' : 'Inspect Loop sessions again'});
   if (local) await act(async () => {fireEvent.click(refresh);});
@@ -780,7 +780,7 @@ test.each(['ordinary', 'local MCP'])('%s disclosures preserve saved session cont
   expect(open).not.toHaveBeenCalled();
   const toggle = screen.getByRole('button', {name: toggleName(1)});
   toggle.focus(); reversed = true;
-  view.rerender(<OverviewLoops workspace={{...changedWorkspace, work: [], employees: []}} onOpenWork={open} onOpenSession={open} />);
+  view.rerender(<OverviewLoops connected={true} workspace={{...changedWorkspace, work: [], employees: []}} onOpenWork={open} onOpenSession={open} />);
   await act(async () => {fireEvent.click(refresh);});
   expect(document.activeElement).toBe(toggle);
   expect(toggle.getAttribute('aria-expanded')).toBe('true');
@@ -796,4 +796,132 @@ test.each(['ordinary', 'local MCP'])('%s disclosures preserve saved session cont
   expect(requests).toEqual(afterFailure);
   expect(toggle.getAttribute('aria-expanded')).toBe('true');
   expect(screen.getByRole('button', {name: local ? `Stop local MCP Loop ${uid(1)} from overview` : `Stop Loop ${uid(1)} from overview`}).getAttribute('aria-disabled')).toBe('true');
+});
+
+test.each(['web', 'local MCP'])('%s disconnect invalidates fresh authority, retains focus and rejects old inspection across reconnect', async owner => {
+  vi.useFakeTimers({toFake: ['setInterval', 'clearInterval']});
+  const local = owner === 'local MCP';
+  const {CompanyOverview} = await import('./CompanyOverview');
+  let hold = false;
+  let resolve!: (response: Response) => void;
+  const reply = () => local ? companyReply([companySession(1)], 'local_authority') : initial();
+  const requests: string[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (path: string, init?: RequestInit) => {
+    requests.push(path);
+    if (path === (local ? '/api/connections/v1/loops/inspect-company' : '/api/loops/v1')) {
+      if (hold) return new Promise<Response>(r => {resolve = r;});
+      return new Response(JSON.stringify(reply()));
+    }
+    expect(init?.method).toBe('GET');
+    if (path === '/api/loops/v1') return new Response(JSON.stringify({...initial(), sessions: [], attempts: []}));
+    return new Response(JSON.stringify({loops: [], hooks: [], skills: []}));
+  }));
+  const open = vi.fn();
+  const props = {workspace, error: '', onOpenWork: open};
+  const view = render(<CompanyOverview {...props} connected />);
+  await act(async () => {});
+  const inspect = screen.getByRole('button', {name: local ? 'Inspect company Loops through local MCP' : 'Inspect Loop sessions again'});
+  if (local) await act(async () => {fireEvent.click(inspect);});
+  const stop = screen.getByRole('button', {name: local ? `Stop local MCP Loop ${uid(1)} from overview` : 'Stop Loop s from overview'});
+  expect(stop.getAttribute('aria-disabled')).toBe('false');
+  const toggle = screen.getByRole('button', {name: local ? `Attempt details for local MCP Loop ${uid(1)}` : 'Attempt details for Loop s'});
+  fireEvent.click(toggle); toggle.focus();
+  // Disconnect before the 2400 ms freshness window can expire.
+  view.rerender(<CompanyOverview {...props} connected={false} />);
+  expect(stop.getAttribute('aria-disabled')).toBe('true');
+  expect(document.activeElement).toBe(toggle);
+  fireEvent.click(stop);
+  view.rerender(<CompanyOverview {...props} connected />);
+  await act(async () => {});
+  expect(stop.getAttribute('aria-disabled')).toBe(local ? 'true' : 'false');
+  if (local) await act(async () => {fireEvent.click(inspect);});
+  hold = true;
+  await act(async () => {fireEvent.click(inspect);});
+  view.rerender(<CompanyOverview {...props} connected={false} />);
+  expect(stop.getAttribute('aria-disabled')).toBe('true');
+  expect(document.activeElement).toBe(toggle);
+  expect(screen.getAllByText(/Stale attempt details/).length).toBeGreaterThan(0);
+  fireEvent.click(stop); fireEvent.click(inspect);
+  hold = false;
+  view.rerender(<CompanyOverview {...props} connected />);
+  await act(async () => {});
+  await act(async () => {resolve(new Response(JSON.stringify(local ? reply() : {...initial(), sessions: [{...session, state: 'stopped'}]})));});
+  expect(stop.getAttribute('aria-disabled')).toBe(local ? 'true' : 'false');
+  if (local) {
+    fireEvent.click(stop);
+    await act(async () => {fireEvent.click(inspect);});
+    expect(stop.getAttribute('aria-disabled')).toBe('false');
+  }
+  expect(document.activeElement).toBe(toggle);
+  expect(toggle.getAttribute('aria-expanded')).toBe('true');
+  expect(requests.every(path => !/stop|start|preview|acknowledge/.test(path))).toBe(true);
+  expect(open).not.toHaveBeenCalled();
+});
+
+test.each(['receipt', 'confirmation'])('old web stop %s cannot confirm or replay after reconnect', async held => {
+  vi.useFakeTimers({toFake: ['setInterval', 'clearInterval']});
+  let resolve!: (response: Response) => void;
+  let stopping = false;
+  const stopped = {...session, schema_version: 1, started_at: 0, expires_at: 1, state: 'stopped'};
+  const fetcher = vi.fn(async (path: string) => {
+    if (path.endsWith('/stop')) {
+      stopping = true;
+      if (held === 'receipt') return new Promise<Response>(r => {resolve = r;});
+      return new Response(JSON.stringify(stopped));
+    }
+    if (stopping && held === 'confirmation') return new Promise<Response>(r => {resolve = r;});
+    return new Response(JSON.stringify(initial()));
+  });
+  vi.stubGlobal('fetch', fetcher);
+  const props = {workspace, onOpenWork: vi.fn()};
+  const view = render(<OverviewLoops {...props} connected />);
+  await act(async () => {});
+  const stop = screen.getByRole('button', {name: 'Stop Loop s from overview'});
+  stop.focus();
+  await act(async () => {fireEvent.click(stop);});
+  view.rerender(<OverviewLoops {...props} connected={false} />);
+  view.rerender(<OverviewLoops {...props} connected />);
+  stopping = false;
+  await act(async () => {resolve(new Response(JSON.stringify(held === 'receipt' ? stopped : {...initial(), sessions: [stopped]})));});
+  expect(screen.getByLabelText('Overview Loop stop outcome').textContent).toMatch(/not confirmed/);
+  expect(document.activeElement).toBe(stop);
+  expect(stop.getAttribute('aria-disabled')).toBe('true');
+  await act(async () => {fireEvent.click(screen.getByRole('button', {name: 'Inspect Loop sessions again'}));});
+  expect(stop.getAttribute('aria-disabled')).toBe('false');
+  expect(fetcher.mock.calls.filter(([path]) => path.endsWith('/stop'))).toHaveLength(1);
+});
+
+test.each(['receipt', 'confirmation'])('old local MCP stop %s stays uncertain and requires company reinspection', async held => {
+  vi.useFakeTimers({toFake: ['setInterval', 'clearInterval']});
+  const expected = companySession(1);
+  const stopped = {...expected, state: 'stopped'};
+  let resolve!: (response: Response) => void;
+  const receipt = {schema_version: 1, requested_task_id: uid(11), status: 'confirmed', code: 'loop_stopped', recovery: 'Read persisted records', data: stopped};
+  const confirmation = {...receipt, code: 'loops_inspected', data: companyReply([stopped], 'local_authority').data};
+  const fetcher = vi.fn(async (path: string) => {
+    if (path === '/api/loops/v1') return new Response(JSON.stringify({...initial(), sessions: [], attempts: []}));
+    if (path.endsWith('/inspect-company')) return new Response(JSON.stringify(companyReply([expected], 'local_authority')));
+    if (path.endsWith('/stop') && held === 'confirmation') return new Response(JSON.stringify(receipt));
+    return new Promise<Response>(r => {resolve = r;});
+  });
+  vi.stubGlobal('fetch', fetcher);
+  const props = {workspace, onOpenWork: vi.fn()};
+  const view = render(<OverviewLoops {...props} connected />);
+  const inspect = screen.getByRole('button', {name: 'Inspect company Loops through local MCP'});
+  await act(async () => {fireEvent.click(inspect);});
+  const stop = screen.getByRole('button', {name: `Stop local MCP Loop ${uid(1)} from overview`});
+  stop.focus();
+  await act(async () => {fireEvent.click(stop);});
+  view.rerender(<OverviewLoops {...props} connected={false} />);
+  view.rerender(<OverviewLoops {...props} connected />);
+  await act(async () => {resolve(new Response(JSON.stringify(held === 'receipt' ? receipt : confirmation)));});
+  expect(screen.getByLabelText('Local MCP interrupted stop outcome').textContent).toMatch(/not confirmed/);
+  expect(stop.getAttribute('aria-disabled')).toBe('true');
+  expect(document.activeElement).toBe(stop);
+  fireEvent.click(stop);
+  await act(async () => {fireEvent.click(inspect);});
+  expect(stop.getAttribute('aria-disabled')).toBe('false');
+  expect(screen.getByLabelText('Local MCP interrupted stop outcome').textContent).toMatch(/not confirmed/);
+  expect(fetcher.mock.calls.filter(([path]) => path.endsWith('/stop'))).toHaveLength(1);
+  expect(fetcher.mock.calls.filter(([path]) => path.endsWith('/inspect'))).toHaveLength(held === 'confirmation' ? 1 : 0);
 });

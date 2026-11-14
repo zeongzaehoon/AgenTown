@@ -72,3 +72,26 @@ empty/disconnected/error states, visible focus, sufficient contrast and a
 reduced-motion check. The existing POC remains a fallback detail/configuration
 surface while these world interactions are introduced; it is not evidence that
 the final 2D experience is complete.
+
+Company overview Loop connection exercise (C105): run the deterministic
+`OverviewLoops.test.tsx` interactions through the existing company overview used
+by `agentown-web`. Disconnect immediately after successful web and explicit local
+MCP company inspection, within the 2400 ms freshness window. Retained sessions,
+saved settings and expanded attempts remain readable, with stale authority and
+unavailable stop controls. Focus remains on the same disclosure or stop button;
+opening saved work continues to use the existing navigation. No stop, preview,
+start or recovery acknowledgment is sent by disconnecting or reconnecting.
+
+Hold an inspection response across disconnect/reconnect and deliver it afterward:
+it must not replace current records or restore authority. A successful inspection
+on the new connection restores web authority; local MCP authority stays stale
+until the user explicitly chooses “Inspect company Loops through local MCP”.
+Also hold each owner's stop receipt or persisted-state confirmation across the
+connection change. Its late response cannot confirm the old outcome or refresh
+records. The interrupted outcome remains uncertain, the request is never replayed,
+and another stop requires fresh inspection and an explicit action. These are
+fixture exercises; live provider validation remains skipped. Supervisor
+verification passed all 32 frontend test files and 1,127 tests, the production
+build, 505 Python tests with 2 skipped, and the harness Rust and operational
+suites. The selected frontend profile deferred installed-browser and
+installation/process-recovery gates.

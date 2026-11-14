@@ -9,7 +9,7 @@ import { confirmedLoop, loopInspection, loopReceipt, type LoopInspection, type L
 export type LoopNavigation = {taskId: string; sessionId: string; policyId?: never} | {taskId: string; policyId: string; sessionId?: never};
 
 /** Polling and navigation inspect only; stopping requires explicit session consent. */
-export function OverviewLoops({workspace, onOpenWork, onOpenSession}: {onOpenSession?: (request: LoopNavigation) => void; workspace: Workspace | null; onOpenWork: (id: string) => void}) {
+export function OverviewLoops({workspace, connected, onOpenWork, onOpenSession}: {connected: boolean; onOpenSession?: (request: LoopNavigation) => void; workspace: Workspace | null; onOpenWork: (id: string) => void}) {
   const [inspection, setInspection] = useState<LoopInspection | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const [control, setControl] = useState<LoopControl | null>(null);
@@ -22,33 +22,40 @@ export function OverviewLoops({workspace, onOpenWork, onOpenSession}: {onOpenSes
   const lock = useRef(false);
   const mounted = useRef(false);
   const refresh = useRef<() => void>(() => {});
-  const fresh = status === 'ready' && now - inspectedAt.current < 2400;
+  const fresh = connected && status === 'ready' && now - inspectedAt.current < 2400;
   async function stop(sessionId: string) {
-    if (lock.current || status !== 'ready' || Date.now() - inspectedAt.current >= 2400 || !canControl(control)
+    if (!connected || lock.current || status !== 'ready' || Date.now() - inspectedAt.current >= 2400 || !canControl(control)
       || !inspection?.sessions.some(s => s.session_id === sessionId && s.state === 'active')) return;
     lock.current = true;
-    ++epoch.current;
+    const generation = ++epoch.current;
     setBusy(true); setStatus('loading'); inspectedAt.current = 0;
     setMessage(`Stop request for Loop ${sessionId} submitted. Awaiting response; cancellation is not confirmed.`);
     try {
       const expected = inspection.sessions.find(s => s.session_id === sessionId)!;
       const receipt = loopReceipt(await api<unknown>('/api/loops/v1/stop', {session_id: sessionId}), expected, 'stop', expected.provider, expected.model);
+      if (!mounted.current || generation !== epoch.current) return;
       if (mounted.current) setMessage('Loop stop response received. Confirming saved stopped state…');
       const saved = confirmedLoop(await api<unknown>('/api/loops/v1', {}, undefined, 'GET'), receipt, 'stop');
+      if (!mounted.current || generation !== epoch.current) return;
       if (mounted.current) { setInspection(saved); setControl(saved.control ?? null); }
       if (mounted.current) setMessage(`Saved stopped state confirmed. Local stop acknowledged for Loop ${sessionId}. Remote completion may remain unknown. Inspect again before another explicit attempt.`);
     } catch (error) {
-      if (mounted.current) {
+      if (mounted.current && generation === epoch.current) {
         setControl(error instanceof ApiError ? error.control ?? null : null);
         setMessage(`Stop outcome for Loop ${sessionId} is not confirmed. ${(error as Error).message} Inspect again before another explicit attempt. Remote completion may remain unknown.`);
       }
     } finally {
-      ++epoch.current; lock.current = false;
-      if (mounted.current) { setBusy(false); setStatus('loading'); }
+      lock.current = false;
+      if (mounted.current) { setBusy(false); if (generation === epoch.current) { ++epoch.current; setStatus('loading'); } }
     }
   }
   useEffect(() => {
     let live = true; mounted.current = true;
+    ++epoch.current; inspectedAt.current = 0; setStatus('loading');
+    if (!connected) {
+      if (lock.current) setMessage('Stop outcome is not confirmed after disconnect. Inspect again before another explicit attempt. Nothing is resent automatically. Remote completion may remain unknown.');
+      return () => { mounted.current = false; ++epoch.current; };
+    }
     let pending = false;
     const controller = new AbortController();
     async function load() {
@@ -64,17 +71,17 @@ export function OverviewLoops({workspace, onOpenWork, onOpenSession}: {onOpenSes
     refresh.current = () => void load();
     void load();
     const timer = setInterval(() => { setNow(Date.now()); void load(); }, 800);
-    return () => { live = false; mounted.current = false; clearInterval(timer); controller.abort(); };
-  }, []);
+    return () => { live = false; mounted.current = false; ++epoch.current; clearInterval(timer); controller.abort(); };
+  }, [connected]);
   return <section aria-labelledby="overview-loops-title">
     <h3 id="overview-loops-title">Bounded Loop activity</h3>
-    <CompanyMcpLoops workspace={workspace} onOpenSession={onOpenSession} />
-    <p role="status">{status === 'loading' ? 'Loading Loop inspection…' : status === 'unavailable'
+    <CompanyMcpLoops connected={connected} workspace={workspace} onOpenSession={onOpenSession} />
+    <p role="status">{!connected ? 'Disconnected — retained Loop records and authority are stale. Reconnect and inspect before stopping.' : status === 'loading' ? 'Loading Loop inspection…' : status === 'unavailable'
       ? inspection ? 'Loop inspection unavailable — showing stale sessions from the last successful inspection.' : 'Loop inspection unavailable. No session data loaded.'
       : !fresh ? 'Loop inspection stale. Inspect again before stopping.' : 'Showing recorded Loop sessions.'}</p>
-    <p role="status" aria-label="Overview Loop authority">{controlText(control)}</p>
+    <p role="status" aria-label="Overview Loop authority">{!fresh ? 'Stale authority: ' : ''}{controlText(control)}</p>
     <p role="status" aria-label="Overview Loop stop outcome">{message}</p>
-    <button type="button" aria-disabled={busy} onClick={() => { if (!lock.current) refresh.current(); }}>Inspect Loop sessions again</button>
+    <button type="button" aria-disabled={!connected || busy} onClick={() => { if (connected && !lock.current) refresh.current(); }}>Inspect Loop sessions again</button>
     <p>Loop admissions are separate from ordinary request counts. Expand session details here to inspect recorded attempts, or open saved work. Stop requires fresh inspection and granted local authority; otherwise stop through the owning MCP or web server. Stop prevents new admissions and requests local cancellation. Remote completion may remain unknown. Nothing starts or resumes here.</p>
     {inspection && !inspection.sessions.length && <p>No recorded Loop sessions.</p>}
     {!!inspection?.sessions.length && <ul aria-label="Recorded Loop sessions">{inspection.sessions.map(session => {
@@ -118,11 +125,13 @@ export function OverviewLoops({workspace, onOpenWork, onOpenSession}: {onOpenSes
 }
 
 
-function CompanyMcpLoops({workspace, onOpenSession}: {workspace: Workspace | null; onOpenSession?: (request: LoopNavigation) => void}) {
+function CompanyMcpLoops({workspace, connected, onOpenSession}: {connected: boolean; workspace: Workspace | null; onOpenSession?: (request: LoopNavigation) => void}) {
   const [inspection, setInspection] = useState<LoopInspection | null>(null);
   const [status, setStatus] = useState('Not inspected. Explicitly inspect recorded sessions through the retained local MCP owner.');
   const [busy, setBusy] = useState(false);
-  const [fresh, setFresh] = useState(false);
+  const [interruptedStop, setInterruptedStop] = useState('');
+  const [inspected, setFresh] = useState(false);
+  const fresh = connected && inspected;
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const stopLock = useRef(false);
   const inspectedAt = useRef(0);
@@ -130,8 +139,17 @@ function CompanyMcpLoops({workspace, onOpenSession}: {workspace: Workspace | nul
   const revision = useRef(0);
   const expiry = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => { ++revision.current; active.current?.abort(); if (expiry.current) clearTimeout(expiry.current); }, []);
+  useEffect(() => {
+    ++revision.current; active.current?.abort();
+    if (expiry.current) clearTimeout(expiry.current);
+    setFresh(false); setBusy(false);
+    if (!connected && stopLock.current) setInterruptedStop('Stop outcome is not confirmed after disconnect. Nothing is resent automatically. Remote completion may remain unknown.');
+    setStatus(!connected
+      ? stopLock.current ? 'Disconnected. Stop outcome is not confirmed. Retained records and authority are stale. Nothing is resent automatically. Remote completion may remain unknown.' : 'Disconnected. Retained local MCP records and authority are stale.'
+      : 'Explicit current-connection company inspection required. Previous local MCP records and authority remain stale.');
+  }, [connected]);
   async function inspect() {
-    if (stopLock.current) return;
+    if (!connected || stopLock.current) return;
     const generation = ++revision.current;
     active.current?.abort();
     if (expiry.current) clearTimeout(expiry.current);
@@ -150,7 +168,7 @@ function CompanyMcpLoops({workspace, onOpenSession}: {workspace: Workspace | nul
   }
   async function stop(sessionId: string) {
     const expected = inspection?.sessions.find(s => s.session_id === sessionId);
-    if (stopLock.current || busy || !fresh || Date.now() - inspectedAt.current >= 2400 ||
+    if (!connected || stopLock.current || busy || !fresh || Date.now() - inspectedAt.current >= 2400 ||
         !canControl(inspection?.control) || expected?.state !== 'active') return;
     stopLock.current = true;
     const generation = ++revision.current;
@@ -182,7 +200,8 @@ function CompanyMcpLoops({workspace, onOpenSession}: {workspace: Workspace | nul
   return <section aria-label="Company local MCP Loop inspection">
     <h4>Retained local MCP Loop activity</h4>
     <p role="status">{status}</p>
-    <button type="button" aria-disabled={stopLock.current} onClick={() => void inspect()}>Inspect company Loops through local MCP</button>
+    <p role="status" aria-label="Local MCP interrupted stop outcome">{interruptedStop}</p>
+    <button type="button" aria-disabled={!connected || stopLock.current} onClick={() => void inspect()}>Inspect company Loops through local MCP</button>
     <p>Read recorded sessions across all work. Inspection and opening work grant no consent and never preview, start or stop work. Stop requires fresh inspection and granted local authority. Stop prevents new admissions and requests local cancellation; remote completion may remain unknown.</p>
     {inspection && <>
       <p aria-label="Retained MCP owner authority">{fresh ? '' : 'Stale authority: '}{controlText(inspection.control)}</p>

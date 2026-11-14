@@ -57,7 +57,7 @@ export function CompanyOverview({workspace, connected, error, onOpenWork, select
     <SkillBooks onOpenSkill={onOpenSkill} onOpenWork={onOpenSkillWork} workspace={workspace} connected={connected} />
     <HookDevices onOpenHook={onOpenHook} onOpenWork={onOpenHookWork} workspace={workspace} connected={connected} />
     <LoopDevices onOpenLoop={onOpenLoop} onOpenPolicy={onOpenSession} workspace={workspace} connected={connected} />
-    <OverviewLoops onOpenSession={onOpenSession} workspace={workspace} onOpenWork={onOpenWork} />
+    <OverviewLoops connected={connected} onOpenSession={onOpenSession} workspace={workspace} onOpenWork={onOpenWork} />
     {workspace && <>
       {workspace.configuration && <p>Execution setup needed: {workspace.configuration} Employees and saved assignments are still shown.</p>}
       <p>Each request counts once per assigned employee. Shared work appears for each employee, so employee counts may exceed the number of requests.</p>
