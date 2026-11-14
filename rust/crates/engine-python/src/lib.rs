@@ -169,7 +169,7 @@ fn preflight_text_work(
 /// Untrusted declared integration metadata, keyed by Run ID; missing is unknown.
 #[pyfunction]
 fn execution_sources(database: &str) -> PyResult<Vec<(String, String)>> {
-    SqliteStore::open(database)
+    ReadOnlyStore::open(database)
         .map_err(|_| error("database unavailable"))?
         .execution_sources()
         .map_err(|_| error("history unavailable"))

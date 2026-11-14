@@ -4716,3 +4716,61 @@ UI/UX review inspected the matching artifacts and found no blocking issues.
 Fresh installed-browser evidence was deferred by this profile; C122's preceding
 full profile remains the latest installed-browser baseline. Live provider
 validation remains skipped, not passed.
+
+### Explicit recorded Connections activity
+
+`POST /api/connections/v1/activity` reads persisted Rust-backed Run records on
+explicit request. Send exactly `{"limit": 20}`; the integer limit must be 1–100.
+The response contains at most that many attempts, ordered by descending
+`started_at`, then descending `run_id`. The existing native snapshot loads all
+history before bounding the response; this endpoint is not a paginated database
+query. It never invokes execution or expired-lease reconciliation.
+
+Each attempt exposes `task_id`, `run_id`, `started_at`, `ended_at`, `state`,
+`outcome`, and the original `declared_source`. `integration` matches only exact
+`codex`, `claude-code`, `claude-desktop`, `cursor`, or `chatgpt` labels. Unknown,
+case-varied and absent labels retain their original value and have a null
+`integration`. `agentown-local-product` attempts are excluded. Labels are
+**untrusted historical metadata**: these records establish neither a current
+connection nor authenticated client identity nor quality approval. Outcomes such
+as `reported_success` describe recorded execution, not independent verification.
+No credentials, provider calls, new schema or client configuration are required.
+Malformed requests return 400 (oversized requests 413); unavailable history
+returns a sanitized 503. Same-origin JSON and no-store protections apply.
+
+Fixture exercise from the checkout, using the product development environment
+with native bindings installed (use a fresh temporary database, not user data):
+
+```sh
+uv run --directory python --locked python - <<'PY'
+from pathlib import Path
+import runpy
+import tempfile
+fixtures = runpy.run_path('tests/test_connection_activity.py')
+database = Path(tempfile.mkdtemp(prefix='agentown-activity-')) / 'fixture.sqlite'
+fixtures['fixture_database'](database)
+print(database)
+PY
+agentown-web --database /absolute/path/printed/above/fixture.sqlite --port 8765
+```
+
+Leave that server running and explicitly query it in another terminal:
+
+```sh
+curl --silent --show-error http://127.0.0.1:8765/api/connections/v1/activity \
+  -H 'Origin: http://127.0.0.1:8765' -H 'Content-Type: application/json' \
+  --data '{"limit":100}'
+```
+
+Expect nine attempts covering all five supported labels, unknown `Codex` and
+`future-client`, an absent label, and an expired unfinished fixture that remains
+active. No local-product attempt appears. Repeat with limit 1 and observe only
+the newest entry; limit 0 returns 400. These are fixture records, not evidence of
+any external application connection or real provider operation. The focused
+`python/tests/test_connection_activity.py` tests also compare the persisted SQL
+dump before and after inspection and cover empty history, sanitized failures,
+interrupted outcomes and stable ordering for equal timestamps. They also query
+while a separate SQLite connection holds a reserved writer lock, and verify that
+empty or corrupt database files are neither initialized nor modified. Both
+history and source-label reads use native read-only connections; inspection does
+not open a migration-capable store.

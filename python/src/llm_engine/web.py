@@ -55,7 +55,7 @@ class LocalBoundary:
         await self.app(scope, receive, secured)
 
 
-def create_app(database, model=None, *, port=8765, provider=None, provider_name="anthropic", execution_port=None, recovery_port=None, skill_port=None, hook_port=None, loop_port=None):
+def create_app(database, model=None, *, port=8765, provider=None, provider_name="anthropic", execution_port=None, recovery_port=None, skill_port=None, hook_port=None, loop_port=None, activity_port=None):
     database = str(database)
     # Injection is for tests only. The CLI uses the selected configured provider.
     configuration = None
@@ -99,6 +99,12 @@ def create_app(database, model=None, *, port=8765, provider=None, provider_name=
     local_loop = loop_port if loop_port is not None else LocalMcpLoop(
         database, provider_name, model, configured=configuration is None)
     apply_selected_loop = ApplySelectedLoop(local_loop)
+
+    from .application.inspect_connection_activity import InspectConnectionActivity, ConnectionActivityRequest
+    from .connection_activity import NativeConnectionActivity
+    from .ports.connection_activity import ConnectionActivityUnavailable
+    inspect_connection_activity = InspectConnectionActivity(
+        activity_port if activity_port is not None else NativeConnectionActivity(database))
 
     @asynccontextmanager
     async def lifespan(app):
@@ -156,6 +162,21 @@ def create_app(database, model=None, *, port=8765, provider=None, provider_name=
     async def connections(request):
         from .connections import connection_setup
         return response(connection_setup(database))
+
+    async def connection_activity(request):
+        try:
+            data = await body(request)
+            if set(data) != {'limit'}:
+                raise ValueError('Only limit is accepted')
+            selected = ConnectionActivityRequest(**data)
+        except RequestTooLarge:
+            return response({'error': 'Activity request exceeds 120,000 bytes.'}, 413)
+        except (ValueError, TypeError, UnicodeError):
+            return response({'error': 'Send only limit as an integer from 1 through 100.'}, 400)
+        try:
+            return response(inspect_connection_activity.execute(selected))
+        except ConnectionActivityUnavailable:
+            return response({'error': 'Recorded activity is unavailable. Try inspection again.'}, 503)
 
     async def connection_inspect_work(request):
         try:
@@ -483,6 +504,7 @@ def create_app(database, model=None, *, port=8765, provider=None, provider_name=
         Route("/api/connections/v1/hooks/{operation}", connection_hook, methods=["POST"]),
         Route("/api/connections/v1/skills/{operation}", connection_skill, methods=["POST"]),
         Route("/api/connections/v1", connections, methods=["POST"]),
+        Route("/api/connections/v1/activity", connection_activity, methods=["POST"]),
         Route("/api/connections/v1/reconcile-work", connection_reconcile_work, methods=["POST"]),
         Route("/api/connections/v1/execute-work", connection_execute_work, methods=["POST"]),
         Route("/api/connections/v1/inspect-work", connection_inspect_work, methods=["POST"]),

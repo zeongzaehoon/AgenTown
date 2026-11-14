@@ -176,6 +176,16 @@ impl ReadOnlyStore {
         tx.commit()?;
         Ok((core, executions))
     }
+
+    /// Untrusted declared integration metadata from the read-only connection.
+    pub fn execution_sources(&self) -> Result<Vec<(String, String)>, StorageError> {
+        let mut statement = self
+            .connection
+            .prepare("SELECT run_id, declared_source FROM execution_sources ORDER BY run_id")?;
+        Ok(statement
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<Result<Vec<_>, _>>()?)
+    }
 }
 
 fn snapshot_executions(tx: &Connection) -> Result<Vec<Execution>, StorageError> {
