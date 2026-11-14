@@ -3777,3 +3777,46 @@ Supervisor verification passed all 32 frontend test files and 1,111 tests, the
 production build, 505 Python tests with 2 skipped, and the harness Rust and
 operational suites. The selected frontend profile deferred installed-browser and
 installation/process-recovery gates. Live provider calls are skipped, not passed.
+
+### Local MCP Skill and Hook inspection focus recovery (C104-T1)
+
+Launch `agentown-web --database PATH --port 8765` and open
+`http://127.0.0.1:8765` with the fixture records described above. These steps
+exercise the **Local MCP work inspection** area rather than the saved-work
+configuration preview panels.
+
+1. Select saved work, choose **Inspect through local MCP**, then **Find Skills
+   through local MCP** or **Find Hooks through local MCP**. Select an enabled
+   Skill or eligible employee Hook and choose **Preview local Skill/Hook**.
+   Check its consent box and leave keyboard focus there. Do not execute.
+2. Disconnect using **Refresh connection** while the local server is stopped,
+   or select different saved work. If focus was still inside the removed
+   inspection content, it moves to the visible **Local MCP work inspection**
+   region. Restore the server and refresh the connection: inspection, preview
+   and consent must remain cleared until explicitly requested again.
+3. Repeat with focus on a control outside the removed inspection content.
+   That focus stays in place. Explicit Skill/Hook navigation instead retains
+   its **Requested Skill inspection** or **Requested Hook inspection** destination.
+4. With consent focused, trigger explicit reinspection (browser console:
+   `document.querySelector('#selected-work-inspection > button').click()`).
+   Focus recovers to the inspection region while the old preview disappears.
+   A normal keyboard activation of the inspection button keeps focus there.
+5. Hold a preview response in browser network tooling, disconnect/reconnect,
+   then release the old response. It must not restore a preview, consent or
+   move focus. Inspect, discover and preview explicitly again: consent is
+   unchecked. Network requests to `/skills/execute` and `/hooks/execute` stay
+   at zero throughout these recovery steps.
+
+Deterministic checks (with frontend dependencies installed):
+`cd frontend && npm test -- src/WorkInspection.test.tsx src/WorkSkill.test.tsx src/WorkHook.test.tsx`.
+Both panel suites assert focused elements, fresh unchecked consent, unchanged
+execution request counts, navigation priority and deferred-response rejection.
+Integration validation passed all 148 tests across these three files and
+TypeScript checking. Checks ran against a temporary copy using existing frontend
+dependencies and Vitest’s runner config loader. Both preview helpers target
+the named preview consent so the ordinary execution consent cannot make the
+query ambiguous. Supervisor verification passed all 32 frontend test files and
+1,121 tests, the production build, 505 Python tests with 2 skipped, and the
+harness Rust and operational suites. The selected frontend profile deferred
+installed-browser and installation/process-recovery gates. Live provider calls
+remain skipped, not passed.

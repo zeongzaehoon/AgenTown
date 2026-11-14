@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, expect, test, vi } from 'vitest';
 import { WorkInspection } from './WorkInspection';
@@ -18,7 +18,7 @@ async function discover() {
   await userEvent.selectOptions(screen.getByRole('combobox', {name: 'Local enabled Skill'}), skill);
 }
 async function prepare() {
-  await discover(); await userEvent.click(previewButton()); await screen.findByRole('checkbox');
+  await discover(); await userEvent.click(previewButton()); await screen.findByRole('checkbox', {name: /I authorize one execution of this exact Skill preview/});
 }
 afterEach(() => {cleanup(); vi.unstubAllGlobals();});
 test('preview never dispatches; keyboard consent sends exactly one complete tuple and restores recovery focus', async () => {
@@ -76,7 +76,9 @@ test('rejects identity, count and provenance mismatches', () => {
   expect(() => parseSkillResponse(r, task, 'execute', skill, preview)).toThrow();
 });
 
-test.each(['selection', 'disconnect', 'inspection', 'navigation'])('%s invalidates Skill preview and consent in selected-work inspection', async reason => {
+test.each(['selection', 'disconnect', 'inspection', 'navigation'].flatMap(reason => [
+  {reason, outside: false}, {reason, outside: true},
+]))('%s invalidates Skill preview and consent in selected-work inspection', async ({reason, outside}) => {
   const inspected = {schema_version: 1, requested_task_id: task, status: 'success', code: 'inspected', message: 'Inspected', recovery: 'Inspect again', inspection: {
     task: {id: task, title: 'Saved work', status: 'pending', assignees: [skill]}, attempts: [],
     readiness: {schema_version: 1, task_id: task, input: 'Saved work', employee_ids: [skill], expected_runs: 0, active_attempt: false, eligibility: 'eligible', resubmission_consent_required: false},
@@ -88,11 +90,30 @@ test.each(['selection', 'disconnect', 'inspection', 'navigation'])('%s invalidat
   await screen.findByRole('button', {name: 'Find Skills through local MCP'});
   await discover(); await userEvent.click(previewButton());
   const consent = await screen.findByLabelText(/I authorize one execution of this exact Skill preview/); await userEvent.click(consent);
+  const inspectionControl = screen.getByRole('button', {name: 'Inspect through local MCP'});
+  if (outside) inspectionControl.focus();
+  else consent.focus();
   if (reason === 'selection') view.rerender(<WorkInspection taskId={skill} />);
   else if (reason === 'disconnect') view.rerender(<WorkInspection taskId={task} connected={false} />);
   else if (reason === 'navigation') view.rerender(<WorkInspection taskId={task} skillRequest={{taskId: task, skillId: skill}} />);
-  else await userEvent.click(screen.getByRole('button', {name: 'Inspect through local MCP'}));
+  else fireEvent.click(inspectionControl);
   expect(screen.queryByLabelText(/I authorize one execution of this exact Skill preview/)).toBeNull();
+  expect(document.activeElement).toBe(reason === 'navigation'
+    ? screen.getByRole('region', {name: 'Requested Skill inspection'})
+    : outside ? inspectionControl : screen.getByRole('region', {name: 'Local MCP work inspection'}));
+  // Reconnect/return to the original Task never replays discovery or consent.
+  const callsAfterRemoval = fetcher.mock.calls.length;
+  view.rerender(<WorkInspection taskId={task} connected={false} />);
+  view.rerender(<WorkInspection taskId={task} connected={true} />);
+  expect(fetcher).toHaveBeenCalledTimes(callsAfterRemoval);
+  expect(screen.queryByLabelText(/I authorize one execution of this exact Skill preview/)).toBeNull();
+  fetcher.mockResolvedValueOnce(reply(inspected)).mockResolvedValueOnce(reply(discovery()))
+    .mockResolvedValueOnce(reply(envelope({...preview, preview_id: 'fresh'}, 'skill_previewed')));
+  await userEvent.click(inspectionControl);
+  await screen.findByRole('button', {name: 'Find Skills through local MCP'});
+  await prepare();
+  expect((screen.getByLabelText(/I authorize one execution of this exact Skill preview/) as HTMLInputElement).checked).toBe(false);
+  expect((screen.getByRole('button', {name: 'Execute local Skill once'}) as HTMLButtonElement).disabled).toBe(true);
   expect(fetcher.mock.calls.some(call => String(call[0]).endsWith('/skills/execute'))).toBe(false);
 });
 
@@ -163,4 +184,31 @@ test('Escape after dispatch preserves pending execution and uncertain recovery',
   expect(screen.getByText(/Consent consumed/)).toBeTruthy();
   expect((previewButton() as HTMLButtonElement).disabled).toBe(true);
   expect(fetcher).toHaveBeenCalledTimes(3);
+});
+
+test('deferred Skill preview cannot restore removed content or move recovered focus', async () => {
+  const inspected = {schema_version: 1, requested_task_id: task, status: 'success', code: 'inspected', message: 'Inspected', recovery: 'Inspect again', inspection: {
+    task: {id: task, title: 'Saved work', status: 'pending', assignees: [skill]}, attempts: [],
+    readiness: {schema_version: 1, task_id: task, input: 'Saved work', employee_ids: [skill], expected_runs: 0, active_attempt: false, eligibility: 'eligible', resubmission_consent_required: false},
+    evidence: {source: 'installed_local_mcp', tools: ['get_task', 'get_work_history_v1', 'inspect_loop_sessions_v1', 'preflight_text_work_v1'], read_only: true, external_client_verified: false},
+  }};
+  let finish!: (value: Response) => void;
+  const fetcher = vi.fn().mockResolvedValueOnce(reply(inspected)).mockResolvedValueOnce(reply(discovery()))
+    .mockImplementationOnce(() => new Promise<Response>(resolve => {finish = resolve;}));
+  vi.stubGlobal('fetch', fetcher);
+  const view = render(<WorkInspection taskId={task} />);
+  await userEvent.click(screen.getByRole('button', {name: 'Inspect through local MCP'}));
+  await screen.findByRole('button', {name: 'Find Skills through local MCP'});
+  await discover(); await userEvent.click(previewButton());
+  previewButton().focus();
+  view.rerender(<WorkInspection taskId={task} connected={false} />);
+  const region = screen.getByRole('region', {name: 'Local MCP work inspection'});
+  expect(document.activeElement).toBe(region);
+  view.rerender(<WorkInspection taskId={task} connected={true} />);
+  await act(async () => {finish(reply(envelope(preview, 'skill_previewed')));});
+  expect(document.activeElement).toBe(region);
+  expect(screen.queryByRole('region', {name: 'Local Skill preview'})).toBeNull();
+  expect(screen.queryByLabelText(/I authorize one execution of this exact Skill preview/)).toBeNull();
+  expect(fetcher).toHaveBeenCalledTimes(3);
+  expect(fetcher.mock.calls.filter(call => String(call[0]).endsWith('/skills/execute'))).toHaveLength(0);
 });

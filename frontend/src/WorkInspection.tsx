@@ -15,9 +15,19 @@ export function WorkInspection({taskId, connected = true, loopRequest, hookReque
   const [error, setError] = useState('');
   const [pending, setPending] = useState(false);
   const request = useRef<{id: string; controller: AbortController} | null>(null);
+  const inspectionRegion = useRef<HTMLElement>(null);
+  const inspectedContent = useRef<HTMLDivElement>(null);
+  function clearInspection() {
+    // Move focus before removing its owner. Outside controls and requested
+    // navigation retain their destination; this region survives disconnects.
+    if (inspectedContent.current?.contains(document.activeElement)) {
+      inspectionRegion.current?.focus();
+    }
+    setResponse(null);
+  }
   useLayoutEffect(() => {
     request.current?.controller.abort(); request.current = null;
-    setResponse(null); setError(''); setPending(false);
+    clearInspection(); setError(''); setPending(false);
     return () => { request.current?.controller.abort(); request.current = null; };
   }, [taskId, connected, loopRequest, hookRequest, skillRequest]);
   const navigationRegion = useRef<HTMLElement>(null);
@@ -25,7 +35,7 @@ export function WorkInspection({taskId, connected = true, loopRequest, hookReque
   async function inspect() {
     if (!connected || !taskId || request.current) return;
     const active = {id: taskId, controller: new AbortController()};
-    request.current = active; setPending(true); setResponse(null); setError('');
+    request.current = active; setPending(true); clearInspection(); setError('');
     try {
       const result = await inspectSelectedWork(taskId, active.controller.signal);
       if (request.current === active) setResponse(result);
@@ -38,7 +48,7 @@ export function WorkInspection({taskId, connected = true, loopRequest, hookReque
     }
   }
   const inspection = response?.status === 'success' ? response.inspection : null;
-  return <section id="selected-work-inspection" aria-label="Local MCP work inspection" aria-busy={pending}>
+  return <section ref={inspectionRegion} tabIndex={-1} id="selected-work-inspection" aria-label="Local MCP work inspection" aria-busy={pending}>
     {skillRequest && <section ref={navigationRegion} tabIndex={-1} aria-label="Requested Skill inspection"><p>Requested Task: {skillRequest.taskId} · Skill: {skillRequest.skillId}. Choose Inspect through local MCP, then Find Skills through local MCP. Navigation grants no consent.</p></section>}
     {hookRequest && <section ref={navigationRegion} tabIndex={-1} aria-label="Requested Hook inspection"><p>Requested Task: {hookRequest.taskId} · Hook: {hookRequest.hookId} · Employee: {hookRequest.employeeId}. Choose Inspect through local MCP, then Find Hooks through local MCP. Navigation grants no consent.</p></section>}
     <h3>Inspect selected work through local MCP</h3>
@@ -49,9 +59,9 @@ export function WorkInspection({taskId, connected = true, loopRequest, hookReque
     <p role="status" aria-live="polite">{pending ? 'Inspecting selected work through local MCP…' : ''}</p>
     {error && <p role="alert">{error}</p>}
     {response?.status === 'failure' && <div role="alert"><p>{response.message}</p><p>{response.recovery}</p><p>Inspection unavailable ({response.code}). Nothing is automatically retried.</p></div>}
-    {taskId && <WorkRecovery key={`${taskId}/${connected}`} taskId={taskId} connected={connected} onRequest={() => {request.current?.controller.abort(); request.current = null; setPending(false); setResponse(null); setError('');}} onInspect={() => void inspect()} />}
+    {taskId && <WorkRecovery key={`${taskId}/${connected}`} taskId={taskId} connected={connected} onRequest={() => {request.current?.controller.abort(); request.current = null; setPending(false); clearInspection(); setError('');}} onInspect={() => void inspect()} />}
     <WorkLoop navigation={loopRequest} taskId={taskId} connected={connected} inspected={!!inspection} />
-    {inspection && <div>
+    {inspection && <div ref={inspectedContent}>
       <p role="status">Confirmed local MCP inspection. External-client connection remains unverified.</p>
       <p>Evidence: installed local MCP · get_task · get_work_history_v1 (read_only=true) · inspect_loop_sessions_v1 · preflight_text_work_v1.</p>
       <p>Confirmed Task ID: {inspection.task.id}</p>
