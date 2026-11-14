@@ -59,14 +59,14 @@ test('loading, unavailable, empty and stale snapshots are distinct', () => {
   expect(screen.getByText('Employee ID: a')).toBeTruthy();
 });
 
-test('App uses existing polling, retains stale counts and drafts, reconnects and opens unassigned history', async () => {
+test.each([true, false])('App retains Loop freshness through polling recovery and preserves drafts (populated: %s)', async populated => {
   vi.useFakeTimers();
   let state = workspace();
   let disconnected = false;
   let loopUnavailable = false;
   const fetcher = vi.fn(async (path: string, init?: RequestInit) => {
     if (path === '/api/teams') return new Response('{"teams":[]}');
-    if (path === '/api/config/v1/loops') return new Response('{"loops":[]}');
+    if (path === '/api/config/v1/loops') return new Response(JSON.stringify({loops: populated ? [{id: 'policy', name: 'Saved policy', task_id: 'unassigned', max_iterations: 2, interval_seconds: 60, enabled: true}] : []}));
     if (path === '/api/loops/v1' && loopUnavailable) throw new Error('Loop inspection offline');
     if (path === '/api/loops/v1') return new Response('{"schema_version":1,"control":{"state":"available","can_control":true,"message":""},"sessions":[],"attempts":[],"cancellation":"Stop prevents admissions"}');
     if (path === '/api/config/v1/hooks') return new Response('{"hooks":[]}');
@@ -99,6 +99,10 @@ test('App uses existing polling, retains stale counts and drafts, reconnects and
   disconnected = true;
   await act(async () => { await vi.advanceTimersByTimeAsync(800); });
   expect(within(overview).getByText(/Disconnected — showing stale/)).toBeTruthy();
+  const devices = within(overview).getByRole('heading', {name: 'Saved Loop policy devices'}).parentElement!;
+  expect(within(devices).getByRole('status').textContent).toContain('Disconnected');
+  if (populated) expect(within(devices).getByText('Disconnected — potentially stale configuration snapshot')).toBeTruthy();
+  else expect(within(devices).getByRole('status').textContent).toContain('current Loops are unknown');
   expect(within(overview).getByText('6 assigned requests')).toBeTruthy();
   disconnected = false; loopUnavailable = false;
   state = {...state, work: []};
@@ -106,6 +110,21 @@ test('App uses existing polling, retains stale counts and drafts, reconnects and
   expect(within(overview).getByText('Showing recorded workload.')).toBeTruthy();
   expect(within(within(overview).getByRole('list', {name: 'Employee workload'})).getAllByText('No assigned work.')).toHaveLength(3);
   expect((screen.getByLabelText('What would you like help with?') as HTMLTextAreaElement).value).toBe('Keep draft');
+  expect(within(devices).getByRole('status').textContent).toContain('may still be stale');
+  // Other panels poll the same endpoint; device freshness is independently retained.
+  expect(within(devices).getByRole('status').textContent).not.toContain('Loading');
+  if (populated) {
+    const card = within(devices).getByRole('button', {name: 'Open Loop device: Saved policy · ID: policy'});
+    fireEvent.click(card);
+    await act(async () => {});
+    expect((screen.getByLabelText('Saved record') as HTMLSelectElement).value).toBe('policy');
+    expect(document.activeElement).toBe(screen.getByLabelText('Saved record'));
+  }
+  fireEvent.click(within(devices).getByRole('button', {name: 'Refresh Loop devices'}));
+  await act(async () => {});
+  expect(within(devices).getByRole('status').textContent).toBe(populated ? 'Showing saved Loop devices.' : 'No saved Loops yet. Create a Loop in Configuration.');
+  expect((screen.getByLabelText('What would you like help with?') as HTMLTextAreaElement).value).toBe('Keep draft');
+  expect(screen.queryByRole('checkbox', {name: /I authorize/})).toBeNull();
   expect(fetcher.mock.calls.filter(([path]) => path === '/api/state')).toHaveLength(5);
   expect(fetcher.mock.calls.every(([path]) => path === '/api/state' || path === '/api/teams' || (path === '/api/config/v1/skills' || path === '/api/config/v1/hooks' || path === '/api/config/v1/loops' || path === '/api/loops/v1'))).toBe(true);
 });

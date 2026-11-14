@@ -3556,3 +3556,50 @@ lifecycle/build gates, all 32 frontend test files and 1,072 tests, the productio
 build, 508 Python tests with 2 skipped, the harness suites, and both browser/
 process-recovery checks with recorded evidence. Live provider validation is
 skipped, not passed.
+
+### Retained Loop configuration freshness (C98-T1)
+
+Launch `agentown-web --database PATH --port 8765` and open
+<http://127.0.0.1:8765> → Company overview → **Saved Loop policy devices**.
+Prerequisite: existing configuration endpoints and a product database; use saved
+Loop policies to exercise populated cards, or an empty database for empty results.
+No credentials or provider calls are needed.
+
+Stop the server and wait for connection polling to report disconnection. Retained
+cards show **Disconnected — potentially stale configuration snapshot**. An empty
+snapshot says current Loops are unknown rather than asserting none exist.
+Restart the same server/database and refresh connection: the section reports
+connection restored with potentially stale configuration, and retained cards keep
+their textual warning. Reconnection alone does not refresh the device snapshot;
+other panels may independently read Loop configuration.
+Configuration navigation remains available, with the same policy IDs and drafts;
+linked-work navigation keeps its existing connection, loading, failure and
+missing-work guards. The freshness warning adds no navigation restriction or
+execution consent.
+
+Choose **Refresh Loop devices** explicitly. Loading remains visible alongside the
+freshness disclosure. A failed refresh retains the previous cards or empty
+snapshot with failure feedback. Only a successful connected refresh started after
+the disconnection clears the warning and shows saved policies or **No saved Loops
+yet**. With deterministic deferred responses, disconnect and reconnect while a
+refresh is in flight: its eventual success must retain the warning. A request
+started while disconnected must also retain it after recovery. Refresh again
+while connected to validate the configuration.
+
+Focused deterministic checks (with frontend dependencies available):
+
+```sh
+cd frontend
+npx tsc --noEmit
+npx vitest run src/LoopDevices.test.tsx src/CompanyOverview.test.tsx
+```
+
+The component cases cover populated/empty retention, failed refresh, recovery,
+requests spanning disconnection and requests started disconnected. The App cases
+exercise actual polling recovery and independently retained device freshness,
+Configuration navigation/focus, retained work drafts and absent execution consent.
+Integration used existing frontend dependencies for scoped checks. Supervisor
+verification passed all 32 frontend test files and 1,078 tests, the production
+build, 505 Python tests with 2 skipped, and the harness Rust and operational
+suites. The selected frontend profile deferred installed-browser and installation/
+process-recovery gates. Live provider validation is skipped, not passed.

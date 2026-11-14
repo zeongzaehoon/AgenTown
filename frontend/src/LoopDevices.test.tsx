@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, expect, test, vi } from 'vitest';
 import { LoopDevices } from './LoopDevices';
@@ -96,7 +96,7 @@ test('App opens exact IDs repeatedly, retains configuration and work drafts and 
   malformed = true;
   fireEvent.click(screen.getByRole('button', {name: 'Refresh Loop devices'}));
   expect((linked as HTMLButtonElement).disabled).toBe(true);
-  await screen.findByText('Loop devices are stale — showing the last successful snapshot.');
+  await waitFor(() => expect(document.querySelector('.loop-policy-devices [role="status"]')?.textContent).toContain('Loop devices are stale — showing the last successful snapshot.'));
   fireEvent.click(linked);
   expect((linked as HTMLButtonElement).disabled).toBe(true);
   malformed = false;
@@ -185,4 +185,82 @@ test.each(['failed', 'malformed'])('linked work requires a successful current sn
   fireEvent.click(linked());
   expect(open).toHaveBeenCalledTimes(1);
   expect(fetcher.mock.calls.map(call => call[0])).toEqual(Array(3).fill('/api/config/v1/loops'));
+});
+
+
+test.each([true, false])('retained freshness survives reconnection and failure (populated: %s)', async populated => {
+  const records = populated ? [loops[0]] : [];
+  const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({loops: records})));
+  // Each request needs its own response body.
+  fetcher.mockImplementation(async () => new Response(JSON.stringify({loops: records})));
+  vi.stubGlobal('fetch', fetcher);
+  const open = vi.fn();
+  const workspace: Workspace = {employees: [], work: [{id: 'w', input: 'Saved', status: 'pending', assignees: [], attempts: []}], configuration: null, provider: 'test', model: 'test'};
+  const props = {onOpenLoop: open, onOpenPolicy: vi.fn(), workspace};
+  const view = render(<LoopDevices {...props} />);
+  await screen.findByText(populated ? 'Showing saved Loop devices.' : 'No saved Loops yet. Create a Loop in Configuration.');
+  const card = populated ? screen.getByRole('button', {name: 'Open Loop device: Manual · ID: one'}) : null;
+  card?.focus();
+  view.rerender(<LoopDevices {...props} connected={false} />);
+  expect(screen.getByRole('status').textContent).toContain('Disconnected');
+  if (card) {
+    expect(card.textContent).toContain('Disconnected — potentially stale configuration snapshot');
+    expect(document.activeElement).toBe(card);
+    fireEvent.click(card);
+    expect(open).toHaveBeenCalledWith('one');
+    expect((screen.getByRole('button', {name: /Open linked work/}) as HTMLButtonElement).disabled).toBe(true);
+  } else expect(screen.getByRole('status').textContent).toContain('current Loops are unknown');
+  view.rerender(<LoopDevices {...props} connected />);
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  expect(screen.getByRole('status').textContent).toContain('may still be stale');
+  if (card) {
+    expect(screen.getByRole('button', {name: 'Open Loop device: Manual · ID: one'})).toBe(card);
+    expect(document.activeElement).toBe(card);
+    // Freshness disclosure adds no new linked-work guard after reconnecting.
+    expect((screen.getByRole('button', {name: /Open linked work/}) as HTMLButtonElement).disabled).toBe(false);
+  }
+  fetcher.mockRejectedValueOnce(new Error('Refresh failed'));
+  fireEvent.click(screen.getByRole('button', {name: 'Refresh Loop devices'}));
+  await screen.findByText('Refresh failed');
+  expect(screen.getByRole('status').textContent).toContain('may still be stale');
+  expect(screen.getByRole('status').textContent).toContain('last successful snapshot');
+  view.rerender(<LoopDevices {...props} connected={false} />);
+  view.rerender(<LoopDevices {...props} connected />);
+  expect(screen.getByRole('alert').textContent).toBe('Refresh failed');
+  fireEvent.click(screen.getByRole('button', {name: 'Refresh Loop devices'}));
+  await screen.findByText(populated ? 'Showing saved Loop devices.' : 'No saved Loops yet. Create a Loop in Configuration.');
+  expect(screen.queryByText('Potentially stale configuration snapshot — refresh to check')).toBeNull();
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(fetcher).toHaveBeenCalledTimes(3);
+});
+
+test.each([true, false])('a refresh spanning disconnection cannot validate a populated or empty snapshot: %s', async populated => {
+  let finish!: (response: Response) => void;
+  const records = populated ? [loops[0]] : [];
+  const response = () => new Response(JSON.stringify({loops: records}));
+  const fetcher = vi.fn().mockResolvedValueOnce(response()).mockImplementationOnce(() => new Promise<Response>(resolve => { finish = resolve; })).mockResolvedValueOnce(response());
+  vi.stubGlobal('fetch', fetcher);
+  const view = render(<LoopDevices />);
+  await screen.findByText(populated ? 'Showing saved Loop devices.' : 'No saved Loops yet. Create a Loop in Configuration.');
+  fireEvent.click(screen.getByRole('button', {name: 'Refresh Loop devices'}));
+  expect(screen.getByRole('status').textContent).toContain('Loading');
+  view.rerender(<LoopDevices connected={false} />);
+  view.rerender(<LoopDevices connected />);
+  await act(async () => { finish(response()); });
+  expect(screen.getByRole('status').textContent).toContain('may still be stale');
+  expect(screen.getByRole('status').textContent).toContain(populated ? 'retained Loop devices' : 'current Loops are unknown');
+  fireEvent.click(screen.getByRole('button', {name: 'Refresh Loop devices'}));
+  await screen.findByText(populated ? 'Showing saved Loop devices.' : 'No saved Loops yet. Create a Loop in Configuration.');
+});
+
+test('a request started disconnected cannot clear freshness after recovery', async () => {
+  let finish!: (response: Response) => void;
+  const fetcher = vi.fn().mockImplementationOnce(() => new Promise<Response>(resolve => { finish = resolve; })).mockResolvedValueOnce(new Response('{"loops":[]}'));
+  vi.stubGlobal('fetch', fetcher);
+  const view = render(<LoopDevices connected={false} />);
+  view.rerender(<LoopDevices connected />);
+  await act(async () => { finish(new Response('{"loops":[]}')); });
+  expect(screen.getByRole('status').textContent).toContain('current Loops are unknown');
+  fireEvent.click(screen.getByRole('button', {name: 'Refresh Loop devices'}));
+  await screen.findByText('No saved Loops yet. Create a Loop in Configuration.');
 });
