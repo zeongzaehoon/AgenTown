@@ -3878,3 +3878,29 @@ process-recovery gates. Supervisor verification passed all 32 frontend test
 files and 1,131 tests, the production build, 505 Python tests with 2 skipped,
 and the harness Rust and operational suites. Live LLM tests remain skipped
 under the user policy.
+
+### Team-room membership after connection recovery
+
+1. Start `agentown-web --database PATH --port 8765` with your local product
+   database path, then open `http://127.0.0.1:8765` → Company overview → Team rooms.
+   Use a database with a saved team to inspect populated rooms; repeat with a
+   database without teams to check the empty snapshot.
+2. Wait for the membership snapshot, then stop the local server and wait for the
+   company connection to show disconnected. Retained membership must say
+   **Team rooms are stale**, including a retained empty snapshot. Saved room,
+   employee and assignment navigation remains read-only; drafts remain intact.
+3. Restart the same command and wait for company data to reconnect. Membership
+   must still say **Team rooms are stale**. Workspace assignment freshness is
+   separate: recovered company data does not confirm current team membership.
+4. Select **Refresh team rooms**. Stale disclosure stays visible while the
+   request is pending and after a failed refresh. Only a successful refresh on
+   the current connection restores **Showing persisted team rooms** or
+   **No team rooms yet**. Responses from before disconnection cannot replace
+   retained membership, clear its stale disclosure, or finish a newer refresh.
+
+Deterministic interaction coverage: from `frontend`, run
+`npm test -- --run src/TeamRooms.test.tsx` when frontend dependencies are installed.
+These checks require no provider credentials or live LLM calls. Supervisor
+periodic full-profile verification passed all 32 frontend test files and 1,135
+tests, the production build, 508 Python tests with 2 skipped, the Rust product
+and desktop checks, and 2 installed-browser and process-recovery checks.

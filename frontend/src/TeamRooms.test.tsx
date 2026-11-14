@@ -174,3 +174,54 @@ test('assignment cards deduplicate Task identities, preserve shared attribution 
   expect(within(room).getByText(/Member assignments unavailable/)).toBeTruthy();
   expect(within(room).queryByText('No saved work assigned to this room’s members.')).toBeNull();
 });
+
+test.each([{snapshot: teams}, {snapshot: [] as Team[]}])('retained membership stays stale through reconnect and failed refresh (%j)', async ({snapshot}) => {
+  const pending: Array<{resolve: (value: Response) => void}> = [];
+  vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(resolve => pending.push({resolve}))));
+  const props = {workspace, selectedEmployee: ''};
+  const view = render(<TeamRooms {...props} connected={false} />);
+  expect(screen.getByRole('status').textContent).toContain('Disconnected');
+  await act(async () => pending[0].resolve(response({teams: snapshot})));
+  expect(screen.getByRole('status').textContent).toContain('Team rooms are stale');
+  view.rerender(<TeamRooms {...props} connected />);
+  expect(screen.getByRole('status').textContent).toContain('Team rooms are stale');
+  expect(screen.queryByText(/Stale member assignments/)).toBeNull();
+  fireEvent.click(screen.getByRole('button', {name: 'Refresh team rooms'}));
+  expect(screen.getByRole('status').textContent).toContain('Team rooms are stale');
+  await act(async () => pending[1].resolve(new Response('offline', {status: 503})));
+  expect(screen.getByRole('status').textContent).toContain('Team rooms are stale');
+  fireEvent.click(screen.getByRole('button', {name: 'Refresh team rooms'}));
+  await act(async () => pending[2].resolve(response({teams: snapshot})));
+  expect(screen.getByRole('status').textContent).toContain(snapshot.length ? 'Showing persisted team rooms.' : 'No team rooms yet.');
+  view.rerender(<TeamRooms {...props} connected={false} />);
+  view.rerender(<TeamRooms {...props} connected />);
+  expect(screen.getByRole('status').textContent).toContain('Team rooms are stale');
+});
+
+test.each(['success', 'failure'])('obsolete pre-disconnect %s cannot replace membership or finish the current refresh', async outcome => {
+  const pending: Array<{resolve: (value: Response) => void; reject: (error: Error) => void}> = [];
+  // Deliberately ignore AbortSignal: an obsolete transport may settle after recovery.
+  vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>((resolve, reject) => pending.push({resolve, reject}))));
+  const props = {workspace, selectedEmployee: ''};
+  const view = render(<TeamRooms {...props} connected />);
+  await act(async () => pending[0].resolve(response({teams})));
+  fireEvent.click(screen.getByRole('button', {name: 'Refresh team rooms'}));
+  view.rerender(<TeamRooms {...props} connected={false} />);
+  expect(screen.getByRole('status').textContent).toContain('Team rooms are stale');
+  view.rerender(<TeamRooms {...props} connected />);
+  const refresh = screen.getByRole('button', {name: 'Refresh team rooms'}) as HTMLButtonElement;
+  expect(refresh.disabled).toBe(false);
+  fireEvent.click(refresh);
+  await act(async () => {
+    if (outcome === 'success') pending[1].resolve(response({teams: []}));
+    else pending[1].reject(new Error('Obsolete failure'));
+  });
+  expect(refresh.disabled).toBe(true);
+  expect(screen.getByRole('status').textContent).toContain('Team rooms are stale');
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(screen.getByRole('region', {name: 'Team room: Editors · ID: t1'})).toBeTruthy();
+  await act(async () => pending[2].resolve(response({teams: []})));
+  expect(refresh.disabled).toBe(false);
+  expect(screen.getByRole('status').textContent).toContain('No team rooms yet.');
+  expect(screen.queryByRole('region', {name: 'Team room: Editors · ID: t1'})).toBeNull();
+});

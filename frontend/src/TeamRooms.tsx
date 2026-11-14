@@ -9,6 +9,8 @@ export function TeamRooms({workspace, connected, selectedEmployee, onSelectEmplo
   const [teams, setTeams] = useState<Team[] | null>(null);
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState('');
+  const [membershipFresh, setMembershipFresh] = useState(false);
+  const connection = useRef(connected);
   const request = useRef<AbortController | null>(null);
   async function refresh() {
     request.current?.abort();
@@ -16,24 +18,31 @@ export function TeamRooms({workspace, connected, selectedEmployee, onSelectEmplo
     setBusy(true); setError('');
     try {
       const result = await listTeams(controller.signal);
-      if (!controller.signal.aborted) setTeams(result.teams);
+      if (!controller.signal.aborted) { setTeams(result.teams); setMembershipFresh(connected); }
     } catch (failure) {
-      if (!controller.signal.aborted) setError((failure as Error).message);
+      if (!controller.signal.aborted) { setError((failure as Error).message); setMembershipFresh(false); }
     } finally {
       if (!controller.signal.aborted) setBusy(false);
     }
   }
   useEffect(() => { void refresh(); return () => request.current?.abort(); }, []);
-  const stale = !!error || !connected;
+  useEffect(() => {
+    if (connection.current === connected) return;
+    connection.current = connected;
+    request.current?.abort();
+    setBusy(false);
+    setMembershipFresh(false);
+  }, [connected]);
+  const stale = !membershipFresh || !connected;
   return <section className="team-rooms" aria-labelledby="team-rooms-title">
     <h3 id="team-rooms-title">Team rooms</h3>
     <p>Persistent teams group employees. Membership does not imply collaboration or execution. Member workload comes from recorded employee assignments, not team-owned work. Shared members and requests appear in each relevant room; counts must not be added across rooms.</p>
-    <p role="status">{busy ? 'Loading team rooms…' : teams === null ? 'Team rooms unavailable. Refresh to try again.' : stale ? 'Team rooms are stale — showing the last successful snapshot.' : teams.length ? 'Showing persisted team rooms.' : 'No team rooms yet. Create a team in Teams.'}</p>
+    <p role="status">{teams !== null && stale ? `Team rooms are stale — showing the last successful snapshot.${busy ? ' Refreshing team rooms…' : ' Refresh team rooms after reconnecting.'}` : !connected ? 'Disconnected — team rooms unavailable. Reconnect and refresh team rooms.' : busy ? 'Loading team rooms…' : teams === null ? 'Team rooms unavailable. Refresh to try again.' : teams.length ? 'Showing persisted team rooms.' : 'No team rooms yet. Create a team in Teams.'}</p>
     {error && <p role="alert">{error}</p>}
     <button type="button" disabled={busy} onClick={() => void refresh()}>Refresh team rooms</button>
     <div className="team-room-grid">{teams?.map(team => <section className="team-room" key={team.id} aria-label={`Team room: ${team.name} · ID: ${team.id}`}>
       <h4>{team.name}</h4><p>Team ID: {team.id}</p>
-      {(stale || busy) && <p>{busy ? 'Refreshing team snapshot' : 'Stale team snapshot'}</p>}
+      {(stale || busy) && <p>{stale ? 'Stale team snapshot' : 'Refreshing team snapshot'}</p>}
       <button type="button" disabled={!onOpenTeam} aria-controls="teams-panel" onClick={() => onOpenTeam?.(team.id)}>Manage team: {team.name} · ID: {team.id}</button>
       {!team.members.length && <p>No members yet.</p>}
       <div className="office-floor">{[...new Set(team.members)].map((id, index) => {
