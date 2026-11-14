@@ -252,3 +252,24 @@ test('failed-work action remains available for an empty stale workload and forwa
   expect(openFailed).toHaveBeenCalledExactlyOnceWith('b');
   expect(screen.getByText(/Disconnected — showing stale company data/)).toBeTruthy();
 });
+
+
+test.each([
+  ['pending', 'View pending work'], ['active', 'View active work'], ['results', 'View unverified results'],
+] as const)('%s action forwards typed identity and remains browsable with zero stale matches', async (outcome, label) => {
+  const open = vi.fn();
+  const user = userEvent.setup();
+  const props = {connected: false, error: 'Disconnected', onOpenWork: vi.fn(), onOpenEmployeeOutcome: open};
+  const view = render(<CompanyOverview {...props} workspace={workspace()} />);
+  const action = () => screen.getByRole('button', {name: `${label}: Alex · ID: a`});
+  expect(action().textContent).toBe(`${label} (1)`);
+  action().focus(); await user.keyboard('{Enter}');
+  expect(open).toHaveBeenLastCalledWith({employeeId: 'a', outcome});
+  view.rerender(<CompanyOverview {...props} workspace={{...workspace(), work: []}} />);
+  expect(action().textContent).toBe(`${label} (0)`);
+  expect((action() as HTMLButtonElement).disabled).toBe(false);
+  action().focus(); await user.keyboard(' ');
+  expect(open).toHaveBeenCalledTimes(2);
+  expect(open).toHaveBeenLastCalledWith({employeeId: 'a', outcome});
+  expect(screen.getByText(/Disconnected — showing stale company data/)).toBeTruthy();
+});

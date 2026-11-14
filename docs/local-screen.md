@@ -4498,3 +4498,47 @@ run with `npm --prefix frontend test -- src/App.test.tsx`. Supervisor frontend
 verification passed 1,307 frontend tests, TypeScript checking, the production
 build, and 505 Python tests with 2 skipped. Installed-browser and recovery gates
 were deferred by this profile. Live provider calls are skipped, not passed.
+
+## Open pending, active and unverified-result work by employee (C119-T1)
+
+Use the same `agentown-web` launch command above with a deterministic saved
+workspace containing at least two employees, shared assignments, pending work
+without attempts, active attempts (including caller-reported attempts without a
+provider), and finished attempts with output. Include an older failure followed
+by a result and an older result followed by an active attempt. Only the latest
+attempt determines the displayed count and matches; shared work counts once for
+each assigned employee. A result with empty output still counts as a result.
+
+1. Enter unsaved employee and work drafts. Select a saved request for its detail,
+   then enter conflicting Search saved work text and choose another outcome.
+2. In Company overview → Employee workload list, Tab to **View pending work**,
+   **View active work**, or **View unverified results** on an employee card.
+   Press Enter or Space. The employee and requested outcome are selected, search
+   is cleared, and focus moves to **Work & results**. Tab reaches search next.
+3. Repeat for all three actions and another employee. Counts must match the
+   filtered list. The drafts and selected detail remain; when excluded, the
+   detail has explicit “outside these matches” messaging. Results remain
+   unverified and caller-reported activity does not imply a provider request.
+4. Disconnect the server and refresh. Repeat all three actions on the stale
+   snapshot, including an employee with a zero count. Actions remain available;
+   stale history and empty matches are explicitly labeled. Reconnect and refresh
+   after changing saved outcomes; counts and matches must follow the new snapshot.
+5. In the network inspector, navigation must issue no save, assignment, retry or
+   execution requests. It only changes the local view.
+
+For runnable deterministic fixtures independent of a prepared database:
+
+```sh
+cd frontend
+npm test -- src/CompanyOverview.test.tsx src/App.test.tsx
+```
+
+The component tests named “action forwards typed identity” and App tests named
+“employee … navigation retains detail and drafts” cover all three outcomes,
+Enter/Space, shared assignments, latest attempts, conflicting filters, preserved
+drafts/detail, caller-reported activity, stale snapshots and zero/empty matches.
+They assert navigation does not mutate the fixture or call mutation/execution
+endpoints. Supervisor frontend verification passed 1,316 frontend tests,
+TypeScript checking, the production build, and 505 Python tests with 2 skipped.
+Installed-browser and recovery gates were deferred by this profile. Live
+provider calls are skipped, not passed.

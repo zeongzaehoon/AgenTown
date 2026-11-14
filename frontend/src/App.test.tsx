@@ -1415,3 +1415,69 @@ test.each(['{Enter}', ' '])('employee failed-work navigation preserves selection
   // Fixture records every state/mutation endpoint; overview navigation only reads.
   expect(f.calls.every(call => call.path === '/api/state')).toBe(true);
 });
+
+test.each([
+  ['pending', 'View pending work', '{Enter}'], ['pending', 'View pending work', ' '],
+  ['active', 'View active work', '{Enter}'], ['active', 'View active work', ' '],
+  ['results', 'View unverified results', '{Enter}'], ['results', 'View unverified results', ' '],
+] as const)('employee %s navigation retains detail and drafts, clears conflicts and browses stale/empty matches (%s, %s)', async (outcome, label, key) => {
+  const active = {id: 'caller', state: 'active' as const, outcome: null, participants: ['a']};
+  const result = {id: 'result', state: 'finished' as const, outcome: 'reported_success', output: '', participants: ['a']};
+  const failure = {id: 'failure', state: 'finished' as const, outcome: 'failure', error: 'timeout', participants: ['a']};
+  const attempts = outcome === 'pending' ? [] : outcome === 'active' ? [result, active] : [failure, result];
+  const f = fixture({...initial(), employees: [{id: 'a', name: 'Alex'}, {id: 'b', name: 'Alex'}, {id: 'idle', name: 'Idle'}], work: [
+    {id: 'selected', input: 'Keep selected detail', status: 'blocked', assignees: ['a'], attempts: []},
+    {id: 'shared', input: 'Shared matching work', status: 'pending', assignees: ['a', 'a', 'b'], attempts},
+    {id: 'own', input: 'Own matching work', status: 'pending', assignees: ['a'], attempts},
+    {id: 'excluded', input: 'Latest failure', status: 'pending', assignees: ['a'], attempts: [result, failure]},
+  ]});
+  const saved = JSON.stringify(f.state);
+  const user = userEvent.setup();
+  render(<App />); await connected();
+  fireEvent.change(screen.getByLabelText('What would you like help with?'), {target: {value: 'Unsaved draft'}});
+  fireEvent.change(screen.getByLabelText('Employee name'), {target: {value: 'Unsaved employee'}});
+  fireEvent.change(searchInput(), {target: {value: 'conflicting search'}});
+  fireEvent.change(outcomeFilter(), {target: {value: 'failed'}});
+  const action = (id: string, name = 'Alex') => screen.getByRole('button', {name: `${label}: ${name} · ID: ${id}`});
+  expect(action('a').textContent).toBe(`${label} (2)`);
+  expect(action('b').textContent).toBe(`${label} (1)`);
+  action('b').focus(); await user.keyboard(key);
+  const heading = screen.getByRole('heading', {name: '3. Work & results'});
+  expect(document.activeElement).toBe(heading);
+  expect((searchInput() as HTMLInputElement).value).toBe('');
+  expect(outcomeFilter().value).toBe(outcome);
+  expect(matchingIds()).toEqual(['shared']);
+  expect(screen.getByText(/Assigned work for Alex · Employee ID: b/)).toBeTruthy();
+  await user.tab(); expect(document.activeElement).toBe(searchInput());
+  f.disconnect(); refresh();
+  await waitFor(() => expect(document.querySelector('#connection')!.textContent).toContain('Disconnected'));
+  action('a').focus(); await user.keyboard(key);
+  expect(document.activeElement).toBe(heading);
+  expect(matchingIds()).toEqual(['shared', 'own']);
+  expect(screen.getByText(/Using stale assignments from the last successful refresh/)).toBeTruthy();
+  expect(screen.getByText(/Disconnected — showing stale company data/)).toBeTruthy();
+  if (outcome === 'active') expect(screen.getAllByText(/caller-reported active · no provider request/).length).toBeGreaterThan(0);
+  expect(screen.getByText('Work ID: selected')).toBeTruthy();
+  expect(screen.getByText(/The selected work is outside these matches/)).toBeTruthy();
+  expect((screen.getByLabelText('What would you like help with?') as HTMLTextAreaElement).value).toBe('Unsaved draft');
+  expect((screen.getByLabelText('Employee name') as HTMLInputElement).value).toBe('Unsaved employee');
+  expect(JSON.stringify(f.state)).toBe(saved);
+  action('idle', 'Idle').focus(); await user.keyboard(key);
+  expect(document.activeElement).toBe(heading);
+  expect(matchingIds()).toEqual([]);
+  expect(screen.getByText(/No saved work matches your employee/)).toBeTruthy();
+  expect(outcomeFilter().value).toBe(outcome);
+  expect(screen.getByText('Work ID: selected')).toBeTruthy();
+  expect(screen.getByText(/The selected work is outside these matches/)).toBeTruthy();
+  expect((screen.getByLabelText('What would you like help with?') as HTMLTextAreaElement).value).toBe('Unsaved draft');
+  // A fresh accepted snapshot can remove all matches without resetting the chosen filters.
+  f.state.work = f.state.work.map(work => ({...work, attempts: [failure]}));
+  f.reconnect(); refresh();
+  await waitFor(() => expect(document.querySelector('#connection')!.textContent).toContain('Connected'));
+  await waitFor(() => expect(action('a').textContent).toBe(`${label} (0)`));
+  action('a').focus(); await user.keyboard(key);
+  expect(matchingIds()).toEqual([]);
+  expect(outcomeFilter().value).toBe(outcome);
+  expect(screen.getByText('Work ID: selected')).toBeTruthy();
+  expect(f.calls.every(call => call.path === '/api/state')).toBe(true);
+});
