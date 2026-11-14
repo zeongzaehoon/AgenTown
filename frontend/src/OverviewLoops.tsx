@@ -8,8 +8,26 @@ import { confirmedLoop, loopInspection, loopReceipt, type LoopInspection, type L
 
 export type LoopNavigation = {taskId: string; sessionId: string; policyId?: never} | {taskId: string; policyId: string; sessionId?: never};
 
+/** Called only after the owner's response freshness checks have passed. */
+function useSessionRemoval(owner: string) {
+  const list = useRef<HTMLUListElement>(null);
+  const destination = useRef<HTMLButtonElement>(null);
+  const [announcement, setAnnouncement] = useState('');
+  function accept(sessions: LoopSession[]) {
+    const surviving = new Set(sessions.map(session => session.session_id));
+    const removed = Array.from(list.current?.children ?? []).filter(row =>
+      !surviving.has((row as HTMLElement).dataset.sessionId ?? ''));
+    if (removed.some(row => row.contains(document.activeElement))) destination.current?.focus();
+    setAnnouncement(removed.length
+      ? `${owner}: ${removed.length} recorded Loop session${removed.length === 1 ? '' : 's'} removed from this inspection. ${sessions.length ? 'Remaining sessions are available below.' : 'No recorded sessions remain.'}`
+      : '');
+  }
+  return {list, destination, announcement, accept};
+}
+
 /** Polling and navigation inspect only; stopping requires explicit session consent. */
 export function OverviewLoops({workspace, connected, onOpenWork, onOpenSession}: {connected: boolean; onOpenSession?: (request: LoopNavigation) => void; workspace: Workspace | null; onOpenWork: (id: string) => void}) {
+  const removal = useSessionRemoval('Web Loop activity');
   const [inspection, setInspection] = useState<LoopInspection | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const [control, setControl] = useState<LoopControl | null>(null);
@@ -64,7 +82,7 @@ export function OverviewLoops({workspace, connected, onOpenWork, onOpenSession}:
       const generation = epoch.current;
       try {
         const value = loopInspection(await api<unknown>('/api/loops/v1', {}, controller.signal, 'GET'));
-        if (live && generation === epoch.current) { inspectedAt.current = Date.now(); setNow(Date.now()); setInspection(value); setControl(value.control ?? null); setStatus('ready'); }
+        if (live && generation === epoch.current) { removal.accept(value.sessions); inspectedAt.current = Date.now(); setNow(Date.now()); setInspection(value); setControl(value.control ?? null); setStatus('ready'); }
       } catch (error) { if (live && generation === epoch.current) { setStatus('unavailable'); setControl(error instanceof ApiError ? error.control ?? null : null); } }
       finally { pending = false; }
     }
@@ -81,13 +99,14 @@ export function OverviewLoops({workspace, connected, onOpenWork, onOpenSession}:
       : !fresh ? 'Loop inspection stale. Inspect again before stopping.' : 'Showing recorded Loop sessions.'}</p>
     <p role="status" aria-label="Overview Loop authority">{!fresh ? 'Stale authority: ' : ''}{controlText(control)}</p>
     <p role="status" aria-label="Overview Loop stop outcome">{message}</p>
-    <button type="button" aria-disabled={!connected || busy} onClick={() => { if (connected && !lock.current) refresh.current(); }}>Inspect Loop sessions again</button>
+    <p role="status" aria-label="Web Loop session removals">{removal.announcement}</p>
+    <button ref={removal.destination} type="button" aria-disabled={!connected || busy} onClick={() => { if (connected && !lock.current) refresh.current(); }}>Inspect Loop sessions again</button>
     <p>Loop admissions are separate from ordinary request counts. Expand session details here to inspect recorded attempts, or open saved work. Stop requires fresh inspection and granted local authority; otherwise stop through the owning MCP or web server. Stop prevents new admissions and requests local cancellation. Remote completion may remain unknown. Nothing starts or resumes here.</p>
     {inspection && !inspection.sessions.length && <p>No recorded Loop sessions.</p>}
-    {!!inspection?.sessions.length && <ul aria-label="Recorded Loop sessions">{inspection.sessions.map(session => {
+    {!!inspection?.sessions.length && <ul ref={removal.list} aria-label="Recorded Loop sessions">{inspection.sessions.map(session => {
       const work = workspace?.work.find(w => w.id === session.preview.task_id);
       const employee = workspace?.employees.find(e => e.id === session.preview.agent_id);
-      return <li key={session.session_id}>
+      return <li key={session.session_id} data-session-id={session.session_id}>
         <h4>{session.preview.policy_name} · {session.session_id}</h4>
         <p>{sourceText(session.declared_source)}</p>
         <p>{loopLabel(session, inspection.attempts)} · Admitted: {session.admitted} / {session.preview.max_iterations}</p>
@@ -126,6 +145,7 @@ export function OverviewLoops({workspace, connected, onOpenWork, onOpenSession}:
 
 
 function CompanyMcpLoops({workspace, connected, onOpenSession}: {connected: boolean; workspace: Workspace | null; onOpenSession?: (request: LoopNavigation) => void}) {
+  const removal = useSessionRemoval('Local MCP Loop activity');
   const [inspection, setInspection] = useState<LoopInspection | null>(null);
   const [status, setStatus] = useState('Not inspected. Explicitly inspect recorded sessions through the retained local MCP owner.');
   const [busy, setBusy] = useState(false);
@@ -159,6 +179,7 @@ function CompanyMcpLoops({workspace, connected, onOpenSession}: {connected: bool
       const result = await inspectCompanyLoops(controller.signal);
       if (generation !== revision.current) return;
       if (!result.inspection) {setStatus('Retained local MCP inspection unavailable. Previous records, if any, are stale. Inspect again.'); return;}
+      removal.accept(result.inspection.sessions);
       setInspection(result.inspection); setFresh(true); inspectedAt.current = Date.now();
       setStatus(result.inspection.sessions.length ? 'Recorded local MCP sessions loaded.' : 'No recorded local MCP sessions.');
       expiry.current = setTimeout(() => { if (generation === revision.current) {setFresh(false); setStatus('Local MCP inspection stale. Inspect again for current persisted state and authority.');} }, 2400);
@@ -201,13 +222,14 @@ function CompanyMcpLoops({workspace, connected, onOpenSession}: {connected: bool
     <h4>Retained local MCP Loop activity</h4>
     <p role="status">{status}</p>
     <p role="status" aria-label="Local MCP interrupted stop outcome">{interruptedStop}</p>
-    <button type="button" aria-disabled={!connected || stopLock.current} onClick={() => void inspect()}>Inspect company Loops through local MCP</button>
+    <p role="status" aria-label="Local MCP Loop session removals">{removal.announcement}</p>
+    <button ref={removal.destination} type="button" aria-disabled={!connected || stopLock.current} onClick={() => void inspect()}>Inspect company Loops through local MCP</button>
     <p>Read recorded sessions across all work. Inspection and opening work grant no consent and never preview, start or stop work. Stop requires fresh inspection and granted local authority. Stop prevents new admissions and requests local cancellation; remote completion may remain unknown.</p>
     {inspection && <>
       <p aria-label="Retained MCP owner authority">{fresh ? '' : 'Stale authority: '}{controlText(inspection.control)}</p>
-      <ul aria-label="Company local MCP sessions">{inspection.sessions.map(s => {
+      <ul ref={removal.list} aria-label="Company local MCP sessions">{inspection.sessions.map(s => {
         const work = workspace?.work.find(w => w.id === s.preview.task_id);
-        return <li key={s.session_id}>
+        return <li key={s.session_id} data-session-id={s.session_id}>
           <p>Task: {s.preview.task_id} · Session: {s.session_id} · Persisted state: {s.state}</p>
           <button type="button" aria-disabled={busy || !fresh || !canControl(inspection.control) || s.state !== 'active'}
             aria-describedby={`mcp-stop-reason-${s.session_id}`} onClick={() => void stop(s.session_id)}>Stop local MCP Loop {s.session_id} from overview</button>

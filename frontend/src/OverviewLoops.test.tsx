@@ -925,3 +925,74 @@ test.each(['receipt', 'confirmation'])('old local MCP stop %s stays uncertain an
   expect(fetcher.mock.calls.filter(([path]) => path.endsWith('/stop'))).toHaveLength(1);
   expect(fetcher.mock.calls.filter(([path]) => path.endsWith('/inspect'))).toHaveLength(held === 'confirmation' ? 1 : 0);
 });
+
+test.each(['web', 'local'] as const)('%s accepted removals recover only focus inside removed rows or details', async owner => {
+  vi.useFakeTimers({toFake: ['setInterval', 'clearInterval']});
+  const local = owner === 'local';
+  const sessions = [companySession(1), companySession(2)];
+  let saved = sessions;
+  const fetcher = vi.fn(async (path: string, init?: RequestInit) => {
+    if (path === '/api/loops/v1') {
+      expect(init?.method).toBe('GET');
+      return new Response(JSON.stringify({...initial(), sessions: local ? [] : saved}));
+    }
+    expect(path).toBe('/api/connections/v1/loops/inspect-company');
+    return new Response(JSON.stringify(companyReply(saved)));
+  });
+  vi.stubGlobal('fetch', fetcher);
+  render(<><button>Outside Loop activity</button><OverviewLoops connected workspace={workspace} onOpenWork={vi.fn()} /></>);
+  await act(async () => {});
+  const inspect = screen.getByRole('button', {name: local ? 'Inspect company Loops through local MCP' : 'Inspect Loop sessions again'});
+  const refresh = async () => { await act(async () => { fireEvent.click(inspect); }); };
+  await refresh();
+  const disclosure = (id: string) => screen.getByRole('button', {name: `Attempt details for ${local ? 'local MCP ' : ''}Loop ${id}`});
+  const notice = screen.getByLabelText(local ? 'Local MCP Loop session removals' : 'Web Loop session removals');
+  for (const target of ['row', 'details', 'survivor', 'external', 'empty']) {
+    saved = sessions; await refresh();
+    const first = disclosure(sessions[0].session_id);
+    let focused: HTMLElement = first;
+    if (target === 'details') {
+      if (first.getAttribute('aria-expanded') !== 'true') fireEvent.click(first);
+      focused = screen.getByRole('region', {name: `Attempts for ${local ? 'local MCP ' : ''}Loop ${sessions[0].session_id}`});
+      focused.tabIndex = -1;
+    } else if (target === 'survivor') focused = disclosure(sessions[1].session_id);
+    else if (target === 'external') focused = screen.getByRole('button', {name: 'Outside Loop activity'});
+    focused.focus();
+    saved = target === 'empty' ? [] : [sessions[1]];
+    // Polling and programmatic refresh preserve the actual active element.
+    if (!local && target === 'row') await act(async () => { await vi.advanceTimersByTimeAsync(800); });
+    else await refresh();
+    expect(document.activeElement).toBe(target === 'survivor' || target === 'external' ? focused : inspect);
+    expect(notice.textContent).toContain('removed from this inspection');
+    if (target === 'empty') expect(notice.textContent).toContain('No recorded sessions remain');
+  }
+  expect(fetcher.mock.calls.every(([path]) => path === '/api/loops/v1' || path === '/api/connections/v1/loops/inspect-company')).toBe(true);
+});
+
+test.each(['web', 'local'] as const)('%s rejected old-connection removal cannot announce or move focus', async owner => {
+  vi.useFakeTimers({toFake: ['setInterval', 'clearInterval']});
+  const local = owner === 'local';
+  let hold = false;
+  let resolve!: (response: Response) => void;
+  const fetcher = vi.fn(async (path: string) => {
+    if (local && path === '/api/loops/v1') return new Response(JSON.stringify({...initial(), sessions: []}));
+    if (hold) return new Promise<Response>(r => { resolve = r; });
+    return new Response(JSON.stringify(local ? companyReply([companySession(1)]) : initial()));
+  });
+  vi.stubGlobal('fetch', fetcher);
+  const props = {workspace, onOpenWork: vi.fn()};
+  const view = render(<OverviewLoops {...props} connected />);
+  await act(async () => {});
+  const inspect = screen.getByRole('button', {name: local ? 'Inspect company Loops through local MCP' : 'Inspect Loop sessions again'});
+  if (local) await act(async () => {fireEvent.click(inspect);});
+  const focused = screen.getByRole('button', {name: `Attempt details for ${local ? `local MCP Loop ${uid(1)}` : 'Loop s'}`});
+  focused.focus(); hold = true;
+  await act(async () => {fireEvent.click(inspect);});
+  view.rerender(<OverviewLoops {...props} connected={false} />);
+  hold = false;
+  view.rerender(<OverviewLoops {...props} connected />);
+  await act(async () => {resolve(new Response(JSON.stringify(local ? companyReply([]) : {...initial(), sessions: []})));});
+  expect(document.activeElement).toBe(focused);
+  expect(screen.getByLabelText(local ? 'Local MCP Loop session removals' : 'Web Loop session removals').textContent).toBe('');
+  expect(fetcher.mock.calls.every(([path]) => path === '/api/loops/v1' || path === '/api/connections/v1/loops/inspect-company')).toBe(true);
+});

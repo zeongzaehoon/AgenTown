@@ -3820,3 +3820,61 @@ query ambiguous. Supervisor verification passed all 32 frontend test files and
 harness Rust and operational suites. The selected frontend profile deferred
 installed-browser and installation/process-recovery gates. Live provider calls
 remain skipped, not passed.
+
+### Company Loop removal focus recovery (C106-T1)
+
+Launch `agentown-web --database PATH --port 8765` (replace PATH with a local
+product database), open <http://127.0.0.1:8765> → Company overview → **Bounded
+Loop activity**. No credentials or provider calls are needed. For deterministic
+browser inspection, paste this into the browser console. It replaces only the two
+inspection responses in this tab; reload the page to restore normal requests.
+
+```js
+const originalLoopFetch = window.fetch.bind(window);
+const loopId = n => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+const loopSession = n => ({schema_version: 1, session_id: loopId(n),
+  state: 'active', admitted: 0, next_at: 0, started_at: 1, expires_at: 100,
+  provider: 'test', model: 'test', preview: {schema_version: 1,
+    preview_id: loopId(n + 40), policy_id: loopId(n + 30),
+    policy_name: 'Keyboard fixture', task_id: loopId(n + 10), agent_id: loopId(20),
+    input: 'Deterministic saved input', max_iterations: 2, interval_seconds: 60,
+    expected_runs: 0, policy_enabled: true, created_at: 1}});
+window.loopFixture = [loopSession(1), loopSession(2)];
+window.fetch = (path, init) => {
+  const data = {schema_version: 1, sessions: window.loopFixture, attempts: [],
+    cancellation: '', control: {state: 'competing_owner', can_control: false,
+      message: 'Read-only keyboard fixture'}};
+  if (path === '/api/loops/v1') return Promise.resolve(Response.json(data));
+  if (path === '/api/connections/v1/loops/inspect-company')
+    return Promise.resolve(Response.json({schema_version: 1, scope: 'company',
+      status: 'confirmed', code: 'company_loops_inspected', recovery: 'Inspect explicitly', data}));
+  return originalLoopFetch(path, init);
+};
+```
+
+1. Wait for a web poll; explicitly choose **Inspect company Loops through local
+   MCP** for that owner's records. Expand a session's attempt details, then leave
+   focus on its disclosure or another control in its row.
+2. In the console set `window.loopFixture = [loopSession(2)]`. Web polling removes
+   the first row; local MCP removes it only on explicit inspection. To request
+   inspection without moving existing focus, use
+   `Array.from(document.querySelectorAll('button')).find(b => b.textContent ===
+   'Inspect company Loops through local MCP').click()` in the console.
+3. Focus must return to that owner's labeled inspection button, with its visible
+   focus outline. A polite status announces the removal. Repeat with
+   `window.loopFixture = []`: the same destination remains available and the
+   announcement says no recorded sessions remain.
+4. Restore both fixture sessions and repeat while focus is on the surviving
+   session or outside the rows. That focus must remain in place. Inspection and
+   removal never request stop, preview or execution; inspect the Network panel.
+
+Run deterministic interaction checks in a prepared checkout:
+`cd frontend && npm test -- src/OverviewLoops.test.tsx`. Coverage includes both
+owners, row/details removal, empty results, surviving/external focus, and late
+old-connection responses that must neither remove records nor move focus or
+announce removal. Browser/visual validation belongs to supervisor verification;
+the selected frontend profile deferred installed-browser and installation/
+process-recovery gates. Supervisor verification passed all 32 frontend test
+files and 1,131 tests, the production build, 505 Python tests with 2 skipped,
+and the harness Rust and operational suites. Live LLM tests remain skipped
+under the user policy.
