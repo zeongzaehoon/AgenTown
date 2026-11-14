@@ -9,15 +9,29 @@ export function HookDevices({onOpenHook, onOpenWork, workspace, connected = true
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState('');
   const request = useRef<AbortController | null>(null);
+  // Connection recovery does not refresh this independently loaded configuration.
+  const [disconnectedSnapshot, setDisconnectedSnapshot] = useState(!connected);
+  const connection = useRef({connected, revision: 0});
+  useEffect(() => {
+    connection.current.connected = connected;
+    if (!connected) {
+      connection.current.revision += 1;
+      setDisconnectedSnapshot(true);
+    }
+  }, [connected]);
   async function refresh() {
     request.current?.abort();
     const controller = new AbortController();
     request.current = controller;
+    const revision = connection.current.revision;
     setBusy(true); setError('');
     try {
       const result = await configurationRequest<{hooks: HookRecord[]}>('hooks', '', undefined, controller.signal);
       if (!Array.isArray(result.hooks) || result.hooks.some(device => !device || typeof device.id !== 'string' || typeof device.name !== 'string' || typeof device.enabled !== 'boolean' || typeof device.event !== 'string' || typeof device.target_kind !== 'string' || typeof device.target_id !== 'string' || typeof device.skill_id !== 'string')) throw new Error('Saved Hook data unavailable. Refresh to try again.');
-      if (!controller.signal.aborted) setDevices(result.hooks);
+      if (!controller.signal.aborted) {
+        setDevices(result.hooks);
+        setDisconnectedSnapshot(!connection.current.connected || revision !== connection.current.revision);
+      }
     } catch (failure) {
       if (!controller.signal.aborted) setError((failure as Error).message);
     } finally {
@@ -28,7 +42,7 @@ export function HookDevices({onOpenHook, onOpenWork, workspace, connected = true
   return <section className="hook-devices" aria-labelledby="hook-devices-title">
     <h3 id="hook-devices-title">Hook trigger devices</h3>
     <p>Open a device to inspect its saved Hook in Configuration. Opening never saves, enables or executes work. Hooks do not run automatically.</p>
-    <p role="status">{busy ? 'Loading Hook devices…' : error ? devices ? 'Hook devices are stale — showing the last successful snapshot.' : 'Hook devices unavailable.' : devices?.length ? 'Showing saved Hook devices.' : 'No saved Hooks yet. Create a Hook in Configuration.'}</p>
+    <p role="status">{!connected ? 'Disconnected — Hook devices configuration may be stale. ' : disconnectedSnapshot ? 'Connection restored — Hook devices configuration may still be stale. Refresh Hook devices to check. ' : ''}{busy ? 'Loading Hook devices…' : error ? devices ? 'Hook devices are stale — showing the last successful snapshot.' : 'Hook devices unavailable.' : devices?.length ? (!connected || disconnectedSnapshot) ? 'Showing retained Hook devices configuration.' : 'Showing saved Hook devices.' : (!connected || disconnectedSnapshot) ? 'The last successful configuration snapshot was empty; current Hooks are unknown.' : 'No saved Hooks yet. Create a Hook in Configuration.'}</p>
     {error && <p role="alert">{error}</p>}
     <button type="button" disabled={busy} onClick={() => void refresh()}>Refresh Hook devices</button>
     <div className="hook-device-grid">{devices?.map(device => <article key={device.id}><button type="button" className="hook-device" key={device.id}
@@ -37,6 +51,7 @@ export function HookDevices({onOpenHook, onOpenWork, workspace, connected = true
       <span aria-hidden="true">⚑</span><strong>{device.name}</strong><span>Trigger configuration</span><span>ID: {device.id}</span><span>Event: {device.event}</span>
       <span>Target: {device.target_kind} · ID: {device.target_id}</span>
       <span>Configuration {device.enabled ? 'enabled' : 'disabled'}</span>
+      {(!connected || disconnectedSnapshot) && <span>{!connected ? 'Disconnected — potentially stale configuration snapshot' : 'Potentially stale configuration snapshot — refresh to check'}</span>}
       {(busy || error) && <span>{busy ? 'Refreshing snapshot' : 'Stale snapshot'}</span>}
     </button>
       <RecordedHookAttempts device={device} workspace={workspace} connected={connected} />

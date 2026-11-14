@@ -1,3 +1,5 @@
+import { SkillBooks } from './SkillBooks';
+import { HookDevices } from './HookDevices';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, expect, test, vi } from 'vitest';
 import userEvent from '@testing-library/user-event';
@@ -145,4 +147,36 @@ test('team room cards forward the exact saved Task identity through overview nav
   const card = await screen.findByRole('button', {name: 'Open member assignment: shared · Task ID: shared · Team ID: team'});
   card.focus(); await user.keyboard('{Enter}');
   expect(open).toHaveBeenCalledExactlyOnceWith('shared');
+});
+
+
+test.each(['skills', 'hooks'])('configuration sections recover independently when %s refresh fails', async failed => {
+  const records = {skills: [{id: 's', name: 'Guide', instructions: 'Saved', enabled: true}],
+    hooks: [{id: 'h', name: 'Follow up', skill_id: 's', target_kind: 'agent', target_id: 'a', event: 'run_completed', enabled: true}]};
+  let failing = false;
+  const fetcher = vi.fn(async (path: string) => {
+    const kind = path.endsWith('/skills') ? 'skills' : 'hooks';
+    if (failing && kind === failed) throw new Error(`${kind} refresh failed`);
+    return new Response(JSON.stringify({[kind]: records[kind]}));
+  });
+  vi.stubGlobal('fetch', fetcher);
+  const sections = (connected: boolean) => <><SkillBooks connected={connected} /><HookDevices connected={connected} /></>;
+  const view = render(sections(true));
+  await screen.findByText('Showing saved Skill books.');
+  await screen.findByText('Showing saved Hook devices.');
+  view.rerender(sections(false));
+  expect(screen.getAllByText('Disconnected — potentially stale configuration snapshot')).toHaveLength(2);
+  view.rerender(sections(true));
+  expect(fetcher).toHaveBeenCalledTimes(2);
+  failing = true;
+  fireEvent.click(screen.getByRole('button', {name: 'Refresh Skill books'}));
+  fireEvent.click(screen.getByRole('button', {name: 'Refresh Hook devices'}));
+  expect((await screen.findByRole('alert')).textContent).toBe(`${failed} refresh failed`);
+  const successful = failed === 'skills' ? 'Hook devices' : 'Skill books';
+  await screen.findByText(`Showing saved ${successful}.`);
+  expect(screen.getAllByText('Potentially stale configuration snapshot — refresh to check')).toHaveLength(1);
+  view.rerender(sections(false));
+  view.rerender(sections(true));
+  expect(fetcher).toHaveBeenCalledTimes(4);
+  expect(screen.getByRole('alert').textContent).toBe(`${failed} refresh failed`);
 });

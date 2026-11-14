@@ -9,15 +9,29 @@ export function SkillBooks({onOpenSkill, onOpenWork, workspace, connected = true
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState('');
   const request = useRef<AbortController | null>(null);
+  // Connection recovery does not refresh this independently loaded configuration.
+  const [disconnectedSnapshot, setDisconnectedSnapshot] = useState(!connected);
+  const connection = useRef({connected, revision: 0});
+  useEffect(() => {
+    connection.current.connected = connected;
+    if (!connected) {
+      connection.current.revision += 1;
+      setDisconnectedSnapshot(true);
+    }
+  }, [connected]);
   async function refresh() {
     request.current?.abort();
     const controller = new AbortController();
     request.current = controller;
+    const revision = connection.current.revision;
     setBusy(true); setError('');
     try {
       const result = await configurationRequest<{skills: ConfigurationRecord[]}>('skills', '', undefined, controller.signal);
       if (!Array.isArray(result.skills) || result.skills.some(book => !book || typeof book.id !== 'string' || typeof book.name !== 'string' || typeof book.enabled !== 'boolean')) throw new Error('Saved Skill data unavailable. Refresh to try again.');
-      if (!controller.signal.aborted) setBooks(result.skills);
+      if (!controller.signal.aborted) {
+        setBooks(result.skills);
+        setDisconnectedSnapshot(!connection.current.connected || revision !== connection.current.revision);
+      }
     } catch (failure) {
       if (!controller.signal.aborted) setError((failure as Error).message);
     } finally {
@@ -28,7 +42,7 @@ export function SkillBooks({onOpenSkill, onOpenWork, workspace, connected = true
   return <section className="skill-library" aria-labelledby="skill-library-title">
     <h3 id="skill-library-title">Skill library</h3>
     <p>Open a book to inspect its saved Skill in Configuration. Opening never saves, enables or executes work.</p>
-    <p role="status">{busy ? 'Loading Skill books…' : error ? books ? 'Skill books are stale — showing the last successful snapshot.' : 'Skill books unavailable.' : books?.length ? 'Showing saved Skill books.' : 'No saved Skills yet. Create a Skill in Configuration.'}</p>
+    <p role="status">{!connected ? 'Disconnected — Skill books configuration may be stale. ' : disconnectedSnapshot ? 'Connection restored — Skill books configuration may still be stale. Refresh Skill books to check. ' : ''}{busy ? 'Loading Skill books…' : error ? books ? 'Skill books are stale — showing the last successful snapshot.' : 'Skill books unavailable.' : books?.length ? (!connected || disconnectedSnapshot) ? 'Showing retained Skill books configuration.' : 'Showing saved Skill books.' : (!connected || disconnectedSnapshot) ? 'The last successful configuration snapshot was empty; current Skills are unknown.' : 'No saved Skills yet. Create a Skill in Configuration.'}</p>
     {error && <p role="alert">{error}</p>}
     <button type="button" disabled={busy} onClick={() => void refresh()}>Refresh Skill books</button>
     <div className="skill-shelf">{books?.map(book => <article key={book.id}><button type="button" className="skill-book" key={book.id}
@@ -36,6 +50,7 @@ export function SkillBooks({onOpenSkill, onOpenWork, workspace, connected = true
       aria-label={`Open Skill book: ${book.name} · ID: ${book.id}`} onClick={() => onOpenSkill?.(book.id)}>
       <span aria-hidden="true">▤</span><strong>{book.name}</strong><span>Skill manual</span><span>ID: {book.id}</span>
       <span>Configuration {book.enabled ? 'enabled' : 'disabled'}</span>
+      {(!connected || disconnectedSnapshot) && <span>{!connected ? 'Disconnected — potentially stale configuration snapshot' : 'Potentially stale configuration snapshot — refresh to check'}</span>}
       {(busy || error) && <span>{busy ? 'Refreshing snapshot' : 'Stale snapshot'}</span>}
     </button>
     <RecordedSkillUse book={book} workspace={workspace} connected={connected} />

@@ -164,6 +164,11 @@ test('empty, disconnected, refreshing and stale snapshots explain unavailable Op
   expect(screen.getByText(/Disconnected. Refresh connection before opening/)).toBeTruthy();
   expect(action.disabled).toBe(true);
   view.rerender(<SkillBooks workspace={{...workspace}} onOpenWork={open} />);
+  // A disclosure is not a new fetch or a new inspection-navigation guard.
+  expect(screen.getByRole('status').textContent).toContain('Connection restored');
+  expect(chooser.disabled).toBe(false); expect(action.disabled).toBe(false);
+  expect(chooser.value).toBe('w');
+  expect(fetcher).toHaveBeenCalledTimes(1);
   let reject!: (error: Error) => void;
   fetcher.mockImplementationOnce(() => new Promise<Response>((_, fail) => { reject = fail; }));
   fireEvent.click(screen.getByRole('button', {name: 'Refresh Skill books'}));
@@ -228,4 +233,71 @@ test('recorded Skill disclosures match persisted IDs, preserve context and focus
   view.rerender(<SkillBooks workspace={null} connected={false} />);
   expect(screen.getAllByText(/Workspace unavailable. Refresh connection/).length).toBeGreaterThan(0);
   expect(fetcher).toHaveBeenCalledTimes(before + 1);
+});
+
+
+test('disconnected configuration stays explicit until a successful refresh, retaining cards and keyboard focus', async () => {
+  const fetcher = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({skills: skills})));
+  vi.stubGlobal('fetch', fetcher);
+  const open = vi.fn();
+  const user = userEvent.setup();
+  const view = render(<SkillBooks onOpenSkill={open} connected />);
+  const card = await screen.findByRole('button', {name: 'Open Skill book: Manual · ID: one'});
+  card.focus();
+  view.rerender(<SkillBooks onOpenSkill={open} connected={false} />);
+  expect(screen.getByRole('status').textContent).toContain('Disconnected');
+  expect(card.textContent).toContain('Disconnected — potentially stale configuration snapshot');
+  expect(document.activeElement).toBe(card);
+  await user.keyboard('{Enter}');
+  expect(open).toHaveBeenCalledWith('one');
+  view.rerender(<SkillBooks onOpenSkill={open} connected />);
+  expect(screen.getByRole('status').textContent).toContain('Connection restored');
+  expect(card.textContent).toContain('Potentially stale configuration snapshot');
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  fetcher.mockRejectedValueOnce(new Error('Configuration refresh failed'));
+  fireEvent.click(screen.getByRole('button', {name: 'Refresh Skill books'}));
+  await screen.findByRole('alert');
+  view.rerender(<SkillBooks onOpenSkill={open} connected={false} />);
+  view.rerender(<SkillBooks onOpenSkill={open} connected />);
+  expect(screen.getByRole('alert').textContent).toBe('Configuration refresh failed');
+  expect(fetcher).toHaveBeenCalledTimes(2);
+  let finish!: (response: Response) => void;
+  fetcher.mockImplementationOnce(() => new Promise<Response>(resolve => { finish = resolve; }));
+  fireEvent.click(screen.getByRole('button', {name: 'Refresh Skill books'}));
+  expect(screen.getByRole('status').textContent).toContain('Loading Skill books');
+  expect(card.textContent).toContain('Refreshing snapshot');
+  finish(new Response(JSON.stringify({skills: skills})));
+  await waitFor(() => expect(screen.getByRole('status').textContent).toBe('Showing saved Skill books.'));
+  expect(card.textContent).not.toContain('stale');
+});
+
+test('empty and unavailable disconnected snapshots never claim current absence; reconnect during a pending fetch is not a refresh', async () => {
+  let finish!: (response: Response) => void;
+  const fetcher = vi.fn(() => new Promise<Response>(resolve => { finish = resolve; }));
+  vi.stubGlobal('fetch', fetcher);
+  const view = render(<SkillBooks connected />);
+  view.rerender(<SkillBooks connected={false} />);
+  expect(screen.getByRole('status').textContent).toContain('Disconnected');
+  expect(screen.getByRole('status').textContent).toContain('Loading');
+  view.rerender(<SkillBooks connected />);
+  finish(new Response('{"skills":[]}'));
+  await waitFor(() => expect(screen.getByRole('status').textContent).toContain('snapshot was empty'));
+  view.rerender(<SkillBooks connected={false} />);
+  expect(screen.getByRole('status').textContent).toContain('Disconnected');
+  expect(screen.getByRole('status').textContent).toContain('snapshot was empty');
+  view.rerender(<SkillBooks connected />);
+  expect(screen.queryByText(/No saved .* yet/)).toBeNull();
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  fetcher.mockRejectedValueOnce(new Error('Refresh unavailable'));
+  fireEvent.click(screen.getByRole('button', {name: 'Refresh Skill books'}));
+  await screen.findByRole('alert');
+  view.unmount();
+  fetcher.mockRejectedValueOnce(new Error('Initial configuration unavailable'));
+  const unavailable = render(<SkillBooks connected={false} />);
+  await screen.findByRole('alert');
+  expect(screen.getByRole('status').textContent).toContain('Skill books unavailable');
+  expect(screen.getByRole('status').textContent).toContain('Disconnected');
+  unavailable.rerender(<SkillBooks connected />);
+  expect(screen.getByRole('status').textContent).toContain('Skill books unavailable');
+  expect(screen.queryByText(/No saved .* yet/)).toBeNull();
 });

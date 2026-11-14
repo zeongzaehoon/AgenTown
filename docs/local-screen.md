@@ -3511,3 +3511,48 @@ and 1,066 tests, including all 8 HookDevices tests, the production build, 505
 Python tests with 2 skipped, and the harness Rust and operational suites. The
 selected frontend profile deferred installed-browser and installation/process-
 recovery gates. Live provider validation is skipped, not passed.
+
+### Disconnected Skill and Hook configuration snapshots (C97-T1)
+
+Launch `agentown-web --database PATH --port 8765` and open
+<http://127.0.0.1:8765> → Company overview with saved Skills and Hooks (or
+use the deterministic fixtures below). No credentials or provider calls are needed.
+
+With the page loaded, stop the local server and wait for connection polling to
+report disconnection. Both configuration section statuses and retained cards
+identify disconnected, potentially stale configuration. Empty retained snapshots
+report that current configuration is unknown; unavailable snapshots do not claim
+that no records exist. Tab to a retained card and press Enter or Space: read-only
+Configuration navigation remains available. Saved-work inspection navigation stays
+blocked while disconnected, loading or after a configuration-refresh failure. After
+connection recovery its existing guards resume; the potentially stale disclosure
+is not an execution authorization. Recorded-history disclosures retain their
+separate stale-history warning.
+
+Restart the same server/database and refresh connection. Reconnection alone does
+not fetch Skills or Hooks, clear their refresh errors, or validate retained
+configuration. Use **Refresh Skill books** and **Refresh Hook devices** separately.
+Each section distinguishes loading, failed refresh, successful empty results and
+successful saved records. A request spanning disconnection remains potentially
+stale even if it finishes after connection recovery. A later successful connected
+refresh clears that section's warning. Existing cards keep identity and focus.
+To exercise independent failures deterministically, use the interaction tests;
+they fail each configuration endpoint in turn while the other refresh succeeds.
+
+With frontend dependencies available, run:
+
+```sh
+cd frontend
+npx vitest run src/SkillBooks.test.tsx src/HookDevices.test.tsx src/CompanyOverview.test.tsx
+npx tsc --noEmit
+```
+
+Integration reused available frontend dependencies: TypeScript checking passed,
+the three focused files passed 26 tests, and the targeted App preview-dismissal
+cases passed 3 tests (86 unrelated cases skipped). These checks preserve the
+existing inspection-navigation guards while retaining configuration warnings.
+Supervisor full-profile verification passed the Rust workspace and desktop
+lifecycle/build gates, all 32 frontend test files and 1,072 tests, the production
+build, 508 Python tests with 2 skipped, the harness suites, and both browser/
+process-recovery checks with recorded evidence. Live provider validation is
+skipped, not passed.
