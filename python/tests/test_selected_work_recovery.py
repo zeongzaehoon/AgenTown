@@ -191,8 +191,9 @@ def test_installed_web_recovery_without_credentials(tmp_path, installed_package)
                 raise AssertionError('Installed server startup timeout')
             inspected = httpx.post(url + '/api/connections/v1/inspect-work', headers={'Origin': url},
                                    json={'task_id': task}, timeout=30)
-            assert inspected.status_code == 200 and inspected.json()['status'] == 'success'
-            assert inspected.json()['inspection']['attempts'][0]['state'] == 'active'
+            inspection = inspected.json()
+            assert inspected.status_code == 200 and inspection['status'] == 'success', inspection
+            assert inspection['inspection']['attempts'][0]['state'] == 'active'
             assert snapshot() == before
             response = httpx.post(url + ENDPOINT, headers={'Origin': url},
                                   json=dict(task_id=task, recovery_consent=True), timeout=30)

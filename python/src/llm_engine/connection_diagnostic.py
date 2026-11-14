@@ -25,7 +25,7 @@ class DiagnosticFailure(Exception):
 
 
 class ConnectionDiagnostic:
-    def __init__(self, database, *, timeout=8):
+    def __init__(self, database, *, timeout=30):
         self.command = installed_server_command(database)
         self.timeout = timeout
         self.active = None

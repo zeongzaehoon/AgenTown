@@ -4774,3 +4774,33 @@ while a separate SQLite connection holds a reserved writer lock, and verify that
 empty or corrupt database files are neither initialized nor modified. Both
 history and source-label reads use native read-only connections; inspection does
 not open a migration-capable store.
+
+### Recorded integration activity
+
+Launch `agentown-web --database /absolute/path/to/agentown.db` (or open the
+packaged AgenTown app with that database). In Company, open a client workstation.
+Setup detection/configuration/connection status remains separate from **Recorded
+integration activity**. Opening setup, copying instructions, and local diagnostics
+do not load activity. Choose **Load recorded activity** explicitly. The read-only
+request is `POST /api/connections/v1/activity` with `{"limit":50}`; no execution or
+provider call is made. Results are a bounded snapshot across sources, filtered by
+the selected client's untrusted declared label. Unrecognized/missing labels appear
+separately and are never attributed to that client.
+
+Each entry shows Task and Run identity, recorded state/outcome, declared source
+and stored timestamps. A reported success does not establish quality approval,
+authenticated identity or a current client connection. **Open saved Task** selects
+the existing saved-work inspector and focuses its picker. Work/configuration
+drafts survive both loading and navigation; selected work changes only when the
+user explicitly opens a Task. Missing Tasks cannot be opened; refresh the workspace
+rather than resubmitting work. The activity endpoint itself never reconciles Runs;
+subsequent existing work inspection retains its usual behavior.
+
+Keyboard exercise: Tab to Load recorded activity and press Enter; focus stays on
+the control through loading. Tab to an available Open saved Task and press Enter;
+focus moves to Saved work. Check an empty database, an unavailable API, and a
+workspace disconnect during loading. Previous observations remain marked stale;
+reconnection does not repeat reads. Only another explicit load refreshes activity.
+Switching clients does not replay a request or change selected work. React tests
+cover these deterministic states; supervisor browser validation remains pending
+for C124-T2. Live LLM calls are skipped, not passed.

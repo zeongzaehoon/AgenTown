@@ -59,3 +59,9 @@
 
 .skill-work-chooser { display: grid; gap: 8px; margin-top: 12px; min-width: 0; }
 .skill-work-chooser select { width: 100%; min-width: 0; }
+
+.connection-activity button[aria-disabled="true"] {
+  background: #e5e8e4;
+  color: #505c54;
+  cursor: default;
+}

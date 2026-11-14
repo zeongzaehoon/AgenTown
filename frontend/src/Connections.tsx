@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { api, RequestTimeoutError } from './api';
+import { ConnectionActivity, type ActivityNavigation } from './ConnectionActivity';
 
 export const workstationClients = [
   {id: 'codex', name: 'Codex'}, {id: 'claude-code', name: 'Claude Code'},
@@ -208,7 +209,7 @@ function SharedDataCheck({workspaceConnected}: {workspaceConnected: boolean}) {
   </section>;
 }
 
-export function Connections({workspaceConnected, openClient}: {workspaceConnected: boolean; openClient?: OpenClientRequest | null}) {
+export function Connections({workspaceConnected, openClient, ...navigation}: ActivityNavigation & {workspaceConnected: boolean; openClient?: OpenClientRequest | null}) {
   const [open, setOpen] = useState(false);
   const [visited, setVisited] = useState(false);
   useLayoutEffect(() => {
@@ -217,11 +218,11 @@ export function Connections({workspaceConnected, openClient}: {workspaceConnecte
   return <section aria-labelledby="connections-heading">
     <h2 id="connections-heading">Connections</h2>
     <button type="button" aria-expanded={open} aria-controls="connections-content" onClick={() => {setVisited(true); setOpen(!open);}}>{open ? 'Hide connections' : 'Open connections'}</button>
-    <div id="connections-content" hidden={!open}>{visited && <Setup active={open} workspaceConnected={workspaceConnected} openClient={openClient} />}</div>
+    <div id="connections-content" hidden={!open}>{visited && <Setup {...navigation} active={open} workspaceConnected={workspaceConnected} openClient={openClient} />}</div>
   </section>;
 }
 
-function Setup({workspaceConnected, openClient, active}: {active: boolean; workspaceConnected: boolean; openClient?: OpenClientRequest | null}) {
+function Setup({workspaceConnected, openClient, active, ...navigation}: ActivityNavigation & {active: boolean; workspaceConnected: boolean; openClient?: OpenClientRequest | null}) {
   const freshness = useEvidenceFreshness(workspaceConnected);
   const [data, setData] = useState<ConnectionSetup | null>(null);
   const [clientId, setClientId] = useState<string>(openClient?.id ?? 'codex');
@@ -370,5 +371,6 @@ function Setup({workspaceConnected, openClient, active}: {active: boolean; works
       <label htmlFor="connection-instructions">Setup instructions</label>
       <textarea id="connection-instructions" readOnly rows={16} value={instructions} />
     </>}
+    <ConnectionActivity {...navigation} clientId={clientId} connected={workspaceConnected} />
   </div>;
 }

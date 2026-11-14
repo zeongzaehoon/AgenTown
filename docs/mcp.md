@@ -1391,3 +1391,12 @@ Inspection never caches a preview or dispatches activation/Stop. Owner authority
 comes from the returned control record, never the caller-declared source.
 See [local-screen.md](local-screen.md#inspect-retained-local-mcp-loops-from-company-overview)
 for runnable navigation and deterministic checks. Real provider validation is skipped.
+
+The product Connections surface can explicitly load persisted integration activity
+using the read-only Connections activity API delivered in C124-T1. Open a client
+workstation, choose **Load recorded activity**, then **Open saved Task** to inspect
+an available Task in the existing work view. See [screen exercise steps](local-screen.md#recorded-integration-activity).
+Declared sources remain untrusted metadata, independently displayed from Run
+outcomes and setup/detection/configuration status. No connection, authenticated
+client identity or quality approval is inferred from these records. Local checks
+and copying setup do not count as recorded integration activity.

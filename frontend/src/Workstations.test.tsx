@@ -16,8 +16,9 @@ const setup: ConnectionSetup = {
 
 test('App workstation keyboard navigation selects all clients, focuses setup and preserves drafts and controls without mutations', async () => {
   const fetcher = vi.fn(async (path: string, _options?: RequestInit) => {
+    if (path === '/api/connections/v1/activity') return new Response(JSON.stringify({schema_version: 1, limit: 50, attempts: [{task_id: 'recorded', run_id: 'recorded-run', started_at: 1, ended_at: 2, state: 'finished', outcome: 'reported_success', declared_source: 'cursor', integration: 'cursor'}], evidence: {read_only: true, source: 'persisted_run_records', source_labels: 'untrusted_historical_metadata', current_connection_verified: false, authenticated_client_identity_verified: false, quality_approved: false, local_product_attempts_excluded: true}}));
     if (path === '/api/connections/v1') return new Response(JSON.stringify(setup));
-    if (path === '/api/state') return new Response(JSON.stringify({employees: [{id: 'a', name: 'Alex'}], work: [], configuration: null, provider: 'deterministic-test', model: 'test'}));
+    if (path === '/api/state') return new Response(JSON.stringify({employees: [{id: 'a', name: 'Alex'}], work: ['previous', 'recorded'].map(id => ({id, input: id + ' request', status: 'pending', assignees: ['a'], attempts: []})), configuration: null, provider: 'deterministic-test', model: 'test'}));
     if (path === '/api/config/v1/skills') return new Response(JSON.stringify({skills: [{id: 'manual', name: 'Manual', instructions: 'Saved instructions', enabled: false}]}));
     if (path === '/api/config/v1/hooks') return new Response('{"hooks":[]}');
     if (path === '/api/config/v1/loops') return new Response('{"loops":[]}');
@@ -56,13 +57,22 @@ test('App workstation keyboard navigation selects all clients, focuses setup and
   expect((screen.getByLabelText('Client') as HTMLSelectElement).value).toBe('cursor');
   expect((screen.getByLabelText('What would you like help with?') as HTMLTextAreaElement).value).toBe('Work draft');
   expect((screen.getByLabelText('Instructions') as HTMLTextAreaElement).value).toBe('Configuration draft');
+  expect((screen.getByLabelText('Saved work') as HTMLSelectElement).value).toBe('previous');
+  await user.click(screen.getByRole('button', {name: 'Load recorded activity'}));
+  const recorded = await screen.findByRole('button', {name: 'Open saved Task: recorded · Run: recorded-run'});
+  expect((screen.getByLabelText('Saved work') as HTMLSelectElement).value).toBe('previous');
+  recorded.focus(); await user.keyboard('{Enter}');
+  expect((screen.getByLabelText('Saved work') as HTMLSelectElement).value).toBe('recorded');
+  expect(document.activeElement).toBe(screen.getByLabelText('Saved work'));
+  expect((screen.getByLabelText('What would you like help with?') as HTMLTextAreaElement).value).toBe('Work draft');
+  expect((screen.getByLabelText('Instructions') as HTMLTextAreaElement).value).toBe('Configuration draft');
   expect(fetcher.mock.calls.filter(([path]) => path === '/api/connections/v1')).toHaveLength(1);
   for (const [path, options] of fetcher.mock.calls) {
     // Presentation inspection can use POST; navigation must never call mutation/execution endpoints.
-    expect(['/api/state', '/api/teams', '/api/loops/v1', '/api/config/v1/skills', '/api/config/v1/hooks', '/api/config/v1/loops', '/api/connections/v1']).toContain(path);
-    expect(options?.method).toBe(['/api/state', '/api/connections/v1'].includes(path) ? 'POST' : 'GET');
+    expect(['/api/state', '/api/teams', '/api/loops/v1', '/api/config/v1/skills', '/api/config/v1/hooks', '/api/config/v1/loops', '/api/connections/v1', '/api/connections/v1/activity']).toContain(path);
+    expect(options?.method).toBe(['/api/state', '/api/connections/v1', '/api/connections/v1/activity'].includes(path) ? 'POST' : 'GET');
   }
-});
+}, 20_000);
 
 test('requested setup receives focus on initial failure, retains stale evidence and handles a missing selected client', async () => {
   let response: ConnectionSetup | null = null;

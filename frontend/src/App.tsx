@@ -508,7 +508,11 @@ export function App() {
         </section></div>
       <footer>Responses are unverified. Read and check the full result before using it.</footer>
       <Configuration connected={connected} workspace={state} openRecord={configurationRequest} />
-      <Connections openClient={clientRequest} workspaceConnected={connected} />
+      <Connections openClient={clientRequest} workspaceConnected={connected} savedTaskIds={state?.work.map(w => w.id)} onOpenRecordedTask={id => {
+        if (!connected || !state?.work.some(w => w.id === id)) return;
+        setSkillRequest(null); setHookRequest(null); setLoopRequest(null);
+        setViewEmployee(''); setSearch(''); setOutcome('all'); setSelected(id); historyRef.current?.focus();
+      }} />
     </main>
   </>;
 }
