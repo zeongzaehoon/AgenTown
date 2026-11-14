@@ -14,7 +14,8 @@ const categories: {key: WorkOutcome; label: string}[] = [
   {key: 'other', label: 'Other recorded work'},
 ];
 
-export function CompanyOverview({workspace, connected, error, onOpenWork, selectedEmployee = '', onSelectEmployee, onOpenHook, onOpenLoop, onOpenSkill, onOpenClient, onOpenTeam, onSelectTeamMember, onOpenSession, onOpenHookWork, onOpenSkillWork}: {
+export function CompanyOverview({workspace, connected, error, onOpenWork, selectedEmployee = '', onSelectEmployee, onOpenHook, onOpenLoop, onOpenSkill, onOpenClient, onOpenTeam, onSelectTeamMember, onOpenSession, onOpenHookWork, onOpenSkillWork, onOpenFailedWork}: {
+  onOpenFailedWork?: (employeeId: string) => void;
   onOpenSkillWork?: (request: SkillNavigation) => void;
   onOpenHookWork?: (request: HookNavigation) => void;
   onOpenSession?: (request: LoopNavigation) => void;
@@ -124,6 +125,12 @@ export function CompanyOverview({workspace, connected, error, onOpenWork, select
             <dl className="workload-counts">{categories.map(category => <div key={category.key}>
               <dt>{category.label}</dt><dd>{counts[category.key]}</dd>
             </div>)}</dl>
+            <button type="button" disabled={!onOpenFailedWork} aria-controls="employee-work"
+              aria-label={`View failed or interrupted work: ${employee.name} · ID: ${employee.id}`}
+              onFocus={event => {
+                focusedEmployee.current = {id: employee.id, name: employee.name, element: event.currentTarget};
+                setRemovalAnnouncement('');
+              }} onClick={() => onOpenFailedWork?.(employee.id)}>View failed or interrupted work ({counts.failed})</button>
             {!!blocked && <p>{blocked} blocked requests</p>}
             {!!callerActive && <p>{callerActive} caller-reported active · no provider request</p>}
           </li>;

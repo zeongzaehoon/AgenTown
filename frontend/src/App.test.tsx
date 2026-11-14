@@ -1359,3 +1359,59 @@ test.each(['surviving request', 'outside draft', 'saved-work selector'])('matchi
   expect(screen.getByText('Work ID: w')).toBeTruthy();
   expect(f.calls.every(call => call.path === '/api/state')).toBe(true);
 });
+
+test.each(['{Enter}', ' '])('employee failed-work navigation preserves selection and drafts without mutations (%s)', async key => {
+  const failure = {id: 'failure', state: 'finished' as const, outcome: 'failure', participants: ['a'], error: 'timeout'};
+  const success = {id: 'success', state: 'finished' as const, outcome: 'reported_success', participants: ['a'], output: 'Retried result'};
+  const f = fixture({...initial(), employees: [{id: 'a', name: 'Alex'}, {id: 'b', name: 'Alex'}], work: [
+    {id: 'selected', input: 'Keep selected detail', status: 'pending', assignees: ['a'], attempts: []},
+    {id: 'shared', input: 'Shared failure', status: 'pending', assignees: ['a', 'a', 'b'], attempts: [failure]},
+    {id: 'interrupted', input: 'Interrupted work', status: 'pending', assignees: ['a'], attempts: [{...failure, id: 'interruption', outcome: 'interruption', error: 'interrupted'}]},
+    {id: 'retried', input: 'Latest success', status: 'pending', assignees: ['a'], attempts: [failure, success]},
+    {id: 'latest-failure', input: 'Latest failure', status: 'pending', assignees: ['a'], attempts: [success, failure]},
+  ]});
+  const saved = JSON.stringify(f.state);
+  const user = userEvent.setup();
+  render(<App />); await connected();
+  fireEvent.change(screen.getByLabelText('What would you like help with?'), {target: {value: 'Unsaved draft'}});
+  fireEvent.change(screen.getByLabelText('Employee name'), {target: {value: 'Unsaved employee'}});
+  fireEvent.change(screen.getByLabelText('Search saved work'), {target: {value: 'incompatible search'}});
+  fireEvent.change(screen.getByLabelText('Current outcome'), {target: {value: 'results'}});
+  const action = (id: string) => screen.getByRole('button', {name: `View failed or interrupted work: Alex · ID: ${id}`});
+  action('b').focus(); await user.keyboard(key);
+  const heading = screen.getByRole('heading', {name: '3. Work & results'});
+  expect(document.activeElement).toBe(heading);
+  expect((screen.getByLabelText('Search saved work') as HTMLInputElement).value).toBe('');
+  expect((screen.getByLabelText('Current outcome') as HTMLSelectElement).value).toBe('failed');
+  const matches = () => within(screen.getByRole('list', {name: 'Matching requests'}));
+  expect(matches().getAllByRole('button')).toHaveLength(1);
+  expect(matches().getByRole('button', {name: /ID: shared$/})).toBeTruthy();
+  expect(screen.getByText(/Assigned work for Alex · Employee ID: b/)).toBeTruthy();
+  await user.tab();
+  expect(document.activeElement).toBe(screen.getByLabelText('Search saved work'));
+  f.disconnect(); refresh();
+  await waitFor(() => expect(document.querySelector('#connection')!.textContent).toContain('Disconnected'));
+  action('a').focus(); await user.keyboard(key);
+  expect(document.activeElement).toBe(heading);
+  expect(matches().getAllByRole('button')).toHaveLength(3);
+  expect(matches().queryByRole('button', {name: /ID: retried$/})).toBeNull();
+  expect(screen.getByText(/Using stale assignments from the last successful refresh/)).toBeTruthy();
+  expect(screen.getByText(/Disconnected — showing stale company data/)).toBeTruthy();
+  expect(screen.getByText('Work ID: selected')).toBeTruthy();
+  expect(screen.getByText(/The selected work is outside these matches/)).toBeTruthy();
+  expect((screen.getByLabelText('What would you like help with?') as HTMLTextAreaElement).value).toBe('Unsaved draft');
+  expect((screen.getByLabelText('Employee name') as HTMLInputElement).value).toBe('Unsaved employee');
+  expect(JSON.stringify(f.state)).toBe(saved);
+  // An accepted refresh can remove every match without resetting filters or detail.
+  f.state.work = f.state.work.map(work => ({...work, attempts: work.attempts.length ? [success] : []}));
+  f.reconnect(); refresh();
+  await waitFor(() => expect(screen.getByText('0 of 5 saved requests match.')).toBeTruthy());
+  expect(matches().queryAllByRole('button')).toHaveLength(0);
+  expect(screen.getByText(/No saved work matches your employee/)).toBeTruthy();
+  expect((screen.getByLabelText('Current outcome') as HTMLSelectElement).value).toBe('failed');
+  expect(screen.getByText(/Assigned work for Alex · Employee ID: a/)).toBeTruthy();
+  expect(screen.getByText('Work ID: selected')).toBeTruthy();
+  expect((screen.getByLabelText('What would you like help with?') as HTMLTextAreaElement).value).toBe('Unsaved draft');
+  // Fixture records every state/mutation endpoint; overview navigation only reads.
+  expect(f.calls.every(call => call.path === '/api/state')).toBe(true);
+});

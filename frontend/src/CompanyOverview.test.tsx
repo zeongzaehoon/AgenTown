@@ -238,3 +238,17 @@ test.each(['Select office character', 'View assigned work'])('%s removal leaves 
   expect(document.activeElement).toBe(outside);
   expect(screen.queryByText(/was removed from this view/)).toBeNull();
 });
+
+test('failed-work action remains available for an empty stale workload and forwards employee identity', async () => {
+  const openFailed = vi.fn();
+  const user = userEvent.setup();
+  render(<CompanyOverview workspace={{...workspace(), work: []}} connected={false} error="Disconnected"
+    onOpenWork={vi.fn()} onOpenFailedWork={openFailed} />);
+  const action = screen.getByRole('button', {name: 'View failed or interrupted work: Alex · ID: b'});
+  expect(action.textContent).toBe('View failed or interrupted work (0)');
+  expect(action.getAttribute('aria-controls')).toBe('employee-work');
+  expect((action as HTMLButtonElement).disabled).toBe(false);
+  action.focus(); await user.keyboard('{Enter}');
+  expect(openFailed).toHaveBeenCalledExactlyOnceWith('b');
+  expect(screen.getByText(/Disconnected — showing stale company data/)).toBeTruthy();
+});

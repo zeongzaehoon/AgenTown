@@ -4463,3 +4463,38 @@ request focus ownership immediately. Both deferred outcome matrices cover this
 case. Periodic full verification passed 1,304 frontend tests, TypeScript
 checking, the production build, 508 Python tests with 2 skipped, and 2 browser
 checks. Live provider validation is skipped, not passed.
+
+## Open an employee’s failed or interrupted work (C118-T1)
+
+Launch `agentown-web` with an existing database containing employees, saved
+assignments and failed/interrupted attempts. No model or credentials are needed
+to inspect this history:
+
+```sh
+uv run --directory python --locked agentown-web --database /tmp/llm-work.sqlite3
+```
+
+1. Open http://127.0.0.1:8765. Enter an unsaved work draft and search text that
+   excludes the failed work; optionally choose another outcome.
+2. In Company overview → Employee workload list, Tab to the employee card’s
+   **View failed or interrupted work** action and press Enter or Space.
+   Focus moves to **Work & results**; Tab continues to Search saved work.
+3. Confirm search is cleared, Current outcome is **Failed or interrupted work**,
+   and the employee ID matches the card. Shared assignments appear for each saved
+   assignee; only the latest attempt determines the outcome. The action remains
+   available with a zero count so an empty filtered view can be inspected.
+4. Confirm the draft and previously selected detail remain intact. A selected
+   item outside these filters is explicitly identified; choose a matching request
+   to change the detail. Navigation does not save, assign, retry or execute work.
+5. Disconnect the server and wait for the disconnected notice. Repeat the action:
+   the retained overview and assignments are labeled stale and remain browsable.
+   Restart the server with the same database and refresh. If the employee has no
+   failed/interrupted work after refresh, the filtered view shows no matches and
+   retains its employee/outcome filters and existing detail.
+
+Deterministic interaction coverage is in `frontend/src/App.test.tsx` (test name
+`employee failed-work navigation preserves selection and drafts without mutations`),
+run with `npm --prefix frontend test -- src/App.test.tsx`. Supervisor frontend
+verification passed 1,307 frontend tests, TypeScript checking, the production
+build, and 505 Python tests with 2 skipped. Installed-browser and recovery gates
+were deferred by this profile. Live provider calls are skipped, not passed.

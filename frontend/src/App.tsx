@@ -132,6 +132,7 @@ export function App() {
   const [configurationRequest, setConfigurationRequest] = useState<ConfigurationNavigation | null>(null);
   const [viewEmployee, setViewEmployee] = useState('');
   const [outcome, setOutcome] = useState<WorkOutcome | 'all'>('all');
+  const workHeadingRef = useRef<HTMLHeadingElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const focusedRequest = useRef<{id: string; input: string; element: HTMLButtonElement} | null>(null);
   const [matchingAnnouncement, setMatchingAnnouncement] = useState('');
@@ -367,7 +368,7 @@ export function App() {
           historyRef.current?.focus();
         }}>I inspected execution history</button>
       </section>}
-      <CompanyOverview onOpenSkillWork={request => { setSkillRequest({...request}); setHookRequest(null); setLoopRequest(null); setViewEmployee(''); setSearch(''); setOutcome('all'); setSelected(request.taskId); }} onOpenHookWork={request => { setSkillRequest(null); setHookRequest({...request}); setLoopRequest(null); setViewEmployee(''); setSearch(''); setOutcome('all'); setSelected(request.taskId); }} onOpenSession={request => { setHookRequest(null); setSkillRequest(null); setLoopRequest({...request}); setViewEmployee(''); setSearch(''); setOutcome('all'); setSelected(request.taskId); }} onSelectTeamMember={id => { setViewEmployee(id); setSearch(''); setOutcome('all'); searchRef.current?.focus(); }} onOpenTeam={id => setTeamRequest({id})} onOpenClient={id => setClientRequest({id})} onOpenSkill={id => setConfigurationRequest({kind: 'skills', id})} onOpenHook={id => setConfigurationRequest({kind: 'hooks', id})} onOpenLoop={id => setConfigurationRequest({kind: 'loops', id})} workspace={state} connected={connected} error={connectionError} selectedEmployee={viewEmployee} onSelectEmployee={setViewEmployee} onOpenWork={id => {
+      <CompanyOverview onOpenFailedWork={employeeId => { setViewEmployee(employeeId); setOutcome('failed'); setSearch(''); workHeadingRef.current?.focus(); }} onOpenSkillWork={request => { setSkillRequest({...request}); setHookRequest(null); setLoopRequest(null); setViewEmployee(''); setSearch(''); setOutcome('all'); setSelected(request.taskId); }} onOpenHookWork={request => { setSkillRequest(null); setHookRequest({...request}); setLoopRequest(null); setViewEmployee(''); setSearch(''); setOutcome('all'); setSelected(request.taskId); }} onOpenSession={request => { setHookRequest(null); setSkillRequest(null); setLoopRequest({...request}); setViewEmployee(''); setSearch(''); setOutcome('all'); setSelected(request.taskId); }} onSelectTeamMember={id => { setViewEmployee(id); setSearch(''); setOutcome('all'); searchRef.current?.focus(); }} onOpenTeam={id => setTeamRequest({id})} onOpenClient={id => setClientRequest({id})} onOpenSkill={id => setConfigurationRequest({kind: 'skills', id})} onOpenHook={id => setConfigurationRequest({kind: 'hooks', id})} onOpenLoop={id => setConfigurationRequest({kind: 'loops', id})} workspace={state} connected={connected} error={connectionError} selectedEmployee={viewEmployee} onSelectEmployee={setViewEmployee} onOpenWork={id => {
         setSkillRequest(null); setHookRequest(null); setLoopRequest(null); setViewEmployee(''); setSearch(''); setOutcome('all'); setSelected(id); historyRef.current?.focus();
       }} />
       <Teams openTeam={teamRequest} workspace={state} connected={connected} onSelectEmployee={id => {
@@ -414,7 +415,7 @@ export function App() {
           <p id="input-error" role="status" aria-live="polite">{inputError}</p>
           <button disabled={!!creationRecovery || !connected || busy.has('work') || !!replacement || !assignee}>Save work</button>
         </form><p role="status" aria-live="polite" aria-atomic="true">{draftNotice}</p></section></aside>
-        <section id="employee-work" className="history"><h2>3. Work &amp; results</h2>
+        <section id="employee-work" className="history"><h2 ref={workHeadingRef} tabIndex={-1}>3. Work &amp; results</h2>
           <p id="empty" hidden={!!state?.work.length}>No work yet. Your saved work and results will appear here.</p>
           <label htmlFor="search">Search saved work</label>
           <input id="search" type="search" ref={searchRef} value={search} aria-describedby="search-help" onChange={e => setSearch(e.target.value)} />
