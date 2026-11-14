@@ -3956,3 +3956,64 @@ test files and 1,144 tests, the production build, 505 Python tests with 2
 skipped, and the harness Rust and operational suites. The selected frontend
 profile deferred installed-browser and installation/process-recovery gates.
 Live LLM calls remain skipped; these interactions require no provider credentials.
+
+### Keyboard orientation after configuration-card removal (C109-T1)
+
+Launch the local screen using the commands above (`agentown-web --database PATH
+--port 8765`); no model or credentials are needed for this read-only flow. Open
+`http://127.0.0.1:8765` → Company overview. In the browser console install these
+configuration-only fixtures (reload restores normal requests):
+
+```js
+window.cardFetch = window.fetch.bind(window);
+window.cardFixtures = {
+  skills: [1, 2].map(n => ({id: `keyboard-s${n}`, name: `Book ${n}`,
+    instructions: 'Read-only fixture', enabled: true})),
+  hooks: [1, 2].map(n => ({id: `keyboard-h${n}`, name: `Hook ${n}`,
+    event: 'run_completed', target_kind: 'agent', target_id: 'keyboard-agent',
+    skill_id: 'keyboard-s1', enabled: true})),
+  loops: [1, 2].map(n => ({id: `keyboard-l${n}`, name: `Policy ${n}`,
+    task_id: 'keyboard-task', max_iterations: 2, interval_seconds: 60,
+    enabled: true})),
+};
+window.fetch = (path, init) => {
+  const kind = Object.keys(window.cardFixtures)
+    .find(key => path === `/api/config/v1/${key}`);
+  return kind ? Promise.resolve(Response.json({[kind]: window.cardFixtures[kind]}))
+    : window.cardFetch(path, init);
+};
+window.refreshCards = label => Array.from(document.querySelectorAll('button'))
+  .find(button => button.textContent === `Refresh ${label}`).click();
+window.refreshCards('Skill books');
+window.refreshCards('Hook devices');
+window.refreshCards('Loop devices');
+```
+
+1. Tab to **Open Skill book: Book 1**. Set
+   `window.cardFixtures.skills = window.cardFixtures.skills.slice(1)` and call
+   `window.refreshCards('Skill books')` in the console. Return to the document:
+   focus is on the enabled **Refresh Skill books** button. A polite removal status
+   reports one removed record. Tab continues into the remaining book.
+2. Repeat for **Open Hook device: Hook 1** with `hooks` / `Hook devices`, and
+   **Open Loop device: Policy 1** with `loops` / `Loop devices`. Set each fixture
+   array to `[]` and refresh with the last card focused: focus returns to its
+   section Refresh button and the status says no cards remain.
+3. Reload and reinstall fixtures. Rename and reverse an array without changing
+   IDs, refresh while a surviving card has focus, and check that focus stays on
+   that control. Remove the other card with focus on a surviving card or an
+   outside draft input: focus stays put. Existing drafts, work selections and
+   expanded recorded-history disclosures on surviving records remain intact.
+4. Use DevTools offline mode (or reject the matching fetch) for a failed refresh:
+   retain the previous cards and focus without a removal announcement. Restore
+   networking and refresh explicitly. A response begun before disconnect/reconnect
+   must not replace the current snapshot or recover focus; the deterministic
+   suites exercise late responses settling after a newer accepted snapshot.
+
+Runnable interaction coverage: `cd frontend && npx vitest run src/SkillBooks.test.tsx
+src/HookDevices.test.tsx src/LoopDevices.test.tsx`. This includes empty snapshots,
+rename/reorder, surviving/outside focus, failures and aborted old-connection
+responses. Supervisor verification supplies browser checks under the current
+profile. The supervisor frontend profile passed 32 frontend test files and
+1,153 tests, the production build, and 505 Python tests with 2 skipped.
+Installed-browser and installation/process-recovery gates were deferred by this
+profile. Live LLM calls remain skipped, not passed.

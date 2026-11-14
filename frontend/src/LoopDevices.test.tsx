@@ -202,17 +202,17 @@ test.each([true, false])('retained freshness survives reconnection and failure (
   const card = populated ? screen.getByRole('button', {name: 'Open Loop device: Manual · ID: one'}) : null;
   card?.focus();
   view.rerender(<LoopDevices {...props} connected={false} />);
-  expect(screen.getByRole('status').textContent).toContain('Disconnected');
+  expect(screen.getByRole('status', {name: ''}).textContent).toContain('Disconnected');
   if (card) {
     expect(card.textContent).toContain('Disconnected — potentially stale configuration snapshot');
     expect(document.activeElement).toBe(card);
     fireEvent.click(card);
     expect(open).toHaveBeenCalledWith('one');
     expect((screen.getByRole('button', {name: /Open linked work/}) as HTMLButtonElement).disabled).toBe(true);
-  } else expect(screen.getByRole('status').textContent).toContain('current Loops are unknown');
+  } else expect(screen.getByRole('status', {name: ''}).textContent).toContain('current Loops are unknown');
   view.rerender(<LoopDevices {...props} connected />);
   expect(fetcher).toHaveBeenCalledTimes(1);
-  expect(screen.getByRole('status').textContent).toContain('may still be stale');
+  expect(screen.getByRole('status', {name: ''}).textContent).toContain('may still be stale');
   if (card) {
     expect(screen.getByRole('button', {name: 'Open Loop device: Manual · ID: one'})).toBe(card);
     expect(document.activeElement).toBe(card);
@@ -222,8 +222,8 @@ test.each([true, false])('retained freshness survives reconnection and failure (
   fetcher.mockRejectedValueOnce(new Error('Refresh failed'));
   fireEvent.click(screen.getByRole('button', {name: 'Refresh Loop devices'}));
   await screen.findByText('Refresh failed');
-  expect(screen.getByRole('status').textContent).toContain('may still be stale');
-  expect(screen.getByRole('status').textContent).toContain('last successful snapshot');
+  expect(screen.getByRole('status', {name: ''}).textContent).toContain('may still be stale');
+  expect(screen.getByRole('status', {name: ''}).textContent).toContain('last successful snapshot');
   view.rerender(<LoopDevices {...props} connected={false} />);
   view.rerender(<LoopDevices {...props} connected />);
   expect(screen.getByRole('alert').textContent).toBe('Refresh failed');
@@ -243,12 +243,12 @@ test.each([true, false])('a refresh spanning disconnection cannot validate a pop
   const view = render(<LoopDevices />);
   await screen.findByText(populated ? 'Showing saved Loop devices.' : 'No saved Loops yet. Create a Loop in Configuration.');
   fireEvent.click(screen.getByRole('button', {name: 'Refresh Loop devices'}));
-  expect(screen.getByRole('status').textContent).toContain('Loading');
+  expect(screen.getByRole('status', {name: ''}).textContent).toContain('Loading');
   view.rerender(<LoopDevices connected={false} />);
   view.rerender(<LoopDevices connected />);
   await act(async () => { finish(response()); });
-  expect(screen.getByRole('status').textContent).toContain('may still be stale');
-  expect(screen.getByRole('status').textContent).toContain(populated ? 'retained Loop devices' : 'current Loops are unknown');
+  expect(screen.getByRole('status', {name: ''}).textContent).toContain('may still be stale');
+  expect(screen.getByRole('status', {name: ''}).textContent).toContain(populated ? 'retained Loop devices' : 'current Loops are unknown');
   fireEvent.click(screen.getByRole('button', {name: 'Refresh Loop devices'}));
   await screen.findByText(populated ? 'Showing saved Loop devices.' : 'No saved Loops yet. Create a Loop in Configuration.');
 });
@@ -260,7 +260,81 @@ test('a request started disconnected cannot clear freshness after recovery', asy
   const view = render(<LoopDevices connected={false} />);
   view.rerender(<LoopDevices connected />);
   await act(async () => { finish(new Response('{"loops":[]}')); });
-  expect(screen.getByRole('status').textContent).toContain('current Loops are unknown');
+  expect(screen.getByRole('status', {name: ''}).textContent).toContain('Loop devices unavailable');
   fireEvent.click(screen.getByRole('button', {name: 'Refresh Loop devices'}));
   await screen.findByText('No saved Loops yet. Create a Loop in Configuration.');
+});
+
+
+test('accepted card removals recover focus, including empty results; surviving and outside focus stay put', async () => {
+  let finish!: (response: Response) => void;
+  const fetcher = vi.fn(() => new Promise<Response>(resolve => { finish = resolve; }));
+  vi.stubGlobal('fetch', fetcher);
+  render(<><input aria-label="Outside draft" defaultValue="Keep draft" /><LoopDevices onOpenLoop={vi.fn()} /></>);
+  const respond = async (records: typeof loops) => {
+    await act(async () => { finish(new Response(JSON.stringify({loops: records}))); });
+  };
+  await respond(loops);
+  const refresh = screen.getByRole('button', {name: 'Refresh Loop devices'});
+  const first = screen.getByRole('button', {name: 'Open Loop device: Manual · ID: one'});
+  // Refresh without moving focus, then settle while the old card still owns focus.
+  first.focus(); fireEvent.click(refresh);
+  await respond([{...loops[1], name: 'Renamed'}, {...loops[0], name: 'Renamed'}]);
+  expect(document.activeElement).toBe(first);
+  first.focus(); fireEvent.click(refresh);
+  await respond([{...loops[1], name: 'Renamed'}]);
+  expect(document.activeElement).toBe(refresh);
+  expect((refresh as HTMLButtonElement).disabled).toBe(false);
+  expect(screen.getByLabelText('Loop devices removals').getAttribute('aria-live')).toBe('polite');
+  expect(screen.getByLabelText('Loop devices removals').getAttribute('aria-atomic')).toBe('true');
+  expect(screen.getByLabelText('Loop devices removals').textContent).toContain('1 record removed');
+  await userEvent.keyboard('{Tab}');
+  const survivor = screen.getByRole('button', {name: 'Open Loop device: Renamed · ID: two'});
+  expect(document.activeElement).toBe(survivor);
+  fireEvent.click(refresh); await respond([]);
+  expect(document.activeElement).toBe(refresh);
+  expect(screen.getByLabelText('Loop devices removals').textContent).toContain('No cards remain');
+  fireEvent.click(refresh); await respond(loops);
+  const outside = screen.getByRole('textbox', {name: 'Outside draft'});
+  outside.focus(); fireEvent.click(refresh); await respond([loops[0]]);
+  expect(document.activeElement).toBe(outside);
+  expect((outside as HTMLInputElement).value).toBe('Keep draft');
+  const remaining = screen.getByRole('button', {name: 'Open Loop device: Manual · ID: one'});
+  remaining.focus(); fireEvent.click(refresh); await respond([{...loops[0], name: 'Final'}]);
+  expect(document.activeElement).toBe(remaining);
+  expect(screen.getByLabelText('Loop devices removals').textContent).toBe('');
+});
+
+test.each([true, false])('failed and old-connection responses cannot override a newer refresh (old settles first: %s)', async oldFirst => {
+  const pending: {resolve: (response: Response) => void; reject: (error: Error) => void}[] = [];
+  vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>((resolve, reject) => pending.push({resolve, reject}))));
+  const view = render(<LoopDevices onOpenLoop={vi.fn()} connected />);
+  const respond = async (index: number, records: typeof loops) => {
+    await act(async () => { pending[index].resolve(new Response(JSON.stringify({loops: records}))); });
+  };
+  await respond(0, loops);
+  const refresh = screen.getByRole('button', {name: 'Refresh Loop devices'});
+  const first = screen.getByRole('button', {name: 'Open Loop device: Manual · ID: one'});
+  first.focus(); fireEvent.click(refresh);
+  await act(async () => { pending[1].reject(new Error('Offline')); });
+  expect(document.activeElement).toBe(first);
+  expect(screen.getByLabelText('Loop devices removals').textContent).toBe('');
+  fireEvent.click(refresh);
+  view.rerender(<LoopDevices onOpenLoop={vi.fn()} connected={false} />);
+  view.rerender(<LoopDevices onOpenLoop={vi.fn()} connected />);
+  fireEvent.click(refresh);
+  if (oldFirst) {
+    await respond(2, []);
+    expect(document.activeElement).toBe(first);
+    expect((refresh as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByLabelText('Loop devices removals').textContent).toBe('');
+  }
+  await respond(3, [{...loops[0], name: 'Current'}]);
+  expect(document.activeElement).toBe(first);
+  const current = screen.getByRole('button', {name: 'Open Loop device: Current · ID: one'});
+  current.focus();
+  if (!oldFirst) await respond(2, []);
+  expect(document.activeElement).toBe(current);
+  expect(screen.getByRole('button', {name: 'Open Loop device: Current · ID: one'})).toBe(current);
+  expect(screen.getByLabelText('Loop devices removals').textContent).toContain('1 record removed');
 });

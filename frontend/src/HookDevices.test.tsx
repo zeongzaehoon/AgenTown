@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, expect, test, vi } from 'vitest';
 import type { Workspace } from './api';
@@ -198,7 +198,7 @@ test('disconnected, refreshing and stale choices cannot navigate and recover wit
   fireEvent.click(action); expect(open).not.toHaveBeenCalled();
   view.rerender(<HookDevices workspace={workspace} onOpenWork={open} />);
   // A disclosure is not a new fetch or a new inspection-navigation guard.
-  expect(screen.getByRole('status').textContent).toContain('Connection restored');
+  expect(screen.getByRole('status', {name: ''}).textContent).toContain('Connection restored');
   expect(chooser.disabled).toBe(false); expect(action.disabled).toBe(false);
   expect(chooser.value).toBe('w');
   expect(fetcher).toHaveBeenCalledTimes(1);
@@ -362,13 +362,13 @@ test('disconnected configuration stays explicit until a successful refresh, reta
   const card = await screen.findByRole('button', {name: 'Open Hook device: Manual · ID: one'});
   card.focus();
   view.rerender(<HookDevices onOpenHook={open} connected={false} />);
-  expect(screen.getByRole('status').textContent).toContain('Disconnected');
+  expect(screen.getByRole('status', {name: ''}).textContent).toContain('Disconnected');
   expect(card.textContent).toContain('Disconnected — potentially stale configuration snapshot');
   expect(document.activeElement).toBe(card);
   await user.keyboard('{Enter}');
   expect(open).toHaveBeenCalledWith('one');
   view.rerender(<HookDevices onOpenHook={open} connected />);
-  expect(screen.getByRole('status').textContent).toContain('Connection restored');
+  expect(screen.getByRole('status', {name: ''}).textContent).toContain('Connection restored');
   expect(card.textContent).toContain('Potentially stale configuration snapshot');
   expect(fetcher).toHaveBeenCalledTimes(1);
   fetcher.mockRejectedValueOnce(new Error('Configuration refresh failed'));
@@ -381,10 +381,10 @@ test('disconnected configuration stays explicit until a successful refresh, reta
   let finish!: (response: Response) => void;
   fetcher.mockImplementationOnce(() => new Promise<Response>(resolve => { finish = resolve; }));
   fireEvent.click(screen.getByRole('button', {name: 'Refresh Hook devices'}));
-  expect(screen.getByRole('status').textContent).toContain('Loading Hook devices');
+  expect(screen.getByRole('status', {name: ''}).textContent).toContain('Loading Hook devices');
   expect(card.textContent).toContain('Refreshing snapshot');
   finish(new Response(JSON.stringify({hooks: hooks})));
-  await waitFor(() => expect(screen.getByRole('status').textContent).toBe('Showing saved Hook devices.'));
+  await waitFor(() => expect(screen.getByRole('status', {name: ''}).textContent).toBe('Showing saved Hook devices.'));
   expect(card.textContent).not.toContain('stale');
 });
 
@@ -394,14 +394,14 @@ test('empty and unavailable disconnected snapshots never claim current absence; 
   vi.stubGlobal('fetch', fetcher);
   const view = render(<HookDevices connected />);
   view.rerender(<HookDevices connected={false} />);
-  expect(screen.getByRole('status').textContent).toContain('Disconnected');
-  expect(screen.getByRole('status').textContent).toContain('Loading');
+  expect(screen.getByRole('status', {name: ''}).textContent).toContain('Disconnected');
+  expect(screen.getByRole('status', {name: ''}).textContent).toContain('Hook devices unavailable');
   view.rerender(<HookDevices connected />);
   finish(new Response('{"hooks":[]}'));
-  await waitFor(() => expect(screen.getByRole('status').textContent).toContain('snapshot was empty'));
+  await waitFor(() => expect(screen.getByRole('status', {name: ''}).textContent).toContain('Hook devices unavailable'));
   view.rerender(<HookDevices connected={false} />);
-  expect(screen.getByRole('status').textContent).toContain('Disconnected');
-  expect(screen.getByRole('status').textContent).toContain('snapshot was empty');
+  expect(screen.getByRole('status', {name: ''}).textContent).toContain('Disconnected');
+  expect(screen.getByRole('status', {name: ''}).textContent).toContain('Hook devices unavailable');
   view.rerender(<HookDevices connected />);
   expect(screen.queryByText(/No saved .* yet/)).toBeNull();
   expect(fetcher).toHaveBeenCalledTimes(1);
@@ -412,9 +412,89 @@ test('empty and unavailable disconnected snapshots never claim current absence; 
   fetcher.mockRejectedValueOnce(new Error('Initial configuration unavailable'));
   const unavailable = render(<HookDevices connected={false} />);
   await screen.findByRole('alert');
-  expect(screen.getByRole('status').textContent).toContain('Hook devices unavailable');
-  expect(screen.getByRole('status').textContent).toContain('Disconnected');
+  expect(screen.getByRole('status', {name: ''}).textContent).toContain('Hook devices unavailable');
+  expect(screen.getByRole('status', {name: ''}).textContent).toContain('Disconnected');
   unavailable.rerender(<HookDevices connected />);
-  expect(screen.getByRole('status').textContent).toContain('Hook devices unavailable');
+  expect(screen.getByRole('status', {name: ''}).textContent).toContain('Hook devices unavailable');
   expect(screen.queryByText(/No saved .* yet/)).toBeNull();
+});
+
+
+test('accepted card removals recover focus, including empty results; surviving and outside focus stay put', async () => {
+  let finish!: (response: Response) => void;
+  const fetcher = vi.fn(() => new Promise<Response>(resolve => { finish = resolve; }));
+  vi.stubGlobal('fetch', fetcher);
+  const workspace: Workspace = {employees: [], configuration: null, provider: 'test', model: null,
+    work: [{id: 'saved', input: 'Keep selection', status: 'pending', assignees: ['a'], attempts: []}]};
+  render(<><input aria-label="Outside draft" defaultValue="Keep draft" /><HookDevices workspace={workspace} onOpenWork={vi.fn()} onOpenHook={vi.fn()} /></>);
+  const respond = async (records: typeof hooks) => {
+    await act(async () => { finish(new Response(JSON.stringify({hooks: records}))); });
+  };
+  await respond(hooks);
+  const chooser = screen.getAllByRole('combobox')[0] as HTMLSelectElement;
+  fireEvent.change(chooser, {target: {value: 'saved'}});
+  const refresh = screen.getByRole('button', {name: 'Refresh Hook devices'});
+  const first = screen.getByRole('button', {name: 'Open Hook device: Manual · ID: one'});
+  // Refresh without moving focus, then settle while the old card still owns focus.
+  first.focus(); fireEvent.click(refresh);
+  await respond([{...hooks[1], name: 'Renamed'}, {...hooks[0], name: 'Renamed'}]);
+  expect(document.activeElement).toBe(first);
+  expect(chooser.value).toBe('saved');
+  expect(screen.getAllByRole('combobox')).toContain(chooser);
+  first.focus(); fireEvent.click(refresh);
+  await respond([{...hooks[1], name: 'Renamed'}]);
+  expect(document.activeElement).toBe(refresh);
+  expect((refresh as HTMLButtonElement).disabled).toBe(false);
+  expect(screen.getByLabelText('Hook devices removals').getAttribute('aria-live')).toBe('polite');
+  expect(screen.getByLabelText('Hook devices removals').getAttribute('aria-atomic')).toBe('true');
+  expect(screen.getByLabelText('Hook devices removals').textContent).toContain('1 record removed');
+  await userEvent.keyboard('{Tab}');
+  const survivor = screen.getByRole('button', {name: 'Open Hook device: Renamed · ID: two'});
+  expect(document.activeElement).toBe(survivor);
+  fireEvent.click(refresh); await respond([]);
+  expect(document.activeElement).toBe(refresh);
+  expect(screen.getByLabelText('Hook devices removals').textContent).toContain('No cards remain');
+  fireEvent.click(refresh); await respond(hooks);
+  const outside = screen.getByRole('textbox', {name: 'Outside draft'});
+  outside.focus(); fireEvent.click(refresh); await respond([hooks[0]]);
+  expect(document.activeElement).toBe(outside);
+  expect((outside as HTMLInputElement).value).toBe('Keep draft');
+  const remaining = screen.getByRole('button', {name: 'Open Hook device: Manual · ID: one'});
+  remaining.focus(); fireEvent.click(refresh); await respond([{...hooks[0], name: 'Final'}]);
+  expect(document.activeElement).toBe(remaining);
+  expect(screen.getByLabelText('Hook devices removals').textContent).toBe('');
+});
+
+test.each([true, false])('failed and old-connection responses cannot override a newer refresh (old settles first: %s)', async oldFirst => {
+  const pending: {resolve: (response: Response) => void; reject: (error: Error) => void}[] = [];
+  vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>((resolve, reject) => pending.push({resolve, reject}))));
+  const view = render(<HookDevices onOpenHook={vi.fn()} connected />);
+  const respond = async (index: number, records: typeof hooks) => {
+    await act(async () => { pending[index].resolve(new Response(JSON.stringify({hooks: records}))); });
+  };
+  await respond(0, hooks);
+  const refresh = screen.getByRole('button', {name: 'Refresh Hook devices'});
+  const first = screen.getByRole('button', {name: 'Open Hook device: Manual · ID: one'});
+  first.focus(); fireEvent.click(refresh);
+  await act(async () => { pending[1].reject(new Error('Offline')); });
+  expect(document.activeElement).toBe(first);
+  expect(screen.getByLabelText('Hook devices removals').textContent).toBe('');
+  fireEvent.click(refresh);
+  view.rerender(<HookDevices onOpenHook={vi.fn()} connected={false} />);
+  view.rerender(<HookDevices onOpenHook={vi.fn()} connected />);
+  fireEvent.click(refresh);
+  if (oldFirst) {
+    await respond(2, []);
+    expect(document.activeElement).toBe(first);
+    expect((refresh as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByLabelText('Hook devices removals').textContent).toBe('');
+  }
+  await respond(3, [{...hooks[0], name: 'Current'}]);
+  expect(document.activeElement).toBe(first);
+  const current = screen.getByRole('button', {name: 'Open Hook device: Current · ID: one'});
+  current.focus();
+  if (!oldFirst) await respond(2, []);
+  expect(document.activeElement).toBe(current);
+  expect(screen.getByRole('button', {name: 'Open Hook device: Current · ID: one'})).toBe(current);
+  expect(screen.getByLabelText('Hook devices removals').textContent).toContain('1 record removed');
 });

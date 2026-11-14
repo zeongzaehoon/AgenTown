@@ -1,6 +1,6 @@
 import type { Workspace } from './api';
 export interface SkillNavigation {taskId: string; skillId: string}
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useId, useRef, useState } from 'react';
 import { configurationRequest, type ConfigurationRecord } from './configuration-api';
 
 /** Office inspection is read-only and independent of provider availability. */
@@ -8,16 +8,40 @@ export function SkillBooks({onOpenSkill, onOpenWork, workspace, connected = true
   const [books, setBooks] = useState<ConfigurationRecord[] | null>(null);
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState('');
+  const [announcement, setAnnouncement] = useState('');
+  const grid = useRef<HTMLDivElement>(null);
+  const refreshButton = useRef<HTMLButtonElement>(null);
+  const recoverFocus = useRef(false);
+  useLayoutEffect(() => {
+    if (!busy && recoverFocus.current) {
+      recoverFocus.current = false;
+      refreshButton.current?.focus();
+    }
+  }, [busy, books]);
+  function acceptSnapshot(next: ConfigurationRecord[]) {
+    const ids = new Set(next.map(record => record.id));
+    let removed = 0;
+    for (const card of Array.from(grid.current?.children ?? [])) {
+      if (!ids.has(card.getAttribute('data-record-id')!)) {
+        removed++;
+        if (card.contains(document.activeElement)) recoverFocus.current = true;
+      }
+    }
+    setAnnouncement(removed
+      ? `Skill books refreshed: ${removed} record${removed === 1 ? '' : 's'} removed from this view. ${next.length ? 'Remaining cards are available below.' : 'No cards remain.'}`
+      : '');
+    setBooks(next);
+  }
   const request = useRef<AbortController | null>(null);
   // Connection recovery does not refresh this independently loaded configuration.
   const [disconnectedSnapshot, setDisconnectedSnapshot] = useState(!connected);
   const connection = useRef({connected, revision: 0});
   useEffect(() => {
-    connection.current.connected = connected;
-    if (!connected) {
-      connection.current.revision += 1;
-      setDisconnectedSnapshot(true);
-    }
+    if (connection.current.connected === connected) return;
+    connection.current = {connected, revision: connection.current.revision + 1};
+    request.current?.abort();
+    setBusy(false);
+    setDisconnectedSnapshot(true);
   }, [connected]);
   async function refresh() {
     request.current?.abort();
@@ -28,24 +52,25 @@ export function SkillBooks({onOpenSkill, onOpenWork, workspace, connected = true
     try {
       const result = await configurationRequest<{skills: ConfigurationRecord[]}>('skills', '', undefined, controller.signal);
       if (!Array.isArray(result.skills) || result.skills.some(book => !book || typeof book.id !== 'string' || typeof book.name !== 'string' || typeof book.enabled !== 'boolean')) throw new Error('Saved Skill data unavailable. Refresh to try again.');
-      if (!controller.signal.aborted) {
-        setBooks(result.skills);
+      if (request.current === controller && !controller.signal.aborted && revision === connection.current.revision) {
+        acceptSnapshot(result.skills);
         setDisconnectedSnapshot(!connection.current.connected || revision !== connection.current.revision);
       }
     } catch (failure) {
-      if (!controller.signal.aborted) setError((failure as Error).message);
+      if (request.current === controller && !controller.signal.aborted && revision === connection.current.revision) setError((failure as Error).message);
     } finally {
-      if (!controller.signal.aborted) setBusy(false);
+      if (request.current === controller && !controller.signal.aborted && revision === connection.current.revision) setBusy(false);
     }
   }
   useEffect(() => { void refresh(); return () => request.current?.abort(); }, []);
   return <section className="skill-library" aria-labelledby="skill-library-title">
     <h3 id="skill-library-title">Skill library</h3>
     <p>Open a book to inspect its saved Skill in Configuration. Opening never saves, enables or executes work.</p>
-    <p role="status">{!connected ? 'Disconnected — Skill books configuration may be stale. ' : disconnectedSnapshot ? 'Connection restored — Skill books configuration may still be stale. Refresh Skill books to check. ' : ''}{busy ? 'Loading Skill books…' : error ? books ? 'Skill books are stale — showing the last successful snapshot.' : 'Skill books unavailable.' : books?.length ? (!connected || disconnectedSnapshot) ? 'Showing retained Skill books configuration.' : 'Showing saved Skill books.' : (!connected || disconnectedSnapshot) ? 'The last successful configuration snapshot was empty; current Skills are unknown.' : 'No saved Skills yet. Create a Skill in Configuration.'}</p>
+    <p role="status">{!connected ? 'Disconnected — Skill books configuration may be stale. ' : disconnectedSnapshot ? 'Connection restored — Skill books configuration may still be stale. Refresh Skill books to check. ' : ''}{busy ? 'Loading Skill books…' : error ? books ? 'Skill books are stale — showing the last successful snapshot.' : 'Skill books unavailable.' : books === null ? 'Skill books unavailable.' : books?.length ? (!connected || disconnectedSnapshot) ? 'Showing retained Skill books configuration.' : 'Showing saved Skill books.' : (!connected || disconnectedSnapshot) ? 'The last successful configuration snapshot was empty; current Skills are unknown.' : 'No saved Skills yet. Create a Skill in Configuration.'}</p>
     {error && <p role="alert">{error}</p>}
-    <button type="button" disabled={busy} onClick={() => void refresh()}>Refresh Skill books</button>
-    <div className="skill-shelf">{books?.map(book => <article key={book.id}><button type="button" className="skill-book" key={book.id}
+    <p aria-live="polite" aria-atomic="true" aria-label="Skill books removals">{announcement}</p>
+    <button ref={refreshButton} type="button" disabled={busy} onClick={() => void refresh()}>Refresh Skill books</button>
+    <div ref={grid} className="skill-shelf">{books?.map(book => <article key={book.id} data-record-id={book.id}><button type="button" className="skill-book" key={book.id}
       disabled={!onOpenSkill} aria-controls="configuration-panel"
       aria-label={`Open Skill book: ${book.name} · ID: ${book.id}`} onClick={() => onOpenSkill?.(book.id)}>
       <span aria-hidden="true">▤</span><strong>{book.name}</strong><span>Skill manual</span><span>ID: {book.id}</span>
