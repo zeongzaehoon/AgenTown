@@ -1,3 +1,4 @@
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { LoopDevices } from './LoopDevices';
 import type { HookNavigation } from './HookDevices';
 import { HookDevices } from './HookDevices';
@@ -24,6 +25,29 @@ export function CompanyOverview({workspace, connected, error, onOpenWork, select
   onOpenHook?: (id: string) => void;
   onOpenSkill?: (id: string) => void; workspace: Workspace | null; connected: boolean; error: string; onOpenWork: (id: string) => void; selectedEmployee?: string; onSelectEmployee?: (id: string) => void;
 }) {
+  const heading = useRef<HTMLHeadingElement>(null);
+  const focusedEmployee = useRef<{id: string; name: string; element: HTMLButtonElement} | null>(null);
+  const [removalAnnouncement, setRemovalAnnouncement] = useState('');
+  useEffect(() => {
+    const trackFocus = (event: FocusEvent) => {
+      if (event.target !== focusedEmployee.current?.element) focusedEmployee.current = null;
+    };
+    document.addEventListener('focusin', trackFocus);
+    return () => document.removeEventListener('focusin', trackFocus);
+  }, []);
+  // App supplies accepted snapshots only. A failed or superseded refresh retains
+  // the previous workspace, so it cannot trigger removal recovery here.
+  useLayoutEffect(() => {
+    const focused = focusedEmployee.current;
+    if (!workspace || !focused) return;
+    const surviving = workspace.employees.find(employee => employee.id === focused.id);
+    if (surviving) { focused.name = surviving.name; return; }
+    focusedEmployee.current = null;
+    if (!focused.element.isConnected && document.activeElement === document.body) {
+      heading.current?.focus();
+      setRemovalAnnouncement(`Employee ${focused.name} · ID: ${focused.id} was removed from this view. ${workspace.employees.length ? 'Remaining employees are available below.' : 'No employees remain.'}`);
+    }
+  }, [workspace]);
   const employees = workspace?.employees ?? [];
   // Both presentations use the same persisted identities and latest-attempt classification.
   const desks = employees.map(employee => {
@@ -40,7 +64,8 @@ export function CompanyOverview({workspace, connected, error, onOpenWork, select
   const employeeIds = new Set(employees.map(employee => employee.id));
   const unassigned = workspace?.work.filter(work => !work.assignees.some(id => employeeIds.has(id))) ?? [];
   return <section className="company-overview" aria-labelledby="company-title">
-    <h2 id="company-title">Company overview</h2>
+    <h2 id="company-title" ref={heading} tabIndex={-1}>Company overview</h2>
+    <p aria-live="polite" aria-atomic="true">{removalAnnouncement}</p>
     <p role="status">{!workspace
       ? error ? 'Company data unavailable. Refresh connection to try again.' : 'Loading company overview…'
       : connected ? 'Showing recorded workload.' : 'Disconnected — showing stale company data from the last successful refresh.'}</p>
@@ -71,7 +96,10 @@ export function CompanyOverview({workspace, connected, error, onOpenWork, select
           {desks.map(({employee, activity, callerActive, blocked}, index) => <div className="office-desk" key={employee.id}>
             <button type="button" className="office-character" disabled={!onSelectEmployee}
               aria-label={`Select office character: ${employee.name} · ID: ${employee.id}`}
-              aria-pressed={selectedEmployee === employee.id} aria-controls="employee-work"
+              onFocus={event => {
+                focusedEmployee.current = {id: employee.id, name: employee.name, element: event.currentTarget};
+                setRemovalAnnouncement('');
+              }} aria-pressed={selectedEmployee === employee.id} aria-controls="employee-work"
               onClick={() => onSelectEmployee?.(employee.id)}>
               <span className={`character-body character-style-${index % 4}`} aria-hidden="true"><span className="character-head" /><span className="character-shirt" /></span>
               <strong>{employee.name}</strong><span>ID: {employee.id}</span>
@@ -87,7 +115,10 @@ export function CompanyOverview({workspace, connected, error, onOpenWork, select
       <ul className="employee-grid" aria-label="Employee workload">
         {desks.map(({employee, assigned, counts, callerActive, blocked}) => {
           return <li key={employee.id} className="employee-card">
-            <h3>{onSelectEmployee ? <button type="button" aria-pressed={selectedEmployee === employee.id} aria-controls="employee-work"
+            <h3>{onSelectEmployee ? <button type="button" onFocus={event => {
+                focusedEmployee.current = {id: employee.id, name: employee.name, element: event.currentTarget};
+                setRemovalAnnouncement('');
+              }} aria-pressed={selectedEmployee === employee.id} aria-controls="employee-work"
               onClick={() => onSelectEmployee(employee.id)} aria-label={`View assigned work: ${employee.name} · ID: ${employee.id}`}>{employee.name}</button> : employee.name}</h3><p className="employee-id">Employee ID: {employee.id}</p>
             <p>{assigned.length ? `${assigned.length} assigned requests` : 'No assigned work.'}</p>
             <dl className="workload-counts">{categories.map(category => <div key={category.key}>

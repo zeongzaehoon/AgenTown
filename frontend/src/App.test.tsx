@@ -50,8 +50,8 @@ function fixture(state = initial()) {
 const refresh = () => fireEvent.click(screen.getByRole('button', {name: 'Refresh connection'}));
 const connected = () => waitFor(() => {
   expect(document.querySelector('#connection')!.textContent).toContain('Connected');
-  const loop = screen.queryByRole('region', {name: 'Run a bounded Loop'});
-  if (loop) expect(within(loop).getByRole('status', {name: 'Loop inspection'}).textContent).not.toContain('Loop data unavailable');
+  // Workspace connectivity does not refresh a retained Loop inspection. Tests
+  // that submit a Loop must wait for its own fresh inspection explicitly.
 });
 
 test('StrictMode employee → saved work → running → failure → explicit retry → full safe result and reload', async () => {
@@ -1234,4 +1234,41 @@ test('Configuration retains an empty snapshot and draft through workspace recove
   expect((name as HTMLInputElement).value).toBe('Retained Skill');
   expect((within(panel).getByRole('button', {name: 'Create Skill'}) as HTMLButtonElement).disabled).toBe(false);
   expect(mutations()).toBe(before);
+});
+
+test.each(['Select office character', 'View assigned work'])('accepted employee removal recovers %s focus without resetting work or drafts', async presentation => {
+  // Stop product polling without replacing interaction/waitFor timers.
+  vi.spyOn(window, 'setInterval').mockImplementation(() => 0);
+  const f = fixture({...initial(), employees: [{id: 'e', name: 'Writer'}], work: [{id: 'w', input: 'Saved text', status: 'pending', assignees: ['e'], attempts: []}]});
+  render(<App />); await connected();
+  fireEvent.change(screen.getByLabelText('What would you like help with?'), {target: {value: 'Keep work draft'}});
+  fireEvent.change(screen.getByLabelText('Employee name'), {target: {value: 'Keep employee draft'}});
+  fireEvent.click(screen.getByRole('button', {name: 'View assigned work: Writer · ID: e'}));
+  const control = screen.getByRole('button', {name: `${presentation}: Writer · ID: e`});
+  control.focus();
+  f.disconnect(); refresh();
+  await waitFor(() => expect(document.querySelector('#connection')!.textContent).toContain('Disconnected'));
+  expect(document.activeElement).toBe(control);
+  expect(screen.queryByText(/was removed from this view/)).toBeNull();
+  f.reconnect();
+  const fetcher = globalThis.fetch;
+  let resolveOld!: (response: Response) => void;
+  let hold = true;
+  vi.stubGlobal('fetch', (path: string, options: RequestInit) => path === '/api/state' && hold
+    ? new Promise<Response>(resolve => { resolveOld = resolve; }) : fetcher(path, options));
+  refresh(); hold = false; refresh(); await connected();
+  await act(async () => resolveOld(new Response(JSON.stringify({...f.state, employees: []}))));
+  expect(document.activeElement).toBe(control);
+  expect(screen.queryByText(/was removed from this view/)).toBeNull();
+  f.state.employees = [];
+  refresh(); await connected();
+  // Connected may already describe the previous accepted snapshot. Wait for
+  // this read to commit before asserting removal recovery.
+  await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('heading', {name: 'Company overview'})));
+  expect(screen.getByText(/Employee Writer · ID: e was removed from this view. No employees remain/)).toBeTruthy();
+  expect(screen.getByText(/Assigned work for an unavailable employee · Employee ID: e/)).toBeTruthy();
+  expect((screen.getByLabelText('Saved work') as HTMLSelectElement).value).toBe('w');
+  expect((screen.getByLabelText('What would you like help with?') as HTMLTextAreaElement).value).toBe('Keep work draft');
+  expect((screen.getByLabelText('Employee name') as HTMLInputElement).value).toBe('Keep employee draft');
+  expect(f.calls.every(call => call.path === '/api/state')).toBe(true);
 });

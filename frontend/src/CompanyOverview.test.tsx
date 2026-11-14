@@ -199,3 +199,42 @@ test.each(['skills', 'hooks'])('configuration sections recover independently whe
   expect(fetcher).toHaveBeenCalledTimes(4);
   expect(screen.getByRole('alert').textContent).toBe(`${failed} refresh failed`);
 });
+
+test.each(['Select office character', 'View assigned work'])('%s removal recovers by ID, including the last employee', async presentation => {
+  const user = userEvent.setup();
+  const props = {connected: true, error: '', onOpenWork: vi.fn(), onSelectEmployee: vi.fn()};
+  const view = render(<CompanyOverview {...props} workspace={workspace()} />);
+  const control = screen.getByRole('button', {name: `${presentation}: Alex · ID: b`});
+  control.focus();
+  // Removing a namesake must not replace the surviving keyed control.
+  const renamed = {...workspace(), employees: [{id: 'c', name: 'Idle'}, {id: 'b', name: 'Renamed'}]};
+  view.rerender(<CompanyOverview {...props} workspace={renamed} />);
+  expect(document.activeElement).toBe(control);
+  expect(screen.getByRole('button', {name: `${presentation}: Renamed · ID: b`})).toBe(control);
+  expect(screen.queryByText(/was removed from this view/)).toBeNull();
+  view.rerender(<CompanyOverview {...props} workspace={{...renamed, employees: [{id: 'c', name: 'Idle'}]}} />);
+  const heading = screen.getByRole('heading', {name: 'Company overview'});
+  expect(document.activeElement).toBe(heading);
+  const announcement = screen.getByText(/Employee Renamed · ID: b was removed/);
+  expect(announcement.getAttribute('aria-live')).toBe('polite');
+  await user.tab();
+  expect(document.activeElement).not.toBe(document.body);
+  expect(document.activeElement).not.toBe(heading);
+  screen.getByRole('button', {name: `${presentation}: Idle · ID: c`}).focus();
+  view.rerender(<CompanyOverview {...props} workspace={{...renamed, employees: []}} />);
+  expect(document.activeElement).toBe(heading);
+  expect(screen.getByText(/No employees remain/)).toBeTruthy();
+  await user.tab();
+  expect(document.activeElement).not.toBe(document.body);
+});
+
+test.each(['Select office character', 'View assigned work'])('%s removal leaves outside focus alone', presentation => {
+  const props = {connected: true, error: '', onOpenWork: vi.fn(), onSelectEmployee: vi.fn()};
+  const content = (data: Workspace) => <><input aria-label="Outside draft" /><CompanyOverview {...props} workspace={data} /></>;
+  const view = render(content(workspace()));
+  screen.getByRole('button', {name: `${presentation}: Alex · ID: a`}).focus();
+  const outside = screen.getByLabelText('Outside draft'); outside.focus();
+  view.rerender(content({...workspace(), employees: []}));
+  expect(document.activeElement).toBe(outside);
+  expect(screen.queryByText(/was removed from this view/)).toBeNull();
+});

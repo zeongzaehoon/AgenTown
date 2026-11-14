@@ -4017,3 +4017,59 @@ profile. The supervisor frontend profile passed 32 frontend test files and
 1,153 tests, the production build, and 505 Python tests with 2 skipped.
 Installed-browser and installation/process-recovery gates were deferred by this
 profile. Live LLM calls remain skipped, not passed.
+
+### Keyboard orientation after employee removal (C110-T1)
+
+Launch `agentown-web --database PATH --port 8765` with a local database and open
+`http://127.0.0.1:8765` → Company overview. No provider configuration is required.
+These console fixtures replace only workspace reads; reload restores normal data.
+They do not delete saved employees or run work:
+
+```js
+window.employeeFetch = window.fetch.bind(window);
+window.employeeSnapshot = await (await window.employeeFetch('/api/state')).json();
+window.employeeSnapshot.employees = [
+  {id: 'keyboard-a', name: 'Alex'}, {id: 'keyboard-b', name: 'Alex'}
+];
+window.fetch = (path, init) => path === '/api/state'
+  ? Promise.resolve(Response.json(window.employeeSnapshot))
+  : window.employeeFetch(path, init);
+// Wait for the next workspace poll, then return to the document.
+window.removeEmployeeLater = id => setTimeout(() => {
+  window.employeeSnapshot.employees = window.employeeSnapshot.employees
+    .filter(employee => employee.id !== id);
+}, 5000);
+```
+
+1. Run `window.removeEmployeeLater('keyboard-a')`, return to the document and
+   Tab to **Select office character: Alex · ID: keyboard-a** before five seconds
+   elapse. On the next accepted poll, focus returns to **Company overview**.
+   A polite message identifies the removed employee by name and ID. Tab continues
+   through the overview controls. The other Alex remains available.
+2. Repeat after reload/installing the fixture with **View assigned work: Alex ·
+   ID: keyboard-a**. Remove `keyboard-b` while its character or workload button
+   is focused: the same heading remains available and the announcement says no
+   employees remain. Existing unavailable-employee filters, selected saved work
+   and unsaved employee/work drafts remain intact.
+3. Rename/reverse the fixture employees while a surviving button is focused;
+   its focus stays put. Remove only the other ID, or focus an outside draft
+   before removal: focus stays where the user left it, with no removal message.
+4. Reject `/api/state` for a failed refresh: previous controls and focus remain.
+   Restore reads to recover. A delayed response from a superseded request must
+   not remove controls or move focus; the App interaction fixture exercises an
+   old empty response arriving after a newer accepted snapshot.
+
+Runnable deterministic interaction coverage in a prepared checkout:
+`cd frontend && npx vitest run src/CompanyOverview.test.tsx src/App.test.tsx`.
+Implementation recovery corrected the App test helper to wait for workspace
+connectivity independently of Loop inspection freshness; reconnecting alone
+does not guarantee that a retained Loop inspection is fresh. The scoped run
+passed both files (103 tests), and `tsc --noEmit` passed. Integration recovery
+also waits for the removal focus outcome rather than an already-connected
+status before asserting the newly accepted snapshot. Its focused removal run
+passed six tests (98 unrelated tests skipped) across both files. Shared read-only
+dependencies required `--configLoader runner` for this isolated check.
+The supervisor frontend profile passed 32 frontend test files and 1,159 tests,
+the production build, and 505 Python tests with 2 skipped. Installed-browser
+and installation/process-recovery gates were deferred by this profile. Live LLM
+calls are skipped, not passed, under the user policy.
