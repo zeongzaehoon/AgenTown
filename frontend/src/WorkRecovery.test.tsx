@@ -82,3 +82,99 @@ test('recovery consumes existing execution consent and requires fresh inspection
   expect((screen.getByRole('button', {name: 'Execute once through local MCP'}) as HTMLButtonElement).disabled).toBe(true);
   expect(fetcher.mock.calls.every(call => !call[0].includes('execute-work'))).toBe(true);
 });
+
+const authorization = () => screen.getByRole('checkbox', {name: 'I authorize reconciliation of expired attempts across the database history snapshot.'});
+const destination = () => screen.getByRole('region', {name: 'Local MCP work inspection'});
+const transitions = [
+  {name: 'disconnect', taskId: id, connected: false},
+  {name: 'changed selection', taskId: other, connected: true},
+  {name: 'missing selection', taskId: null, connected: true},
+  {name: 'saved work omitted while inspection ID is retained', taskId: id, connected: true, recoveryAvailable: false},
+];
+
+test.each(transitions)('focused consent recovers to inspection on $name without requests', async transition => {
+  const fetcher = vi.fn(); vi.stubGlobal('fetch', fetcher);
+  const view = render(<WorkInspection taskId={id} />);
+  await userEvent.click(review()); await userEvent.click(authorization());
+  expect(document.activeElement).toBe(authorization());
+  view.rerender(<WorkInspection taskId={transition.taskId} connected={transition.connected} recoveryAvailable={transition.recoveryAvailable} />);
+  expect(document.activeElement).toBe(destination());
+  expect(screen.getByText(/The previous recovery review is unavailable/).getAttribute('aria-live')).toBe('polite');
+  expect(screen.queryByRole('checkbox')).toBeNull();
+  view.rerender(<WorkInspection taskId={id} connected />);
+  expect(screen.queryByRole('checkbox')).toBeNull();
+  await userEvent.click(review());
+  expect((authorization() as HTMLInputElement).checked).toBe(false);
+  expect((submit() as HTMLButtonElement).disabled).toBe(true);
+  expect(fetcher).not.toHaveBeenCalled();
+});
+
+test.each(transitions)('post-recovery control recovers on $name with no automatic requests', async transition => {
+  const fetcher = vi.fn().mockResolvedValue(reply(receipt())); vi.stubGlobal('fetch', fetcher);
+  const view = render(<WorkInspection taskId={id} />);
+  await userEvent.click(review()); await userEvent.click(authorization()); await userEvent.click(submit());
+  const inspect = await screen.findByRole('button', {name: 'Inspect after recovery'});
+  await waitFor(() => expect(document.activeElement).toBe(inspect));
+  view.rerender(<WorkInspection taskId={transition.taskId} connected={transition.connected} recoveryAvailable={transition.recoveryAvailable} />);
+  expect(document.activeElement).toBe(destination());
+  expect(screen.getByText(/The previous recovery review is unavailable/)).toBeTruthy();
+  expect(fetcher).toHaveBeenCalledTimes(1);
+});
+
+test.each(transitions)('outside focus survives recovery invalidation on $name', async transition => {
+  const fetcher = vi.fn(); vi.stubGlobal('fetch', fetcher);
+  const content = (taskId: string | null, connected = true, recoveryAvailable = true) => <><input aria-label="Outside draft" /><WorkInspection taskId={taskId} connected={connected} recoveryAvailable={recoveryAvailable} /></>;
+  const view = render(content(id));
+  await userEvent.click(review()); await userEvent.click(authorization());
+  const outside = screen.getByRole('textbox', {name: 'Outside draft'}); outside.focus();
+  view.rerender(content(transition.taskId, transition.connected, transition.recoveryAvailable));
+  expect(document.activeElement).toBe(outside);
+  expect(fetcher).not.toHaveBeenCalled();
+});
+
+test.each(transitions)('late recovery receipt cannot restore review or move outside focus after $name', async transition => {
+  let finish!: (response: Response) => void;
+  const fetcher = vi.fn(() => new Promise<Response>(resolve => {finish = resolve;})); vi.stubGlobal('fetch', fetcher);
+  const content = (taskId: string | null, connected = true, recoveryAvailable = true) => <><input aria-label="Outside draft" /><WorkInspection taskId={taskId} connected={connected} recoveryAvailable={recoveryAvailable} /></>;
+  const view = render(content(id));
+  await userEvent.click(review()); await userEvent.click(authorization()); await userEvent.click(submit());
+  // Focus a pending recovery control before replacement.
+  authorization().focus();
+  view.rerender(content(transition.taskId, transition.connected, transition.recoveryAvailable));
+  expect(document.activeElement).toBe(destination());
+  view.rerender(content(id));
+  await userEvent.click(review());
+  const outside = screen.getByRole('textbox', {name: 'Outside draft'}); outside.focus();
+  await act(async () => {finish(reply(receipt()));});
+  expect(document.activeElement).toBe(outside);
+  expect(screen.queryByText(/Reconciliation confirmed/)).toBeNull();
+  expect((authorization() as HTMLInputElement).checked).toBe(false);
+  expect(screen.queryByRole('button', {name: 'Inspect after recovery'})).toBeNull();
+  expect(fetcher).toHaveBeenCalledTimes(1);
+});
+
+test('explicit Skill navigation keeps its requested destination when recovery is removed', async () => {
+  const fetcher = vi.fn(); vi.stubGlobal('fetch', fetcher);
+  const view = render(<WorkInspection taskId={id} />);
+  await userEvent.click(review());
+  view.rerender(<WorkInspection taskId={other} skillRequest={{taskId: other, skillId: id}} />);
+  expect(document.activeElement).toBe(screen.getByRole('region', {name: 'Requested Skill inspection'}));
+  expect(screen.getByText(/The previous recovery review is unavailable/)).toBeTruthy();
+  expect(fetcher).not.toHaveBeenCalled();
+});
+
+test('completed recovery replacement preserves outside focus and explicit Hook navigation', async () => {
+  const fetcher = vi.fn().mockResolvedValue(reply(receipt())); vi.stubGlobal('fetch', fetcher);
+  const content = (connected: boolean) => <><button>Outside control</button><WorkInspection taskId={id} connected={connected} /></>;
+  const view = render(content(true));
+  await userEvent.click(review()); await userEvent.click(authorization()); await userEvent.click(submit());
+  await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', {name: 'Inspect after recovery'})));
+  const outside = screen.getByRole('button', {name: 'Outside control'}); outside.focus();
+  view.rerender(content(false));
+  expect(document.activeElement).toBe(outside);
+  view.rerender(content(true));
+  await userEvent.click(review());
+  view.rerender(<WorkInspection taskId={other} hookRequest={{taskId: other, hookId: id, employeeId: id}} />);
+  expect(document.activeElement).toBe(screen.getByRole('region', {name: 'Requested Hook inspection'}));
+  expect(fetcher).toHaveBeenCalledTimes(1);
+});

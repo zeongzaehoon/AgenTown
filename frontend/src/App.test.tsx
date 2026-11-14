@@ -1125,8 +1125,16 @@ test('selected local inspection remains reachable when refreshed history omits t
     work: [{id: 'work-1', input: 'Saved request', status: 'pending', assignees: ['employee-1'], attempts: []}]});
   render(<App />); await connected();
   await screen.findByText('Work ID: work-1');
+  await userEvent.click(screen.getByRole('button', {name: 'Review recovery scope'}));
+  const recoveryConsent = screen.getByRole('checkbox', {name: /I authorize reconciliation/});
+  recoveryConsent.focus();
   f.state.work = []; refresh();
   await waitFor(() => expect(screen.queryByText('Work ID: work-1')).toBeNull());
+  const inspectionRegion = screen.getByRole('region', {name: 'Local MCP work inspection'});
+  await waitFor(() => expect(document.activeElement).toBe(inspectionRegion));
+  expect(screen.getByText(/The previous recovery review is unavailable/)).toBeTruthy();
+  expect(screen.queryByRole('checkbox', {name: /I authorize reconciliation/})).toBeNull();
+  expect(f.calls.some(call => /reconcile|execute/.test(call.path))).toBe(false);
   const inspect = screen.getByRole('button', {name: 'Inspect through local MCP'}) as HTMLButtonElement;
   expect(inspect.disabled).toBe(false);
   inspect.focus(); await userEvent.keyboard('{Enter}');

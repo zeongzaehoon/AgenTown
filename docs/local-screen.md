@@ -4194,3 +4194,46 @@ navigation tests remain unchanged. Scoped command when dependencies are present:
 build, 508 Python tests with 2 skipped, the Rust and desktop gates, and 2
 installed Chromium browser tests covering 38 interaction steps. Live LLM calls
 are skipped under the current user policy, not passed.
+
+### Selected-work recovery replacement focus (C114-T1)
+
+Launch `agentown-web --database /tmp/agentown-recovery.sqlite --port 8765`
+with saved work in that local product database, then open `http://127.0.0.1:8765`.
+Select saved work and choose **Review recovery scope**. Consent receives focus;
+check it if desired, but do not submit reconciliation for this exercise.
+
+While consent retains focus, stop the local server and let workspace polling
+observe disconnection. Focus moves to **Local MCP work inspection**, a labeled
+region with a visible focus outline. A polite status explains that the previous
+recovery review is unavailable and fresh review and consent are required.
+Restart the same server and refresh the connection: review stays closed. Choose
+**Review recovery scope** again; consent must be unchecked and reconciliation
+must remain disabled until explicitly authorized.
+
+Repeat by changing the selected saved work, or removing the selected work from
+the returned saved-history snapshot in a local response fixture. To change
+selection without first moving focus from consent, use the browser console to
+set the Saved work selector's native value and dispatch a bubbling `change`
+event, or use the deterministic interaction fixtures. If the selected work is
+missing, the same inspection region survives and explains how to select work.
+Normal clicks on selection controls keep their intentional focus destination.
+Repeat while focus is on an outside draft/control: focus must stay there.
+Explicit Skill/Hook navigation retains its requested inspection destination.
+Observe network traffic: invalidation and reconnect send no reconciliation or
+execution requests. Recovery requires separate explicit consent and submission.
+
+`frontend/src/WorkRecovery.test.tsx` also covers replacement of **Inspect after
+recovery**, held receipts arriving after selection loss/disconnect/reconnect,
+fresh unchecked consent, outside focus, and requested navigation. Those receipt
+fixtures are deterministic and do not reconcile the local database or call a
+provider. No late receipt may restore invalidated review or move focus.
+Recovery interaction coverage also removes canonical saved-work availability
+while retaining the selected inspection ID, covering consent, post-recovery
+controls, outside focus and late receipts. Read-only inspection remains available
+for that ID; recovery requires available saved work.
+
+Supervisor frontend-profile verification passed all 27 recovery interaction
+tests and 1,205 frontend tests, TypeScript checking, the production build, and
+505 Python tests with 2 skipped. Installed-browser and installation/process-
+recovery gates were deferred by this profile. Live provider validation is
+skipped under the user policy, not passed.

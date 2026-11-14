@@ -1,7 +1,7 @@
 import type { SkillNavigation } from './SkillBooks';
 import type { HookNavigation } from './HookDevices';
 import type { LoopNavigation } from './OverviewLoops';
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { WorkRecovery } from './WorkRecovery';
 import { WorkLoop } from './WorkLoop';
 import { WorkHook } from './WorkHook';
@@ -10,13 +10,35 @@ import { WorkExecution } from './WorkExecution';
 import { RequestTimeoutError } from './api';
 import { inspectSelectedWork, type InspectionResponse } from './work-inspection-api';
 
-export function WorkInspection({taskId, connected = true, loopRequest, hookRequest, skillRequest}: {skillRequest?: SkillNavigation | null;hookRequest?: HookNavigation | null; loopRequest?: LoopNavigation | null; taskId: string | null; connected?: boolean}) {
+export function WorkInspection({taskId, recoveryAvailable = true, connected = true, loopRequest, hookRequest, skillRequest}: {skillRequest?: SkillNavigation | null;hookRequest?: HookNavigation | null; loopRequest?: LoopNavigation | null; taskId: string | null; recoveryAvailable?: boolean; connected?: boolean}) {
   const [response, setResponse] = useState<InspectionResponse | null>(null);
   const [error, setError] = useState('');
   const [pending, setPending] = useState(false);
   const request = useRef<{id: string; controller: AbortController} | null>(null);
   const inspectionRegion = useRef<HTMLElement>(null);
   const inspectedContent = useRef<HTMLDivElement>(null);
+  const recoveryContent = useRef<HTMLDivElement | null>(null);
+  const removedRecovery = useRef({focused: false, reviewed: false});
+  const [recoveryNotice, setRecoveryNotice] = useState('');
+  // Detachment runs before the keyed child is removed and focus falls to body.
+  const attachRecovery = useCallback((node: HTMLDivElement | null) => {
+    if (!node && recoveryContent.current) {
+      removedRecovery.current = {
+        focused: recoveryContent.current.contains(document.activeElement),
+        reviewed: !!recoveryContent.current.querySelector('input[type="checkbox"]'),
+      };
+    }
+    recoveryContent.current = node;
+  }, []);
+  const recoveryTaskId = recoveryAvailable ? taskId : null;
+  useLayoutEffect(() => {
+    const removed = removedRecovery.current;
+    removedRecovery.current = {focused: false, reviewed: false};
+    setRecoveryNotice(removed.reviewed
+      ? 'The previous recovery review is unavailable. Select available saved work, reconnect if needed, and choose Review recovery scope again. New consent is required. Nothing is automatically resent.'
+      : '');
+    if (removed.focused) inspectionRegion.current?.focus();
+  }, [recoveryTaskId, connected]);
   function clearInspection() {
     // Move focus before removing its owner. Outside controls and requested
     // navigation retain their destination; this region survives disconnects.
@@ -59,7 +81,8 @@ export function WorkInspection({taskId, connected = true, loopRequest, hookReque
     <p role="status" aria-live="polite">{pending ? 'Inspecting selected work through local MCP…' : ''}</p>
     {error && <p role="alert">{error}</p>}
     {response?.status === 'failure' && <div role="alert"><p>{response.message}</p><p>{response.recovery}</p><p>Inspection unavailable ({response.code}). Nothing is automatically retried.</p></div>}
-    {taskId && <WorkRecovery key={`${taskId}/${connected}`} taskId={taskId} connected={connected} onRequest={() => {request.current?.controller.abort(); request.current = null; setPending(false); clearInspection(); setError('');}} onInspect={() => void inspect()} />}
+    <p role="status" aria-live="polite">{recoveryNotice}</p>
+    {recoveryTaskId && <div key={`${recoveryTaskId}/${connected}`} ref={attachRecovery}><WorkRecovery taskId={recoveryTaskId} connected={connected} onRequest={() => {request.current?.controller.abort(); request.current = null; setPending(false); clearInspection(); setError('');}} onInspect={() => void inspect()} /></div>}
     <WorkLoop navigation={loopRequest} taskId={taskId} connected={connected} inspected={!!inspection} />
     {inspection && <div ref={inspectedContent}>
       <p role="status">Confirmed local MCP inspection. External-client connection remains unverified.</p>

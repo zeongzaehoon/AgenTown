@@ -442,7 +442,7 @@ export function App() {
             {(selectedExcluded || !work) && <option value="" disabled>Select a matching request</option>}
             {matches.map(w => <option key={w.id} value={w.id}>{w.input.slice(0, 55)} — {workStatus(w)} · ID: {w.id}</option>)}
           </select>
-          <WorkInspection skillRequest={skillRequest?.taskId === selected ? skillRequest : null} hookRequest={hookRequest?.taskId === selected ? hookRequest : null} loopRequest={loopRequest?.taskId === selected ? loopRequest : null} taskId={selected || null} connected={connected} />
+          <WorkInspection skillRequest={skillRequest?.taskId === selected ? skillRequest : null} hookRequest={hookRequest?.taskId === selected ? hookRequest : null} loopRequest={loopRequest?.taskId === selected ? loopRequest : null} taskId={selected || null} recoveryAvailable={!!work} connected={connected} />
           <WorkHandoff taskId={work?.id ?? null} connected={connected} />
           <div id="detail">{work && <>
             <h3>Saved work</h3><p>Work ID: {work.id}</p><p className="badge">{workStatus(work)}</p><pre>{work.input}</pre>
