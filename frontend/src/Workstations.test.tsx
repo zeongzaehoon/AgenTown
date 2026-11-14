@@ -63,7 +63,8 @@ test('App workstation keyboard navigation selects all clients, focuses setup and
   expect((screen.getByLabelText('Saved work') as HTMLSelectElement).value).toBe('previous');
   recorded.focus(); await user.keyboard('{Enter}');
   expect((screen.getByLabelText('Saved work') as HTMLSelectElement).value).toBe('recorded');
-  expect(document.activeElement).toBe(screen.getByLabelText('Saved work'));
+  expect(document.activeElement).toBe(screen.getByText(/Recorded attempt unavailable in the current workspace snapshot/));
+  expect(screen.getByText(/No other attempt was selected/)).toBeTruthy();
   expect((screen.getByLabelText('What would you like help with?') as HTMLTextAreaElement).value).toBe('Work draft');
   expect((screen.getByLabelText('Instructions') as HTMLTextAreaElement).value).toBe('Configuration draft');
   expect(fetcher.mock.calls.filter(([path]) => path === '/api/connections/v1')).toHaveLength(1);

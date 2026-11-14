@@ -24,7 +24,7 @@ test('explicit keyboard loading presents separate records, retains focus and onl
   expect(screen.getByText('Declared source (untrusted): codex')).toBeTruthy();
   expect(open).not.toHaveBeenCalled();
   const link = screen.getByRole('button', {name: /Open saved Task/});
-  link.focus(); await user.keyboard('{Enter}'); expect(open).toHaveBeenCalledWith('saved');
+  link.focus(); await user.keyboard('{Enter}'); expect(open).toHaveBeenCalledWith({taskId: 'saved', runId: 'run-1'});
   view.rerender(<ConnectionActivity clientId="cursor" connected savedTaskIds={['saved']} onOpenRecordedTask={open} />);
   expect(screen.getByText(/No recorded activity for this declared client/)).toBeTruthy();
   expect(fetcher).toHaveBeenCalledTimes(1);

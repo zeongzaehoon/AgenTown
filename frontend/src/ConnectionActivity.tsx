@@ -23,9 +23,10 @@ export function isActivity(v: unknown): v is Activity {
     a.integration === (clients.includes(a.declared_source as string) ? a.declared_source : null)) &&
     new Set(v.attempts.map(a => a.run_id)).size === v.attempts.length;
 }
+export interface RecordedAttemptNavigation { taskId: string; runId: string }
 export interface ActivityNavigation {
   savedTaskIds?: string[];
-  onOpenRecordedTask?: (id: string) => void;
+  onOpenRecordedTask?: (request: RecordedAttemptNavigation) => void;
 }
 export function ConnectionActivity({clientId, connected, savedTaskIds = [], onOpenRecordedTask}: ActivityNavigation & {clientId: string; connected: boolean}) {
   const [data, setData] = useState<Activity | null>(null);
@@ -75,7 +76,7 @@ export function ConnectionActivity({clientId, connected, savedTaskIds = [], onOp
       <p>Recorded state: {a.state}. Recorded outcome: {a.outcome ?? 'Not recorded'}.</p>
       <p>Declared source (untrusted): {a.declared_source ?? 'Not recorded'}</p>
       <p>Recorded timestamps (Unix milliseconds): started {a.started_at}; ended {a.ended_at ?? 'Not recorded'}.</p>
-      <button type="button" aria-disabled={!canOpen} onClick={() => { if (canOpen) onOpenRecordedTask?.(a.task_id); }}>Open saved Task: {a.task_id} · Run: {a.run_id}</button>
+      <button type="button" aria-disabled={!canOpen} onClick={() => { if (canOpen) onOpenRecordedTask?.({taskId: a.task_id, runId: a.run_id}); }}>Open saved Task: {a.task_id} · Run: {a.run_id}</button>
       {!canOpen && <p>{!connected ? 'Reconnect before opening saved work.' : 'Saved Task unavailable in the current workspace. It may have been removed; refresh the workspace to inspect again.'}</p>}
     </li>;
   }

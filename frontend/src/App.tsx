@@ -1,3 +1,4 @@
+import type { RecordedAttemptNavigation } from './ConnectionActivity';
 import type { SkillNavigation } from './SkillBooks';
 import type { HookNavigation } from './HookDevices';
 import type { LoopNavigation } from './OverviewLoops';
@@ -28,9 +29,13 @@ function RecordedTime({ value }: { value: number | null | undefined }) {
   return <time dateTime={iso}>{iso.slice(0, 10)} {iso.slice(11, 23)} UTC</time>;
 }
 
-function AttemptResult({ attempt, work, number, latest }: {attempt: Attempt; work: Work; number: number; latest: boolean}) {
+function AttemptResult({ attempt, work, number, latest, navigation }: {attempt: Attempt; work: Work; number: number; latest: boolean; navigation: RecordedAttemptNavigation | null}) {
   // Keep an expanded historical result expanded across polling updates.
   const [open, setOpen] = useState(latest);
+  const summary = useRef<HTMLElement>(null);
+  useLayoutEffect(() => {
+    if (navigation) { setOpen(true); summary.current?.focus(); }
+  }, [navigation]);
   const [feedback, setFeedback] = useState('');
   const copying = useRef(false);
   async function copy() {
@@ -62,7 +67,7 @@ function AttemptResult({ attempt, work, number, latest }: {attempt: Attempt; wor
     }
   }
   return <details data-attempt-id={attempt.id} open={open} onToggle={event => setOpen(event.currentTarget.open)}>
-    <summary>Attempt {number} · {attempt.output != null ? 'Result available · Unverified' : attempt.error === 'output_limit' ? 'Failed — response reached the output limit' : attempt.error || attempt.state}</summary>
+    <summary ref={summary}>{navigation && 'Selected recorded attempt · '}Attempt {number} · {attempt.output != null ? 'Result available · Unverified' : attempt.error === 'output_limit' ? 'Failed — response reached the output limit' : attempt.error || attempt.state}</summary>
     <p>{['anthropic', 'openai', 'bedrock', 'xai'].includes(attempt.provider || '') ? (attempt.output != null ? 'Real provider response' : 'Real provider request') : attempt.provider ? 'Test response — not live validation' : 'Caller-reported attempt — no provider request'} · {attempt.model || 'No model'}</p>
     <p>Caller-declared source (unverified): {attempt.declared_source ?? 'Unknown / not recorded'}</p>
     <p>This caller-declared attribution does not establish authenticated identity, Loop ownership or provider verification.</p>
@@ -126,6 +131,8 @@ export function App() {
   const creationBlocked = useRef(false);
   const recoveryVersion = useRef(0);
   const [selected, setSelected] = useState('');
+  const [recordedRequest, setRecordedRequest] = useState<RecordedAttemptNavigation | null>(null);
+  const unavailableAttempt = useRef<HTMLParagraphElement>(null);
   const [search, setSearch] = useState('');
   const [clientRequest, setClientRequest] = useState<OpenClientRequest | null>(null);
   const [teamRequest, setTeamRequest] = useState<{id: string} | null>(null);
@@ -164,6 +171,11 @@ export function App() {
   const mutations = useRef(new Set<AbortController>());
   const work = state?.work.find(w => w.id === selected);
   const matches = state?.work.filter(w => (!viewEmployee || w.assignees.includes(viewEmployee)) && w.input.toLowerCase().includes(search.toLowerCase()) && (outcome === 'all' || classifyWork(w).outcome === outcome)) ?? [];
+  const recordedTarget = recordedRequest?.taskId === selected ? recordedRequest : null;
+  const recordedUnavailable = !!recordedTarget && !work?.attempts.some(a => a.id === recordedTarget.runId);
+  useLayoutEffect(() => {
+    if (recordedUnavailable) unavailableAttempt.current?.focus();
+  }, [recordedRequest, recordedUnavailable]);
   const selectedExcluded = !!work && !matches.some(w => w.id === work.id);
   const assignee = employee === null ? state?.employees[0]?.id ?? '' : state?.employees.some(e => e.id === employee) ? employee : '';
 
@@ -374,7 +386,8 @@ export function App() {
         setEmployee(id);
         inputRef.current?.focus();
       }} onOpenEmployeeOutcome={({employeeId, outcome}) => { setViewEmployee(employeeId); setOutcome(outcome); setSearch(''); workHeadingRef.current?.focus(); }} onOpenFailedWork={employeeId => { setViewEmployee(employeeId); setOutcome('failed'); setSearch(''); workHeadingRef.current?.focus(); }} onOpenSkillWork={request => { setSkillRequest({...request}); setHookRequest(null); setLoopRequest(null); setViewEmployee(''); setSearch(''); setOutcome('all'); setSelected(request.taskId); }} onOpenHookWork={request => { setSkillRequest(null); setHookRequest({...request}); setLoopRequest(null); setViewEmployee(''); setSearch(''); setOutcome('all'); setSelected(request.taskId); }} onOpenSession={request => { setHookRequest(null); setSkillRequest(null); setLoopRequest({...request}); setViewEmployee(''); setSearch(''); setOutcome('all'); setSelected(request.taskId); }} onSelectTeamMember={id => { setViewEmployee(id); setSearch(''); setOutcome('all'); searchRef.current?.focus(); }} onOpenTeam={id => setTeamRequest({id})} onOpenClient={id => setClientRequest({id})} onOpenSkill={id => setConfigurationRequest({kind: 'skills', id})} onOpenHook={id => setConfigurationRequest({kind: 'hooks', id})} onOpenLoop={id => setConfigurationRequest({kind: 'loops', id})} workspace={state} connected={connected} error={connectionError} selectedEmployee={viewEmployee} onSelectEmployee={id => { setViewEmployee(id); setSearch(''); setOutcome('all'); workHeadingRef.current?.focus(); }} onOpenWork={id => {
-        setSkillRequest(null); setHookRequest(null); setLoopRequest(null); setViewEmployee(''); setSearch(''); setOutcome('all'); setSelected(id); historyRef.current?.focus();
+        setSkillRequest(null); setHookRequest(null); setLoopRequest(null); setViewEmployee(''); setSearch(''); setOutcome('all'); setSelected(id);
+        setRecordedRequest(null); historyRef.current?.focus();
       }} />
       <Teams openTeam={teamRequest} workspace={state} connected={connected} onSelectEmployee={id => {
         setViewEmployee(id); setSearch(''); setOutcome('all'); searchRef.current?.focus();
@@ -452,6 +465,7 @@ export function App() {
           </select>
           <WorkInspection skillRequest={skillRequest?.taskId === selected ? skillRequest : null} hookRequest={hookRequest?.taskId === selected ? hookRequest : null} loopRequest={loopRequest?.taskId === selected ? loopRequest : null} taskId={selected || null} recoveryAvailable={!!work} connected={connected} />
           <WorkHandoff taskId={work?.id ?? null} connected={connected} />
+          <p ref={unavailableAttempt} tabIndex={-1} role="status">{recordedUnavailable && `Recorded attempt unavailable in the current workspace snapshot. Task: ${recordedTarget?.taskId} · Run: ${recordedTarget?.runId}. No other attempt was selected. Refresh the workspace to inspect again; nothing was executed or retried.`}</p>
           <div id="detail">{work && <>
             <h3>Saved work</h3><p>Work ID: {work.id}</p><p className="badge">{workStatus(work)}</p><pre>{work.input}</pre>
             <p>Assigned to: {work.assignees.map(id => state?.employees.find(e => e.id === id)?.name || id).join(', ') || 'No employee assigned'}</p>
@@ -503,15 +517,16 @@ export function App() {
               </div>
             </section>}
             {!!work.attempts.length && <p>A retry sends the saved text again and creates a separate attempt. Previous results stay in history.</p>}
-            {[...work.attempts].reverse().map((attempt, i) => <AttemptResult key={`${work.id}/${attempt.id}`} attempt={attempt} work={work} number={work.attempts.length - i} latest={i === 0} />)}
+            {[...work.attempts].reverse().map((attempt, i) => <AttemptResult key={`${work.id}/${attempt.id}`} attempt={attempt} work={work} number={work.attempts.length - i} latest={i === 0} navigation={recordedTarget?.runId === attempt.id ? recordedTarget : null} />)}
           </>}</div>
         </section></div>
       <footer>Responses are unverified. Read and check the full result before using it.</footer>
       <Configuration connected={connected} workspace={state} openRecord={configurationRequest} />
-      <Connections openClient={clientRequest} workspaceConnected={connected} savedTaskIds={state?.work.map(w => w.id)} onOpenRecordedTask={id => {
-        if (!connected || !state?.work.some(w => w.id === id)) return;
+      <Connections openClient={clientRequest} workspaceConnected={connected} savedTaskIds={state?.work.map(w => w.id)} onOpenRecordedTask={request => {
+        if (!connected || !state?.work.some(w => w.id === request.taskId)) return;
+        setRecordedRequest({...request});
         setSkillRequest(null); setHookRequest(null); setLoopRequest(null);
-        setViewEmployee(''); setSearch(''); setOutcome('all'); setSelected(id); historyRef.current?.focus();
+        setViewEmployee(''); setSearch(''); setOutcome('all'); setSelected(request.taskId);
       }} />
     </main>
   </>;

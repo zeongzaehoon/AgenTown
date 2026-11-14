@@ -4790,7 +4790,11 @@ separately and are never attributed to that client.
 Each entry shows Task and Run identity, recorded state/outcome, declared source
 and stored timestamps. A reported success does not establish quality approval,
 authenticated identity or a current client connection. **Open saved Task** selects
-the existing saved-work inspector and focuses its picker. Work/configuration
+the existing saved-work inspector, expands the exact Run, marks it **Selected
+recorded attempt**, and focuses its summary. Reopening the same record restores
+expansion and focus. A Run absent from the workspace snapshot produces a focused
+**Recorded attempt unavailable** observation with both IDs; no other attempt is
+selected as a substitute. Work/configuration
 drafts survive both loading and navigation; selected work changes only when the
 user explicitly opens a Task. Missing Tasks cannot be opened; refresh the workspace
 rather than resubmitting work. The activity endpoint itself never reconciles Runs;
@@ -4798,9 +4802,56 @@ subsequent existing work inspection retains its usual behavior.
 
 Keyboard exercise: Tab to Load recorded activity and press Enter; focus stays on
 the control through loading. Tab to an available Open saved Task and press Enter;
-focus moves to Saved work. Check an empty database, an unavailable API, and a
+focus moves to the matching attempt summary. Check an empty database, an unavailable API, and a
 workspace disconnect during loading. Previous observations remain marked stale;
 reconnection does not repeat reads. Only another explicit load refreshes activity.
 Switching clients does not replay a request or change selected work. React tests
 cover these deterministic states; supervisor browser validation remains pending
 for C124-T2. Live LLM calls are skipped, not passed.
+
+
+### Exact recorded-attempt navigation (C125-T1)
+
+With the product Python environment activated and native bindings available, create
+an isolated deterministic database (no provider requests):
+
+```sh
+python - <<'PYFIXTURE'
+import tempfile
+from pathlib import Path
+from llm_engine import _native
+p = str(Path(tempfile.mkdtemp(prefix="agentown-exact-attempt-")) / "fixture.sqlite")
+employee = _native.create_agent(p, "Fixture writer")[0]
+task = _native.create_assigned_work(p, "Inspect two recorded results", employee)[0]
+for index in range(2):
+    run = _native.start_mcp_execution(p, task, "deterministic-test", "fixture", index, index > 0, "codex")
+    _native.finish_execution(p, run[0], f"Deterministic recorded result {index + 1}", None)
+    print("Task:", task, "Run:", run[0])
+print("Database:", p)
+PYFIXTURE
+agentown-web --database /absolute/path/printed/above/fixture.sqlite --port 8765
+```
+
+1. Open http://127.0.0.1:8765. Enter an unsaved work draft, then open the
+   Codex workstation in Company (or Open connections and select Codex).
+2. Choose Load recorded activity. Keyboard-activate Open saved Task for the
+   first Run printed above. Saved work must show Attempt 1 expanded, its exact
+   ID and first result, the Selected recorded attempt marker, and focus on its
+   summary. The second attempt must not receive the marker. Source attribution
+   remains unverified and fixture results do not prove live validation.
+3. Collapse Attempt 1 and activate the same activity entry again. It must expand
+   and receive focus again. The unsaved draft must remain unchanged. Neither
+   navigation sends an execute or retry request.
+   Use Tab and Shift+Tab to reach both attempt summaries, and Enter to toggle
+   each disclosure. Exact-Run focus must preserve ordinary keyboard access.
+4. Stop the server and choose Refresh connection. Activity navigation must become
+   unavailable; activating a retained record must not change selection or send
+   work. Restarting the server does not replay activity loading or execution.
+
+The interaction test `frontend/src/recorded-attempt-navigation.test.tsx` also
+supplies an activity Run missing from the saved workspace snapshot and checks
+its explicit unavailable observation and focus, without falling back to another
+Run. Run it with `cd frontend && npx vitest run src/recorded-attempt-navigation.test.tsx
+src/ConnectionActivity.test.tsx` when frontend dependencies are installed.
+Supervisor checks and browser validation are pending for this invocation; live
+provider calls remain skipped, not passed.
