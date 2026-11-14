@@ -63,6 +63,7 @@ test('recovers saved active sessions and keeps emergency stop available when exe
   expect((stop as HTMLButtonElement).disabled).toBe(true);
   expect(screen.getAllByRole('status')[0].textContent).toMatch(/stale/);
   view.rerender(<LoopExecution {...f.props} disabled connected />);
+  await userEvent.setup().click(screen.getByRole('button', {name: 'Refresh Loop session records'}));
   await userEvent.setup().click(stop);
   expect(f.props.submit).toHaveBeenCalledWith('/api/loops/v1/stop', {session_id: 'session'}, true);
 });
@@ -73,6 +74,20 @@ test('waiting requires actual finished attempt evidence; missing records stay ac
   const s = {...session, admitted: 1};
   expect(loopLabel(s, [])).toMatch(/^Active/);
   expect(loopLabel(s, [{session_id: 'session', run_id: 'r', ordinal: 1, execution: {id: 'r', state: 'finished', outcome: 'reported_success', participants: ['e']}}])).toMatch(/^Waiting/);
+});
+test('initial connection reads Loop availability without waiting for polling or submitting work', async () => {
+  const realInterval = globalThis.setInterval;
+  const timer = vi.spyOn(globalThis, 'setInterval').mockImplementation((callback, delay, ...args) =>
+    delay === 800 ? 0 as unknown as ReturnType<typeof setInterval> : realInterval(callback, delay, ...args));
+  try {
+    const f = setup();
+    const view = render(<LoopExecution {...f.props} connected={false} />);
+    expect(f.fetcher).not.toHaveBeenCalled();
+    view.rerender(<LoopExecution {...f.props} connected />);
+    await waitFor(() => expect(f.props.availability).toHaveBeenLastCalledWith(false));
+    expect(screen.getByLabelText('Loop inspection').textContent).toMatch(/Configured Loops/);
+    expect(f.props.submit).not.toHaveBeenCalled();
+  } finally { timer.mockRestore(); }
 });
 test('polling recovers disconnected inspection without resubmitting consent', async () => {
   vi.useFakeTimers();
@@ -411,4 +426,72 @@ test.each(['cancel', 'escape'])('saved-work Loop %s clears consent locally and r
     expect(fetcher.mock.calls).toHaveLength(requests + 1);
     expect(props.submit).not.toHaveBeenCalled();
   } finally { interval.mockRestore(); }
+});
+
+
+test.each(['prior refresh', 'held refresh', 'held poll', 'held confirmation'])('reconnect rejects %s for recovery consent while preserving emergency Stop', async scenario => {
+  let poll = () => {};
+  const realInterval = globalThis.setInterval;
+  const timer = vi.spyOn(globalThis, 'setInterval').mockImplementation((callback, delay, ...args) => {
+    if (delay === 800) { poll = callback as () => void; return 1 as unknown as ReturnType<typeof setInterval>; }
+    return realInterval(callback, delay, ...args);
+  });
+  try {
+    const f = setup();
+    f.data.sessions = [{...session, state: 'stopped'}];
+    let hold = false;
+    let release!: (value: Response) => void;
+    const original = globalThis.fetch;
+    vi.stubGlobal('fetch', (path: string, options: RequestInit) => hold && path === '/api/loops/v1'
+      ? new Promise<Response>(resolve => { release = resolve; }) : original(path, options));
+    const submit = vi.fn(async (path: string) => path.endsWith('/start')
+      ? scenario === 'held confirmation' ? {...session, schema_version: 1, started_at: 0, expires_at: 1} : null
+      : {...session, state: 'stopped', schema_version: 1, started_at: 0, expires_at: 1});
+    const view = render(<LoopExecution {...f.props} submit={submit} />);
+    const start = await inspect();
+    hold = scenario === 'held confirmation';
+    await act(async () => start.click());
+    const refresh = screen.getByRole('button', {name: 'Refresh Loop session records'});
+    const acknowledge = () => screen.getByRole('button', {name: 'I inspected refreshed Loop records'}) as HTMLButtonElement;
+    if (scenario === 'prior refresh') {
+      await userEvent.setup().click(refresh);
+      expect(acknowledge().disabled).toBe(false);
+    } else if (scenario !== 'held confirmation') {
+      hold = true;
+      if (scenario === 'held refresh') await userEvent.setup().click(refresh);
+      else await act(async () => poll());
+    }
+    view.rerender(<LoopExecution {...f.props} submit={submit} connected={false} />);
+    expect(acknowledge().disabled).toBe(true);
+    view.rerender(<LoopExecution {...f.props} submit={submit} connected />);
+    if (scenario !== 'prior refresh') {
+      await act(async () => release(new Response(JSON.stringify({...f.data, sessions: [session]}))));
+      expect(screen.getByRole('region', {name: 'Loop session session'}).textContent).toMatch(/Stopped/);
+    }
+    expect(acknowledge().disabled).toBe(true);
+    expect(screen.getByText('Retained session and attempt records are stale. Refresh on the current connection to inspect them.')).toBeTruthy();
+    expect(screen.getByLabelText('Loop inspection').textContent).toMatch(/stale/);
+    hold = false;
+    f.data.sessions = [session];
+    await act(async () => poll());
+    expect(screen.getByText('Session and attempt records observed on the current connection.')).toBeTruthy();
+    expect(acknowledge().disabled).toBe(true);
+    const stop = screen.getByRole('button', {name: 'Stop Loop session'}) as HTMLButtonElement;
+    expect(stop.disabled).toBe(false);
+    expect(submit).toHaveBeenCalledTimes(1);
+    // Emergency control is independent of uncertain-start acknowledgment.
+    f.data.sessions = [{...session, state: 'stopped'}];
+    await act(async () => stop.click());
+    expect(submit).toHaveBeenCalledTimes(2);
+    expect(submit).toHaveBeenLastCalledWith('/api/loops/v1/stop', {session_id: 'session'}, true);
+    expect(acknowledge().disabled).toBe(true);
+    await userEvent.setup().click(refresh);
+    expect(acknowledge().disabled).toBe(false);
+    acknowledge().focus();
+    await userEvent.setup().keyboard('{Enter}');
+    expect(screen.queryByRole('button', {name: 'I inspected refreshed Loop records'})).toBeNull();
+    expect((screen.getByRole('button', {name: 'Preview Loop with saved work'}) as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.queryByRole('button', {name: 'Authorize and start bounded Loop'})).toBeNull();
+    expect(submit).toHaveBeenCalledTimes(2);
+  } finally { timer.mockRestore(); }
 });

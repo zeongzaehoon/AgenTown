@@ -3702,3 +3702,39 @@ test files and 1,092 tests, the production build, 505 Python tests with 2
 skipped, and the harness Rust and operational suites. The selected frontend
 profile deferred installed-browser and installation/process-recovery gates.
 Live provider calls are skipped, not passed.
+
+### Saved-work bounded Loop recovery on the current connection (C102-T1)
+
+Launch `agentown-web --database PATH --port 8765` with an existing product
+database, open <http://127.0.0.1:8765>, select saved work, and expand **Run a
+bounded Loop**. Existing session and attempt evidence remains readable offline.
+Disconnect and reconnect the service using the same database: the retained records
+stay visibly stale until a successful read on the current connection. Polling can
+refresh observations and restore emergency **Stop Loop …** with current authority;
+it cannot acknowledge an uncertain start or replay a request.
+
+For an uncertain start, choose **Refresh Loop session records**, inspect the
+sessions and attempts, then choose **I inspected refreshed Loop records**. A
+refresh completed before disconnection cannot authorize acknowledgment after
+reconnect. A read started before a connection transition is discarded even if its
+response arrives afterward. Refresh explicitly again on the current connection.
+Acknowledgment clears recovery only; starting requires a new preview and consent.
+Stop remains available during uncertain-start recovery after a current authority
+read, including when ordinary execution is disabled. Ownership checks still apply.
+The initial connection reads Loop availability without waiting for polling. Loop
+freshness gates Loop actions; ordinary execution retains its separate connection
+and execution-history acknowledgment flow.
+
+Deterministic deferred-response interactions:
+`cd frontend && npm test -- src/LoopExecution.test.tsx`.
+These cover prior refreshes, held explicit/poll/confirmation responses across
+reconnect, retained records, polling-only recovery, fresh keyboard acknowledgment,
+and emergency Stop without replay. Use fixtures for uncertain delivery; live
+provider calls remain skipped. Supervisor full-profile verification passed all
+32 frontend test files and 1,097 tests, the production build, 508 Python tests
+with 2 skipped, the Rust product and desktop checks, and 2 installed-browser and
+process-recovery checks.
+
+Integration validation: TypeScript checking and all 109 tests in
+`LoopExecution.test.tsx` and `execution-receipt.test.tsx` passed in a temporary
+source copy using existing frontend dependencies. No live provider was called.

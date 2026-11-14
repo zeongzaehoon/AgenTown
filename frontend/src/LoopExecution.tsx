@@ -34,12 +34,20 @@ export function LoopExecution({work, workspace, connected, draft, disabled, avai
   const [policies, setPolicies] = useState<Policy[]>([]);
   const [inspection, setInspection] = useState<LoopInspection | null>(null);
   const [available, setAvailable] = useState(false);
+  const connection = useRef({connected, generation: 0});
+  if (connection.current.connected !== connected) {
+    connection.current = {connected, generation: connection.current.generation + 1};
+  }
+  const [observedConnection, setObservedConnection] = useState(-1);
+  const fresh = connected && observedConnection === connection.current.generation;
+
   const [control, setControl] = useState<LoopControl | null>(null);
   const inspectedAt = useRef(0);
-  const authority = available && Date.now() - inspectedAt.current < 2400 && canControl(control);
+  const authority = fresh && available && Date.now() - inspectedAt.current < 2400 && canControl(control);
   const [recovery, setRecovery] = useState(false);
-  const [recoveryRead, setRecoveryRead] = useState(false);
+  const [recoveryRead, setRecoveryRead] = useState<number | null>(null);
   const refresh = useRef<() => void>(() => {});
+  const observe = useRef<() => void>(() => {});
   const [selected, setSelected] = useState('');
   const [preview, setPreview] = useState<{value: LoopPreview; snapshot: string} | null>(null);
   const [busy, setBusy] = useState(false);
@@ -68,9 +76,10 @@ export function LoopExecution({work, workspace, connected, draft, disabled, avai
     let pending = false;
     const controller = new AbortController();
     async function load(explicit = false) {
-      if (pending || lock.current) return;
+      if (pending || lock.current || !connection.current.connected) return;
       pending = true;
       const generation = epoch.current;
+      const connectionGeneration = connection.current.generation;
       try {
         const [config, state] = await Promise.all([
           configurationRequest<unknown>('loops', '', undefined, controller.signal),
@@ -78,15 +87,23 @@ export function LoopExecution({work, workspace, connected, draft, disabled, avai
         ]);
         const saved = savedLoopPolicies(config);
         const inspected = loopInspection(state);
-        if (live && generation === epoch.current) { inspectedAt.current = Date.now(); if (explicit) setRecoveryRead(true); setPolicies(saved); setInspection(inspected); setControl(inspected.control ?? null); setAvailable(true); }
-      } catch (error) { if (live && generation === epoch.current) { setAvailable(false); setControl(error instanceof ApiError ? error.control ?? null : null); } }
+        if (live && generation === epoch.current && connection.current.connected && connectionGeneration === connection.current.generation) { inspectedAt.current = Date.now(); setObservedConnection(connectionGeneration); if (explicit) setRecoveryRead(connectionGeneration); setPolicies(saved); setInspection(inspected); setControl(inspected.control ?? null); setAvailable(true); }
+      } catch (error) { if (live && generation === epoch.current && connection.current.connected && connectionGeneration === connection.current.generation) { setAvailable(false); setControl(error instanceof ApiError ? error.control ?? null : null); } }
       finally { pending = false; }
     }
-    refresh.current = () => { setRecoveryRead(false); void load(true); };
+    refresh.current = () => { setRecoveryRead(null); void load(true); };
+    observe.current = () => { void load(); };
     void load();
     const timer = setInterval(() => void load(), 800);
     return () => { live = false; controller.abort(); clearInterval(timer); };
   }, []);
+  useEffect(() => {
+    // App mounts disconnected. Obtain its first observation once connected,
+    // even if the polling interval has not fired; this grants no recovery consent.
+    if (connected && !inspection) observe.current();
+  }, [connected, inspection]);
+  // Loop observation freshness gates Loop controls, not ordinary execution's
+  // separate connection/history inspection acknowledgment.
   useEffect(() => { availability(!available || active || recovery); }, [availability, available, active, recovery]);
   useLayoutEffect(() => {
     if (preview && !valid) {
@@ -114,8 +131,9 @@ export function LoopExecution({work, workspace, connected, draft, disabled, avai
   }
   async function send(path: string, payload: object, expected: LoopPreview | LoopSession, emergency = false) {
     if (lock.current || (!emergency && recovery) || !connected || !authority || Date.now() - inspectedAt.current >= 2400) return;
+    const connectionGeneration = connection.current.generation;
     lock.current = true; ++epoch.current; setBusy(true); setPreview(null); setAvailable(false);
-    if (!emergency) { setRecovery(true); setRecoveryRead(false); }
+    if (!emergency) { setRecovery(true); setRecoveryRead(null); }
     setMessage('Request submitted. Awaiting receipt and saved-state confirmation.');
     region.current?.focus();
     try {
@@ -123,6 +141,8 @@ export function LoopExecution({work, workspace, connected, draft, disabled, avai
         'session_id' in expected ? expected.provider : workspace.provider, 'session_id' in expected ? expected.model : workspace.model);
       setMessage('Loop response received. Confirming saved session state…');
       const saved = confirmedLoop(await api<unknown>('/api/loops/v1', {}, undefined, 'GET'), receipt, emergency ? 'stop' : 'start');
+      if (!connection.current.connected || connectionGeneration !== connection.current.generation) throw new Error('Connection changed. Refresh records on the current connection.');
+      setObservedConnection(connectionGeneration);
       setInspection(saved); setControl(saved.control ?? null); inspectedAt.current = Date.now(); setAvailable(true);
       if (!emergency) setRecovery(false);
       setMessage(emergency ? 'Local stop acknowledged and saved stopped state confirmed. Remote completion may remain unknown.' : 'Loop admission acknowledged and saved session confirmed. Inspect records for progress.');
@@ -142,11 +162,11 @@ export function LoopExecution({work, workspace, connected, draft, disabled, avai
       {policies.map(p => <option key={p.id} value={p.id} disabled={!eligible(p)}>{p.name} · {p.id} · {!p.enabled ? 'Disabled' : p.task_id !== work.id ? 'Different work' : 'Configured'}</option>)}
     </select>
     <button ref={inspectButton} type="button" disabled={busy || recovery || disabled || active || !connected || !authority || !policies.some(p => p.id === selected && eligible(p))} onClick={() => void inspect()}>Preview Loop with saved work</button>
-    <p role="status" aria-label="Loop inspection" aria-live="polite">{!connected || !available ? 'Disconnected or Loop data unavailable. Loaded sessions may be stale; reconnect to inspect before submitting.' : 'Configured Loops require preview and explicit start.'}</p>
+    <p role="status" aria-label="Loop inspection" aria-live="polite">{!fresh || !available ? 'Disconnected or Loop data unavailable. Loaded sessions may be stale; reconnect to inspect before submitting.' : 'Configured Loops require preview and explicit start.'}</p>
     <button type="button" disabled={busy || !connected} onClick={() => refresh.current()}>Refresh Loop session records</button>
     {recovery && <div>
       <p role="status">Start outcome uncertain. Polling cannot release recovery. Refresh records, inspect sessions and attempts, then acknowledge inspection before a new preview. Nothing is replayed.</p>
-      <button type="button" disabled={busy || !recoveryRead || !available} onClick={() => { setRecovery(false); setRecoveryRead(false); setMessage('Refreshed records inspected. No request replayed. A new start requires a new preview and consent.'); }}>I inspected refreshed Loop records</button>
+      <button type="button" disabled={busy || !connected || !fresh || recoveryRead !== connection.current.generation || !available} onClick={() => { if (!connected || !fresh || recoveryRead !== connection.current.generation || !available) return; setRecovery(false); setRecoveryRead(null); setMessage('Refreshed records inspected. No request replayed. A new start requires a new preview and consent.'); }}>I inspected refreshed Loop records</button>
     </div>}
     <p role="status" aria-label="Loop request outcome">{message}</p>
     <p role="status">{controlText(control)}</p>
@@ -165,6 +185,7 @@ export function LoopExecution({work, workspace, connected, draft, disabled, avai
       }}>Authorize and start bounded Loop</button>
     </section>}
     <p>{inspection?.cancellation || 'Stop prevents new admissions and attempts local cancellation. Remote completion may remain unknown.'}</p>
+    {inspection && <p role="status">{fresh && available ? 'Session and attempt records observed on the current connection.' : 'Retained session and attempt records are stale. Refresh on the current connection to inspect them.'}</p>}
     <div aria-live="polite">{inspection?.sessions.filter(s => s.preview.task_id === work.id).map(s => <section key={s.session_id} aria-label={`Loop session ${s.session_id}`}>
       <h5>{s.preview.policy_name} · {s.session_id}</h5>
       <p>{sourceText(s.declared_source)}</p>
