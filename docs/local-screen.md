@@ -2716,8 +2716,26 @@ cd frontend
 ./node_modules/.bin/tsc --noEmit
 ```
 
-Supervisor-selected consolidated checks and browser validation remain pending.
-Live provider validation is skipped, not passed; external connectivity is unverified.
+Keyboard recovery exercise (C113-T1): choose **Show manual handoff**, then Tab
+into **Manual read-only MCP handoff**. While focus remains in that textarea,
+refresh history after removing the selected work in another local window, or
+stop the local server and wait for the workspace to report disconnection.
+Focus must move to **Share selected work with an MCP client**, and the polite
+status must announce that the previous manual handoff is unavailable. Tab
+continues to the next available control. Reconnect/refresh and select saved work:
+the textarea stays closed until you explicitly choose **Show manual handoff**.
+Repeat with focus on a control outside the handoff; that focus must stay put.
+Changing the selected Task also invalidates the manual handoff. Ordinary selection
+clicks retain focus on the selection control; the deterministic tests above cover
+a selection update while the textarea itself retains focus. They also hold and
+resolve/reject clipboard promises across each invalidation and verify zero
+network requests. These tests require no credentials or external MCP client.
+
+Supervisor frontend-profile verification passed all 19 WorkHandoff tests and
+1,187 frontend tests, TypeScript checking, the production build, and 505 Python
+tests with 2 skipped. Installed-browser and installation/process-recovery gates
+were deferred by this profile. Live provider validation is skipped, not passed;
+external connectivity is unverified.
 
 ### Ordinary-text readiness in selected-work inspection (C72-T1)
 

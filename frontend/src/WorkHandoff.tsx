@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 
 export function workHandoff(taskId: string): string {
   return [
@@ -20,9 +20,21 @@ export function WorkHandoff({taskId, connected}: {taskId: string | null; connect
   const [manual, setManual] = useState(false);
   const generation = useRef(0);
   const copying = useRef(false);
+  const destination = useRef<HTMLHeadingElement>(null);
+  const manualField = useRef<HTMLTextAreaElement | null>(null);
+  const removedFocus = useRef(false);
+  // Capture focus during ref detachment, before removal sends it to the body.
+  const attachManualField = useCallback((node: HTMLTextAreaElement | null) => {
+    if (!node && manualField.current === document.activeElement) removedFocus.current = true;
+    manualField.current = node;
+  }, []);
   useLayoutEffect(() => {
     generation.current++; copying.current = false;
-    setFeedback(''); setPending(false); setManual(false);
+    const recoverFocus = removedFocus.current || (manualField.current !== null && manualField.current === document.activeElement);
+    removedFocus.current = false;
+    setFeedback(manual ? 'The previous manual handoff is unavailable. Select available saved work and choose Show manual handoff to open it again.' : '');
+    setPending(false); setManual(false);
+    if (recoverFocus) destination.current?.focus();
     return () => { generation.current++; };
   }, [taskId, connected]);
   const valid = connected && !!taskId;
@@ -45,7 +57,7 @@ export function WorkHandoff({taskId, connected}: {taskId: string | null; connect
     }
   }
   return <section aria-label="External MCP handoff">
-    <h3>Share selected work with an MCP client</h3>
+    <h3 ref={destination} tabIndex={-1}>Share selected work with an MCP client</h3>
     <p>Copy read-only inspection instructions for your external client. Copying makes no MCP or provider requests and does not configure or connect a client.</p>
     {!connected ? <p role="status">Workspace disconnected or stale. Refresh saved history before copying a handoff.</p>
       : !taskId ? <p role="status">Select available saved work before copying a handoff.</p> : <p>Handoff Task ID: {taskId}</p>}
@@ -53,7 +65,7 @@ export function WorkHandoff({taskId, connected}: {taskId: string | null; connect
     <button type="button" disabled={!valid || pending} onClick={() => setManual(true)}>Show manual handoff</button>
     <p role="status" aria-live="polite" aria-atomic="true">{feedback}</p>
     {valid && manual && <label>Manual read-only MCP handoff
-      <textarea readOnly rows={12} value={text} onFocus={event => event.currentTarget.select()} />
+      <textarea ref={attachManualField} readOnly rows={12} value={text} onFocus={event => event.currentTarget.select()} />
     </label>}
   </section>;
 }

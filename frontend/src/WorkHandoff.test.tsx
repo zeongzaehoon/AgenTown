@@ -89,3 +89,76 @@ test.each(['missing', 'disconnected'])('%s work removes manual text and invalida
   expect(screen.queryByRole('textbox')).toBeNull();
   expect(fetcher).not.toHaveBeenCalled();
 });
+
+const handoffDestination = () => screen.getByRole('heading', {name: 'Share selected work with an MCP client'});
+const unavailableMessage = /The previous manual handoff is unavailable/;
+const invalidations = ['selection', 'missing', 'disconnected'] as const;
+function handoffScene(state: typeof invalidations[number] | 'initial') {
+  return <>
+    <WorkHandoff taskId={state === 'missing' ? null : state === 'selection' ? 'task-b' : 'task-a'} connected={state !== 'disconnected'} />
+    <button>Continue outside handoff</button>
+  </>;
+}
+
+test.each(invalidations)('%s recovers focused manual handoff and supports keyboard continuation', async state => {
+  const user = userEvent.setup();
+  const fetcher = vi.fn(); vi.stubGlobal('fetch', fetcher);
+  const write = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue();
+  const view = render(handoffScene('initial'));
+  await user.click(screen.getByRole('button', {name: 'Show manual handoff'}));
+  await user.tab();
+  expect(document.activeElement).toBe(screen.getByRole('textbox'));
+  view.rerender(handoffScene(state));
+  expect(screen.queryByRole('textbox')).toBeNull();
+  expect(document.activeElement).toBe(handoffDestination());
+  expect(screen.getByText(unavailableMessage).getAttribute('role')).toBe('status');
+  expect(screen.getByText(unavailableMessage).getAttribute('aria-live')).toBe('polite');
+  await user.tab();
+  expect(document.activeElement).toBe(state === 'selection' ? copyButton() : screen.getByRole('button', {name: 'Continue outside handoff'}));
+  view.rerender(handoffScene('initial'));
+  expect(screen.queryByRole('textbox')).toBeNull();
+  await user.click(screen.getByRole('button', {name: 'Show manual handoff'}));
+  expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe(expected('task-a'));
+  expect(write).not.toHaveBeenCalled();
+  expect(fetcher).not.toHaveBeenCalled();
+});
+
+test.each(invalidations)('%s preserves focus outside the removed manual content', async state => {
+  const user = userEvent.setup();
+  const fetcher = vi.fn(); vi.stubGlobal('fetch', fetcher);
+  const view = render(handoffScene('initial'));
+  await user.click(screen.getByRole('button', {name: 'Show manual handoff'}));
+  await user.tab();
+  expect(document.activeElement).toBe(screen.getByRole('textbox'));
+  await user.tab();
+  const outside = screen.getByRole('button', {name: 'Continue outside handoff'});
+  expect(document.activeElement).toBe(outside);
+  view.rerender(handoffScene(state));
+  expect(document.activeElement).toBe(outside);
+  expect(screen.queryByRole('textbox')).toBeNull();
+  expect(fetcher).not.toHaveBeenCalled();
+});
+
+test.each(invalidations.flatMap(state => (['resolve', 'reject'] as const).map(outcome => ({state, outcome}))))(
+  '$state recovery ignores late clipboard $outcome before explicit reopening', async ({state, outcome}) => {
+    const user = userEvent.setup();
+    const fetcher = vi.fn(); vi.stubGlobal('fetch', fetcher);
+    let resolve!: () => void; let reject!: (error: Error) => void;
+    const write = vi.spyOn(navigator.clipboard, 'writeText').mockImplementationOnce(() => new Promise<void>((yes, no) => {resolve = yes; reject = no;}));
+    const view = render(handoffScene('initial'));
+    await user.click(screen.getByRole('button', {name: 'Show manual handoff'}));
+    await user.click(copyButton());
+    await user.click(screen.getByRole('textbox'));
+    view.rerender(handoffScene(state));
+    expect(document.activeElement).toBe(handoffDestination());
+    expect(screen.getByText(unavailableMessage)).toBeTruthy();
+    view.rerender(handoffScene('initial'));
+    await act(async () => {if (outcome === 'resolve') resolve(); else reject(new Error('late denial'));});
+    expect(screen.queryByRole('textbox')).toBeNull();
+    expect(screen.queryByText(/Handoff copied|Could not copy|Copying selected/)).toBeNull();
+    await user.click(screen.getByRole('button', {name: 'Show manual handoff'}));
+    expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe(expected('task-a'));
+    expect(write).toHaveBeenCalledTimes(1);
+    expect(fetcher).not.toHaveBeenCalled();
+  },
+);
