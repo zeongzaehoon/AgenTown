@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { classifyWork, listTeams, type Team, type Workspace, type WorkOutcome } from './api';
 
 /** Membership is a persisted grouping, never an assignment or execution signal. */
@@ -10,6 +10,43 @@ export function TeamRooms({workspace, connected, selectedEmployee, onSelectEmplo
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState('');
   const [membershipFresh, setMembershipFresh] = useState(false);
+  const [announcement, setAnnouncement] = useState('');
+  const grid = useRef<HTMLDivElement>(null);
+  const refreshButton = useRef<HTMLButtonElement>(null);
+  const recoverFocus = useRef(false);
+  useLayoutEffect(() => {
+    if (!busy && recoverFocus.current) {
+      recoverFocus.current = false;
+      refreshButton.current?.focus();
+    }
+  }, [busy, teams]);
+  function acceptMembership(next: Team[]) {
+    const rooms = new Map(next.map(team => [team.id, team]));
+    let removedRooms = 0; let removedMembers = 0;
+    for (const room of Array.from(grid.current?.children ?? [])) {
+      const team = rooms.get(room.getAttribute('data-team-id')!);
+      if (!team) {
+        removedRooms++;
+        if (room.contains(document.activeElement)) recoverFocus.current = true;
+        continue;
+      }
+      for (const member of room.querySelectorAll<HTMLElement>('[data-member-id]')) {
+        if (!team.members.includes(member.dataset.memberId!)) {
+          removedMembers++;
+          if (member.contains(document.activeElement)) recoverFocus.current = true;
+        }
+      }
+      // Assignment cards can also disappear when their last room member leaves.
+      for (const card of room.querySelectorAll<HTMLElement>('[data-work-id]')) {
+        const work = workspace?.work.find(item => item.id === card.dataset.workId);
+        if (!work?.assignees.some(id => team.members.includes(id)) && card.contains(document.activeElement)) recoverFocus.current = true;
+      }
+    }
+    setAnnouncement(removedRooms || removedMembers
+      ? `Team rooms refreshed: ${removedRooms} room${removedRooms === 1 ? '' : 's'} and ${removedMembers} member${removedMembers === 1 ? '' : 's'} removed from this view. ${next.length ? 'Remaining team rooms are available below.' : 'No team rooms remain.'}`
+      : '');
+    setTeams(next);
+  }
   const connection = useRef(connected);
   const request = useRef<AbortController | null>(null);
   async function refresh() {
@@ -18,7 +55,7 @@ export function TeamRooms({workspace, connected, selectedEmployee, onSelectEmplo
     setBusy(true); setError('');
     try {
       const result = await listTeams(controller.signal);
-      if (!controller.signal.aborted) { setTeams(result.teams); setMembershipFresh(connected); }
+      if (!controller.signal.aborted) { acceptMembership(result.teams); setMembershipFresh(connected); }
     } catch (failure) {
       if (!controller.signal.aborted) { setError((failure as Error).message); setMembershipFresh(false); }
     } finally {
@@ -39,20 +76,21 @@ export function TeamRooms({workspace, connected, selectedEmployee, onSelectEmplo
     <p>Persistent teams group employees. Membership does not imply collaboration or execution. Member workload comes from recorded employee assignments, not team-owned work. Shared members and requests appear in each relevant room; counts must not be added across rooms.</p>
     <p role="status">{teams !== null && stale ? `Team rooms are stale — showing the last successful snapshot.${busy ? ' Refreshing team rooms…' : ' Refresh team rooms after reconnecting.'}` : !connected ? 'Disconnected — team rooms unavailable. Reconnect and refresh team rooms.' : busy ? 'Loading team rooms…' : teams === null ? 'Team rooms unavailable. Refresh to try again.' : teams.length ? 'Showing persisted team rooms.' : 'No team rooms yet. Create a team in Teams.'}</p>
     {error && <p role="alert">{error}</p>}
-    <button type="button" disabled={busy} onClick={() => void refresh()}>Refresh team rooms</button>
-    <div className="team-room-grid">{teams?.map(team => <section className="team-room" key={team.id} aria-label={`Team room: ${team.name} · ID: ${team.id}`}>
+    <p role="status" aria-label="Team room removals">{announcement}</p>
+    <button ref={refreshButton} type="button" disabled={busy} onClick={() => void refresh()}>Refresh team rooms</button>
+    <div ref={grid} className="team-room-grid">{teams?.map(team => <section className="team-room" key={team.id} data-team-id={team.id} aria-label={`Team room: ${team.name} · ID: ${team.id}`}>
       <h4>{team.name}</h4><p>Team ID: {team.id}</p>
       {(stale || busy) && <p>{stale ? 'Stale team snapshot' : 'Refreshing team snapshot'}</p>}
       <button type="button" disabled={!onOpenTeam} aria-controls="teams-panel" onClick={() => onOpenTeam?.(team.id)}>Manage team: {team.name} · ID: {team.id}</button>
       {!team.members.length && <p>No members yet.</p>}
       <div className="office-floor">{[...new Set(team.members)].map((id, index) => {
         const employee = workspace?.employees.find(item => item.id === id);
-        if (!workspace) return <p key={id}>Employee data unavailable · ID: {id}</p>;
-        if (!employee) return <p key={id}>Unavailable employee · ID: {id}</p>;
+        if (!workspace) return <p key={id} data-member-id={id}>Employee data unavailable · ID: {id}</p>;
+        if (!employee) return <p key={id} data-member-id={id}>Unavailable employee · ID: {id}</p>;
         const assigned = workspace.work.filter(work => work.assignees.includes(id));
         const counts: Record<WorkOutcome, number> = {pending: 0, active: 0, results: 0, failed: 0, other: 0};
         assigned.forEach(work => { counts[classifyWork(work).outcome]++; });
-        return <div className="office-desk" key={id}>
+        return <div className="office-desk" key={id} data-member-id={id}>
           <button type="button" className="office-character" disabled={!onSelectEmployee} aria-controls="employee-work"
             aria-pressed={selectedEmployee === id} aria-label={`Select team member: ${employee.name} · ID: ${id} · Team ID: ${team.id}`} onClick={() => onSelectEmployee?.(id)}>
             <span className={`character-body character-style-${index % 4}`} aria-hidden="true"><span className="character-head" /><span className="character-shirt" /></span>
@@ -70,7 +108,7 @@ export function TeamRooms({workspace, connected, selectedEmployee, onSelectEmplo
         return <>
           {!connected && <p>Stale member assignments — showing the last successful company snapshot.</p>}
           {!assigned.length ? <p>No saved work assigned to this room’s members.</p> : <ul className="room-work-cards" aria-label={`Member assignments · Team ID: ${team.id}`}>
-            {assigned.map(work => <li key={work.id}>
+            {assigned.map(work => <li key={work.id} data-work-id={work.id}>
               <button type="button" disabled={!onOpenWork} aria-controls="employee-work"
                 aria-label={`Open member assignment: ${work.input.slice(0, 55)} · Task ID: ${work.id} · Team ID: ${team.id}`}
                 onClick={() => onOpenWork?.(work.id)}>{work.input.slice(0, 120)} · Task ID: {work.id}</button>

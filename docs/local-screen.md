@@ -3904,3 +3904,55 @@ These checks require no provider credentials or live LLM calls. Supervisor
 periodic full-profile verification passed all 32 frontend test files and 1,135
 tests, the production build, 508 Python tests with 2 skipped, the Rust product
 and desktop checks, and 2 installed-browser and process-recovery checks.
+
+### Keyboard orientation after team-room removal
+
+Start `agentown-web --database PATH --port 8765`, then open
+`http://127.0.0.1:8765` → Company overview → Team rooms. For a reproducible
+read-only fixture, run this in the browser console (reload restores normal
+requests):
+
+```js
+window.originalTeamFetch = window.fetch.bind(window);
+window.teamRoomFixture = [
+  {id: 'keyboard-one', name: 'First room', members: []},
+  {id: 'keyboard-two', name: 'Second room', members: []},
+];
+window.fetch = (path, init) => path === '/api/teams'
+  ? Promise.resolve(Response.json({teams: window.teamRoomFixture}))
+  : window.originalTeamFetch(path, init);
+window.refreshTeamRooms = () => Array.from(document.querySelectorAll('button'))
+  .find(button => button.textContent === 'Refresh team rooms').click();
+window.refreshTeamRooms();
+```
+
+1. Tab to **Manage team: First room**. In the console set
+   `window.teamRoomFixture = window.teamRoomFixture.slice(1)` and call
+   `window.refreshTeamRooms()`. Focus returns to the enabled **Refresh team
+   rooms** button. The polite **Team room removals** status reports one room
+   removed. Repeat with `window.teamRoomFixture = []`: the status says no team
+   rooms remain, and the same focus destination stays available.
+2. To test member removal, restore a fixture room with `members` containing an
+   actual employee ID from your database. Refresh, focus its **Select team
+   member** button, then set that room's `members` to `[]` and refresh through
+   the console. Focus returns to **Refresh team rooms** and the status reports
+   the removed member. A focused assignment card that loses its last matching
+   room member uses the same destination.
+3. Restore both rooms. Repeat removal while focused on the surviving room or
+   outside Team rooms. Focus stays there; the removal is still announced.
+   Unchanged refreshes clear the removal message. Room/member identity, rather
+   than display name, determines removal. Existing read-only navigation and
+   work, team and configuration drafts remain intact.
+4. Failed or aborted requests retain the snapshot and focus without a removal
+   message. Deterministic tests also settle an old request after disconnect and
+   reconnect while a newer refresh is pending: it must neither announce a
+   removal nor move focus, change membership, or finish the newer refresh.
+
+Scoped check in a prepared checkout:
+`cd frontend && npm test -- src/TeamRooms.test.tsx`. This Task adds deterministic
+coverage for room/member/assignment removal, empty results, surviving/external
+focus and rejected responses. Supervisor verification passed all 32 frontend
+test files and 1,144 tests, the production build, 505 Python tests with 2
+skipped, and the harness Rust and operational suites. The selected frontend
+profile deferred installed-browser and installation/process-recovery gates.
+Live LLM calls remain skipped; these interactions require no provider credentials.

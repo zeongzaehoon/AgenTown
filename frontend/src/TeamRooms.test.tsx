@@ -180,22 +180,22 @@ test.each([{snapshot: teams}, {snapshot: [] as Team[]}])('retained membership st
   vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(resolve => pending.push({resolve}))));
   const props = {workspace, selectedEmployee: ''};
   const view = render(<TeamRooms {...props} connected={false} />);
-  expect(screen.getByRole('status').textContent).toContain('Disconnected');
+  expect(screen.getByRole('status', {name: ''}).textContent).toContain('Disconnected');
   await act(async () => pending[0].resolve(response({teams: snapshot})));
-  expect(screen.getByRole('status').textContent).toContain('Team rooms are stale');
+  expect(screen.getByRole('status', {name: ''}).textContent).toContain('Team rooms are stale');
   view.rerender(<TeamRooms {...props} connected />);
-  expect(screen.getByRole('status').textContent).toContain('Team rooms are stale');
+  expect(screen.getByRole('status', {name: ''}).textContent).toContain('Team rooms are stale');
   expect(screen.queryByText(/Stale member assignments/)).toBeNull();
   fireEvent.click(screen.getByRole('button', {name: 'Refresh team rooms'}));
-  expect(screen.getByRole('status').textContent).toContain('Team rooms are stale');
+  expect(screen.getByRole('status', {name: ''}).textContent).toContain('Team rooms are stale');
   await act(async () => pending[1].resolve(new Response('offline', {status: 503})));
-  expect(screen.getByRole('status').textContent).toContain('Team rooms are stale');
+  expect(screen.getByRole('status', {name: ''}).textContent).toContain('Team rooms are stale');
   fireEvent.click(screen.getByRole('button', {name: 'Refresh team rooms'}));
   await act(async () => pending[2].resolve(response({teams: snapshot})));
-  expect(screen.getByRole('status').textContent).toContain(snapshot.length ? 'Showing persisted team rooms.' : 'No team rooms yet.');
+  expect(screen.getByRole('status', {name: ''}).textContent).toContain(snapshot.length ? 'Showing persisted team rooms.' : 'No team rooms yet.');
   view.rerender(<TeamRooms {...props} connected={false} />);
   view.rerender(<TeamRooms {...props} connected />);
-  expect(screen.getByRole('status').textContent).toContain('Team rooms are stale');
+  expect(screen.getByRole('status', {name: ''}).textContent).toContain('Team rooms are stale');
 });
 
 test.each(['success', 'failure'])('obsolete pre-disconnect %s cannot replace membership or finish the current refresh', async outcome => {
@@ -207,7 +207,7 @@ test.each(['success', 'failure'])('obsolete pre-disconnect %s cannot replace mem
   await act(async () => pending[0].resolve(response({teams})));
   fireEvent.click(screen.getByRole('button', {name: 'Refresh team rooms'}));
   view.rerender(<TeamRooms {...props} connected={false} />);
-  expect(screen.getByRole('status').textContent).toContain('Team rooms are stale');
+  expect(screen.getByRole('status', {name: ''}).textContent).toContain('Team rooms are stale');
   view.rerender(<TeamRooms {...props} connected />);
   const refresh = screen.getByRole('button', {name: 'Refresh team rooms'}) as HTMLButtonElement;
   expect(refresh.disabled).toBe(false);
@@ -217,11 +217,72 @@ test.each(['success', 'failure'])('obsolete pre-disconnect %s cannot replace mem
     else pending[1].reject(new Error('Obsolete failure'));
   });
   expect(refresh.disabled).toBe(true);
-  expect(screen.getByRole('status').textContent).toContain('Team rooms are stale');
+  expect(screen.getByRole('status', {name: ''}).textContent).toContain('Team rooms are stale');
   expect(screen.queryByRole('alert')).toBeNull();
   expect(screen.getByRole('region', {name: 'Team room: Editors · ID: t1'})).toBeTruthy();
   await act(async () => pending[2].resolve(response({teams: []})));
   expect(refresh.disabled).toBe(false);
-  expect(screen.getByRole('status').textContent).toContain('No team rooms yet.');
+  expect(screen.getByRole('status', {name: ''}).textContent).toContain('No team rooms yet.');
   expect(screen.queryByRole('region', {name: 'Team room: Editors · ID: t1'})).toBeNull();
+});
+
+test.each(['room', 'member', 'empty', 'assignment', 'survivor', 'external'] as const)('accepted membership removal preserves keyboard orientation: %s', async target => {
+  const pending: Array<(value: Response) => void> = [];
+  vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(resolve => pending.push(resolve))));
+  render(<><button>Outside team rooms</button><TeamRooms workspace={workspace} connected selectedEmployee=""
+    onOpenTeam={vi.fn()} onSelectEmployee={vi.fn()} onOpenWork={vi.fn()} /></>);
+  await act(async () => pending[0](response({teams})));
+  const refresh = screen.getByRole('button', {name: 'Refresh team rooms'}) as HTMLButtonElement;
+  fireEvent.click(refresh);
+  expect(refresh.disabled).toBe(true);
+  const focused = target === 'external' ? screen.getByRole('button', {name: 'Outside team rooms'})
+    : target === 'survivor' ? screen.getByRole('button', {name: 'Manage team: Editors · ID: t1'})
+    : target === 'member' ? screen.getByRole('button', {name: 'Select team member: Alex · ID: a · Team ID: t0'})
+    : target === 'assignment' ? screen.getByRole('button', {name: 'Open member assignment: Shared work · Task ID: w · Team ID: t0'})
+    : screen.getByRole('button', {name: 'Manage team: Editors · ID: t0'});
+  focused.focus();
+  const next = target === 'empty' ? [] : target === 'member' || target === 'assignment'
+    ? teams.map(team => team.id === 't0' ? {...team, members: ['missing']} : team)
+    : teams.filter(team => team.id !== 't0');
+  await act(async () => pending[1](response({teams: next})));
+  expect(refresh.disabled).toBe(false);
+  expect(document.activeElement).toBe(target === 'survivor' || target === 'external' ? focused : refresh);
+  const notice = screen.getByRole('status', {name: 'Team room removals'});
+  expect(notice.textContent).toContain('removed from this view');
+  expect(notice.textContent).toContain(target === 'empty' ? 'No team rooms remain.' : 'Remaining team rooms are available below.');
+  expect(notice.textContent).toContain(target === 'member' || target === 'assignment' ? '0 rooms and 1 member' : target === 'empty' ? '3 rooms and 0 members' : '1 room and 0 members');
+  // A later unchanged snapshot does not repeat the removal announcement.
+  fireEvent.click(refresh);
+  await act(async () => pending[2](response({teams: next})));
+  expect(notice.textContent).toBe('');
+});
+
+test.each(['failure', 'abort', 'obsolete'] as const)('rejected membership refresh cannot announce removals or move focus: %s', async outcome => {
+  const pending: Array<{resolve: (value: Response) => void; reject: (error: Error) => void}> = [];
+  vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>((resolve, reject) => pending.push({resolve, reject}))));
+  const props = {workspace, selectedEmployee: '', onOpenTeam: vi.fn()};
+  const view = render(<TeamRooms {...props} connected />);
+  await act(async () => pending[0].resolve(response({teams})));
+  const refresh = screen.getByRole('button', {name: 'Refresh team rooms'});
+  fireEvent.click(refresh);
+  const focused = screen.getByRole('button', {name: 'Manage team: Editors · ID: t0'});
+  focused.focus();
+  if (outcome !== 'failure') view.rerender(<TeamRooms {...props} connected={false} />);
+  if (outcome === 'obsolete') {
+    view.rerender(<TeamRooms {...props} connected />);
+    fireEvent.click(refresh);
+  }
+  await act(async () => {
+    if (outcome === 'failure') pending[1].reject(new Error('Refresh failed'));
+    else pending[1].resolve(response({teams: []}));
+  });
+  expect(document.activeElement).toBe(focused);
+  expect(screen.getByRole('status', {name: 'Team room removals'}).textContent).toBe('');
+  expect(screen.getByRole('region', {name: 'Team room: Editors · ID: t0'})).toBeTruthy();
+  if (outcome === 'obsolete') {
+    expect((refresh as HTMLButtonElement).disabled).toBe(true);
+    await act(async () => pending[2].resolve(response({teams})));
+    expect(document.activeElement).toBe(focused);
+    expect(screen.getByRole('status', {name: 'Team room removals'}).textContent).toBe('');
+  }
 });
