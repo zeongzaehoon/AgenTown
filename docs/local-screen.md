@@ -4237,3 +4237,75 @@ tests and 1,205 frontend tests, TypeScript checking, the production build, and
 505 Python tests with 2 skipped. Installed-browser and installation/process-
 recovery gates were deferred by this profile. Live provider validation is
 skipped under the user policy, not passed.
+
+### Retained Loop refresh focus (C115-T1)
+
+Launch `agentown-web --database /tmp/agentown-loop-focus.sqlite --port 8765`
+and open http://127.0.0.1:8765. Save and select a text work item. No provider
+credentials or activation are needed. This temporary browser-console fixture
+intercepts only Loop inspection reads; reload removes it and no sessions are
+written to SQLite. Replace `TASK_ID` with that saved work ID (a UUID for local
+MCP inspection). Install before inspecting either Loop surface:
+
+```js
+const taskId = 'TASK_ID';
+const sessionId = '22222222-2222-4222-8222-222222222222';
+const preview = {schema_version: 1, preview_id: 'focus-fixture',
+  policy_id: sessionId, policy_name: 'Keyboard fixture', task_id: taskId,
+  agent_id: '11111111-1111-4111-8111-111111111111', input: 'Retained fixture input',
+  expected_runs: 0, policy_enabled: true, max_iterations: 2,
+  interval_seconds: 60, created_at: 1};
+const retained = {schema_version: 1, session_id: sessionId, preview,
+  state: 'active', admitted: 0, next_at: 1, started_at: 1, expires_at: 100,
+  provider: 'fixture', model: 'fixture', declared_source: 'agentown-local-product'};
+window.loopFocusFixture = {mode: 'active', delay: 0};
+const originalLoopFetch = window.fetch.bind(window);
+window.fetch = async (input, init) => {
+  const path = String(input);
+  const local = path === '/api/connections/v1/loops/inspect';
+  if (!local && !(path === '/api/loops/v1' && (!init?.method || init.method === 'GET')))
+    return originalLoopFetch(input, init);
+  const {mode, delay} = window.loopFocusFixture;
+  await new Promise(resolve => setTimeout(resolve, delay));
+  if (mode === 'failed') throw new TypeError('Fixture inspection unavailable');
+  const data = mode === 'invalid' ? {sessions: 'invalid'} : {
+    schema_version: 1, control: {state: 'available', can_control: true, message: ''},
+    sessions: mode === 'removed' ? [] : [{...retained, state: mode === 'terminal' ? 'stopped' : 'active'}],
+    attempts: [], cancellation: 'Remote completion may remain unknown.'};
+  return new Response(JSON.stringify(local ? {schema_version: 1,
+    requested_task_id: taskId, status: 'confirmed', code: 'loops_inspected',
+    recovery: 'Inspect explicitly', data} : data),
+    {headers: {'Content-Type': 'application/json'}});
+};
+```
+
+Inspect local Loop sessions, or wait for the saved-work Loop observation. Set
+`window.loopFocusFixture = {mode: 'removed', delay: 3000}` and request another
+inspection. Keep focus on the retained session region (console `.focus()` is
+useful while local inspection controls are disabled). For saved-work polling,
+focus its Stop button before the delayed response arrives. The accepted removal
+must focus the bounded Loop region and announce that the session no longer
+appears. Reset to `active`, inspect again, then use `terminal`: a focused Stop
+control is replaced, focus moves to its surviving session region and a polite
+status explains that Stop is no longer available. Never press Stop or authorize
+activation during this reproduction.
+
+Repeat with focus moved to an outside control during the delay: it stays there.
+An `active` refresh preserves a surviving focused control. `failed` and `invalid`
+keep retained records and do not announce focus recovery. Disconnect/reconnect
+or explicitly navigate to another work item before a delayed response returns:
+obsolete reads must not move focus or override requested navigation. Observe
+**Loop focus update**, `document.activeElement`, and network requests: inspection
+must never send start/activation or Stop requests.
+
+Deterministic delayed-response coverage is in `WorkLoop.test.tsx` and
+`LoopExecution.test.tsx` under “delayed … refresh preserves keyboard orientation”.
+Integration validation passed TypeScript (`tsc --noEmit`) and both scoped Vitest
+files (101 tests), using the available dependency tree and `--configLoader native`.
+The named focus announcement retains `aria-live="polite"` without introducing
+an extra status role ahead of the existing inspection/request messages.
+Supervisor frontend-profile verification passed 32 frontend files and 1,220
+tests, TypeScript checking, the production build, and 505 Python tests with 2
+skipped. Installed-browser and installation/process-recovery gates were deferred
+by this profile. Live provider tests are skipped, not passed, under the current
+user policy.

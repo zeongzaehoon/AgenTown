@@ -411,3 +411,31 @@ test('Stop confirmation preserves stopped evidence but requires a separate expli
   expect((screen.getByRole('button', {name: 'I inspected local Loop records'}) as HTMLButtonElement).disabled).toBe(false);
   expect(fetcher).toHaveBeenCalledTimes(6);
 });
+
+test.each(['removed', 'terminal', 'outside', 'surviving', 'failed', 'invalid', 'obsolete', 'navigation'])('delayed session refresh preserves keyboard orientation: %s', async mode => {
+  let finish!: (value: Response) => void;
+  let fail!: (error: Error) => void;
+  const fetcher = vi.fn().mockResolvedValueOnce(reply(inspection(), 'loops_inspected'))
+    .mockImplementationOnce(() => new Promise<Response>((resolve, reject) => {finish = resolve; fail = reject;}));
+  vi.stubGlobal('fetch', fetcher);
+  const view = render(<><button>Outside</button><WorkLoop taskId={task} connected inspected /></>);
+  await userEvent.click(screen.getByRole('button', {name: 'Inspect local Loop sessions'}));
+  const retained = screen.getByRole('region', {name: `Local Loop session ${policy}`});
+  const stop = screen.getByRole('button', {name: `Stop local Loop ${policy}`});
+  if (mode === 'surviving') screen.getByRole('button', {name: `Inspect retained session ${policy}`}).focus();
+  else stop.focus();
+  act(() => {screen.getByRole('button', {name: 'Inspect local Loop sessions'}).click();});
+  if (mode === 'removed') retained.focus();
+  if (mode === 'outside') screen.getByRole('button', {name: 'Outside'}).focus();
+  if (mode === 'obsolete' || mode === 'navigation') view.rerender(<><button>Outside</button><WorkLoop taskId={policy} connected inspected navigation={mode === 'navigation' ? {taskId: policy, sessionId: task} : undefined} /></>);
+  const before = document.activeElement;
+  await act(async () => {
+    if (mode === 'failed') fail(new Error('offline'));
+    else finish(mode === 'invalid' ? reply({schema_version: 1, sessions: 'invalid'}, 'loops_inspected') : reply(inspection(mode === 'terminal' ? [{...session, state: 'stopped'}] : mode === 'surviving' ? [session] : []), 'loops_inspected'));
+  });
+  if (mode === 'removed') expect(document.activeElement).toBe(screen.getByRole('region', {name: 'Bounded Loop through local MCP'}));
+  else if (mode === 'terminal') expect(document.activeElement).toBe(retained);
+  else expect(document.activeElement).toBe(before);
+  expect(screen.getByLabelText('Loop focus update').textContent).toMatch(mode === 'removed' ? /no longer appears/ : mode === 'terminal' ? /Stop is no longer available/ : /^$/);
+  expect(fetcher.mock.calls.map(call => call[0])).toEqual(Array(2).fill('/api/connections/v1/loops/inspect'));
+});

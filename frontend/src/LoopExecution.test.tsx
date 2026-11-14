@@ -495,3 +495,35 @@ test.each(['prior refresh', 'held refresh', 'held poll', 'held confirmation'])('
     expect(submit).toHaveBeenCalledTimes(2);
   } finally { timer.mockRestore(); }
 });
+
+test.each(['removed', 'terminal', 'outside', 'surviving', 'failed', 'invalid', 'obsolete'])('delayed saved Loop refresh preserves keyboard orientation: %s', async mode => {
+  const realInterval = globalThis.setInterval;
+  const timer = vi.spyOn(globalThis, 'setInterval').mockImplementation((callback, delay, ...args) =>
+    delay === 800 ? 0 as unknown as ReturnType<typeof setInterval> : realInterval(callback, delay, ...args));
+  try {
+    const f = setup(); f.data.sessions = [session];
+    const view = render(<><button>Outside</button><LoopExecution {...f.props} /></>);
+    const stop = await screen.findByRole('button', {name: 'Stop Loop session'});
+    const retained = screen.getByRole('region', {name: 'Loop session session'});
+    let finish!: (value: Response) => void;
+    let fail!: (error: Error) => void;
+    const original = globalThis.fetch;
+    vi.stubGlobal('fetch', (path: string, options: RequestInit) => path === '/api/loops/v1'
+      ? new Promise<Response>((resolve, reject) => {finish = resolve; fail = reject;}) : original(path, options));
+    await userEvent.click(screen.getByRole('button', {name: 'Refresh Loop session records'}));
+    if (mode === 'surviving') retained.focus(); else stop.focus();
+    if (mode === 'outside') screen.getByRole('button', {name: 'Outside'}).focus();
+    if (mode === 'obsolete') view.rerender(<><button>Outside</button><LoopExecution {...f.props} connected={false} /></>);
+    const before = document.activeElement;
+    await act(async () => {
+      if (mode === 'failed') fail(new Error('offline'));
+      else finish(new Response(JSON.stringify(mode === 'invalid' ? {sessions: 'invalid'} : {...f.data, sessions: mode === 'terminal' ? [{...session, state: 'stopped'}] : mode === 'surviving' ? [session] : []})));
+    });
+    if (mode === 'removed') expect(document.activeElement).toBe(screen.getByRole('region', {name: 'Run a bounded Loop'}));
+    else if (mode === 'terminal') expect(document.activeElement).toBe(retained);
+    else expect(document.activeElement).toBe(before);
+    expect(screen.getByLabelText('Loop focus update').textContent).toMatch(mode === 'removed' ? /no longer appears/ : mode === 'terminal' ? /Stop is no longer available/ : /^$/);
+    expect(f.props.submit).not.toHaveBeenCalled();
+    expect(f.fetcher.mock.calls.every(call => !call[0].endsWith('/start') && !call[0].endsWith('/stop'))).toBe(true);
+  } finally {timer.mockRestore();}
+});

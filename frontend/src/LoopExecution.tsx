@@ -55,6 +55,28 @@ export function LoopExecution({work, workspace, connected, draft, disabled, avai
   const lock = useRef(false);
   const epoch = useRef(0);
   const region = useRef<HTMLElement>(null);
+  const sessionFocus = useRef<{element: Element; sessionId: string} | null>(null);
+  const [focusNotice, setFocusNotice] = useState('');
+  function captureSessionFocus(next: LoopSession[]) {
+    const element = document.activeElement;
+    const owner = element?.closest<HTMLElement>('[data-loop-session]');
+    if (!element || !owner || !region.current?.contains(owner)) return;
+    const sessionId = owner.dataset.loopSession!;
+    const surviving = next.find(s => s.session_id === sessionId);
+    if (!surviving || (element.hasAttribute('data-loop-stop') && surviving.state !== 'active')) {
+      sessionFocus.current = {element, sessionId};
+    }
+  }
+  useLayoutEffect(() => {
+    const lost = sessionFocus.current;
+    sessionFocus.current = null;
+    if (!lost || lost.element.isConnected || (document.activeElement !== document.body && document.activeElement !== lost.element)) return;
+    const destination = Array.from(region.current?.querySelectorAll<HTMLElement>('[data-loop-session]') || [])
+      .find(node => node.dataset.loopSession === lost.sessionId);
+    (destination || region.current)?.focus();
+    setFocusNotice(destination ? 'Loop session updated. Stop is no longer available. Focus moved to the session.' : 'Loop session no longer appears in refreshed records. Focus moved to the bounded Loop region.');
+  }, [inspection]);
+
   const inspectButton = useRef<HTMLButtonElement>(null);
   const startButton = useRef<HTMLButtonElement>(null);
   const focused = useRef(false);
@@ -87,7 +109,7 @@ export function LoopExecution({work, workspace, connected, draft, disabled, avai
         ]);
         const saved = savedLoopPolicies(config);
         const inspected = loopInspection(state);
-        if (live && generation === epoch.current && connection.current.connected && connectionGeneration === connection.current.generation) { inspectedAt.current = Date.now(); setObservedConnection(connectionGeneration); if (explicit) setRecoveryRead(connectionGeneration); setPolicies(saved); setInspection(inspected); setControl(inspected.control ?? null); setAvailable(true); }
+        if (live && generation === epoch.current && connection.current.connected && connectionGeneration === connection.current.generation) { inspectedAt.current = Date.now(); setObservedConnection(connectionGeneration); if (explicit) setRecoveryRead(connectionGeneration); setPolicies(saved); captureSessionFocus(inspected.sessions); setInspection(inspected); setControl(inspected.control ?? null); setAvailable(true); }
       } catch (error) { if (live && generation === epoch.current && connection.current.connected && connectionGeneration === connection.current.generation) { setAvailable(false); setControl(error instanceof ApiError ? error.control ?? null : null); } }
       finally { pending = false; }
     }
@@ -154,6 +176,7 @@ export function LoopExecution({work, workspace, connected, draft, disabled, avai
     finally { ++epoch.current; lock.current = false; setBusy(false); }
   }
   return <section ref={region} tabIndex={-1} aria-label="Run a bounded Loop">
+    <p aria-label="Loop focus update" aria-live="polite">{focusNotice}</p>
     <h4>Run a bounded Loop</h4>
     <p>Enabled means configured only. Preview uses saved work, not the unsaved draft. Starting authorizes bounded attempts; it does not activate Hooks or Skills.</p>
     <label htmlFor="execution-loop">Saved Loop</label>
@@ -186,11 +209,11 @@ export function LoopExecution({work, workspace, connected, draft, disabled, avai
     </section>}
     <p>{inspection?.cancellation || 'Stop prevents new admissions and attempts local cancellation. Remote completion may remain unknown.'}</p>
     {inspection && <p role="status">{fresh && available ? 'Session and attempt records observed on the current connection.' : 'Retained session and attempt records are stale. Refresh on the current connection to inspect them.'}</p>}
-    <div aria-live="polite">{inspection?.sessions.filter(s => s.preview.task_id === work.id).map(s => <section key={s.session_id} aria-label={`Loop session ${s.session_id}`}>
+    <div aria-live="polite">{inspection?.sessions.filter(s => s.preview.task_id === work.id).map(s => <section tabIndex={-1} data-loop-session={s.session_id} key={s.session_id} aria-label={`Loop session ${s.session_id}`}>
       <h5>{s.preview.policy_name} · {s.session_id}</h5>
       <p>{sourceText(s.declared_source)}</p>
       <p>{loopLabel(s, inspection.attempts)} · Admitted: {s.admitted} / {s.preview.max_iterations} · {s.provider} / {s.model}</p>
-      {s.state === 'active' && <button type="button" disabled={busy || !connected || !authority} onClick={() => void send('/api/loops/v1/stop', {session_id: s.session_id}, s, true)}>Stop Loop {s.session_id}</button>}
+      {s.state === 'active' && <button data-loop-stop type="button" disabled={busy || !connected || !authority} onClick={() => void send('/api/loops/v1/stop', {session_id: s.session_id}, s, true)}>Stop Loop {s.session_id}</button>}
       <ul>{inspection.attempts.filter(a => a.session_id === s.session_id).map(a => <li key={a.run_id}>Attempt {a.ordinal} · {a.run_id} · {a.execution ? `${attemptState(a)} · ${a.execution.outcome || (a.execution.error ? 'Failure or interruption' : a.execution.output != null ? 'Result available · Unverified' : 'No terminal outcome')}${a.execution.error ? ` · ${a.execution.error}` : ''}` : 'Execution record unavailable'}{a.execution?.output != null && <pre>{a.execution.output}</pre>}</li>)}</ul>
     </section>)}</div>
   </section>;
