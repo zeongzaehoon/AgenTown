@@ -3477,3 +3477,37 @@ frontend test files and 1,065 tests, including 46 OverviewLoops tests, the
 production build, 505 Python tests with 2 skipped, and the harness Rust and
 operational suites. The selected frontend profile deferred installed-browser and
 installation/process-recovery gates. Live provider calls remain skipped, not passed.
+
+### Inspect a recorded Hook follow-up’s source attempt (C96-T1)
+
+Launch `agentown-web --database PATH --port 8765`, open
+<http://127.0.0.1:8765> → Company overview → **Hook trigger devices** →
+**Recorded attempts for Hook**. Prerequisite: saved Hook follow-up provenance and
+its source-attempt history; deterministic fixtures suffice. No provider call is needed.
+
+Within a follow-up, Tab to **Source attempt details · Run ID: ID** and use Enter
+or Space to expand/collapse it. Inspect the persisted source state, outcome,
+output and error. Matching uses the saved source Run ID within that follow-up’s
+Task only, even when newer attempts exist or another Task contains the same Run
+ID. Duplicate Hook names remain distinguished by Hook ID. Current configuration
+and the latest attempt never replace a missing source. Missing source records,
+unavailable Workspace and disconnected stale snapshots have separate messages.
+Missing output/error is explicit; empty recorded strings remain recorded values.
+
+Opening and closing details makes no requests, grants no consent and starts no
+work. Refresh saved history through the existing connection/history refresh to
+see updated source records in place; an expanded same-Run disclosure retains
+focus. Refresh Hook devices alone refreshes configuration, not attempt history.
+Disconnected retained history remains inspectable with its stale warning.
+
+Focused deterministic check, with frontend dependencies installed:
+`cd frontend && npx vitest run src/HookDevices.test.tsx` and `npx tsc --noEmit`.
+The C96 fixture covers multiple source/follow-up attempts, cross-Task collisions,
+missing sources, duplicate Hook names, Enter/Space, zero disclosure requests,
+refreshed source values/removal, focus retention and unavailable/stale history.
+This implementation checkout has no frontend dependencies, so these checks were
+not executed locally. Supervisor verification passed all 32 frontend test files
+and 1,066 tests, including all 8 HookDevices tests, the production build, 505
+Python tests with 2 skipped, and the harness Rust and operational suites. The
+selected frontend profile deferred installed-browser and installation/process-
+recovery gates. Live provider validation is skipped, not passed.

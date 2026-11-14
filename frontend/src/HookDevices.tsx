@@ -1,4 +1,4 @@
-import type { Workspace } from './api';
+import type { Attempt, Workspace } from './api';
 export interface HookNavigation {taskId: string; hookId: string; employeeId: string}
 import { useEffect, useId, useRef, useState } from 'react';
 import { configurationRequest, type HookRecord } from './configuration-api';
@@ -104,6 +104,7 @@ function RecordedHookAttempts({device, workspace, connected}: {
           <p>Task ID: {work.id} · Run ID: {attempt.id}</p>
           <p>Saved Hook: {saved.hook_name} · Hook ID: {saved.hook_id}</p>
           <p>Source Run ID: {saved.source_run_id} · Event: {saved.event} · Source outcome: {saved.source_outcome}</p>
+          <SourceAttempt sourceRunId={saved.source_run_id} source={work.attempts.find(source => source.id === saved.source_run_id)} />
           <p>Saved employee ID: {saved.agent_id}</p>
           <p>Saved Skill: {saved.skill_name} · Skill ID: {saved.skill_id}</p>
           <p>Preview ID: {saved.preview_id} · Provenance Run ID: {saved.run_id}</p>
@@ -114,6 +115,27 @@ function RecordedHookAttempts({device, workspace, connected}: {
           {attempt.output != null ? <><p>Recorded output</p><pre>{attempt.output}</pre></> : <p>No recorded output available.</p>}
           {attempt.error != null && <p>Recorded error: {attempt.error}</p>}
         </section>)}
+      </>}
+    </div>
+  </div>;
+}
+
+/** Resolve from the containing Task only; disclosure never fetches or executes. */
+function SourceAttempt({sourceRunId, source}: {sourceRunId: string; source?: Attempt}) {
+  const id = useId();
+  const [expanded, setExpanded] = useState(false);
+  return <div>
+    <button type="button" aria-expanded={expanded} aria-controls={id}
+      onClick={() => setExpanded(value => !value)}>
+      Source attempt details · Run ID: {sourceRunId}
+    </button>
+    <div id={id} hidden={!expanded}>
+      {!source ? <p>Source record missing from this Task’s loaded history. Refresh saved history; no other attempt is substituted.</p> : <>
+        <p>Persisted source Run ID: {source.id}</p>
+        <p>Source execution state: {source.state} · Outcome: {source.outcome ?? 'Not recorded'}</p>
+        {source.output != null ? <><p>Source recorded output</p><pre>{source.output}</pre></> : <p>No recorded source output available.</p>}
+        {source.error != null ? <><p>Source recorded error</p><pre>{source.error}</pre></> : <p>No recorded source error available.</p>}
+        <p>Source quality unverified</p>
       </>}
     </div>
   </div>;

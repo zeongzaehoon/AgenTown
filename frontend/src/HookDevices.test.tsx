@@ -278,3 +278,71 @@ test('recorded Hook attempts use saved identity across work and retain focus and
   expect(screen.getAllByText(/Workspace unavailable. Refresh connection/)).toHaveLength(2);
   expect(fetcher).toHaveBeenCalledTimes(before + 1);
 });
+
+test('source disclosures inspect only the saved Run in the same Task and update from loaded history without requests', async () => {
+  const fetcher = vi.fn(async () => new Response(JSON.stringify({hooks})));
+  vi.stubGlobal('fetch', fetcher);
+  const open = vi.fn();
+  const saved = {run_id: 'follow', preview_id: 'preview', hook_id: 'one', hook_name: 'Old name',
+    event: 'run_failed', agent_id: 'a', source_run_id: 'source', source_outcome: 'failure',
+    skill_id: 's', skill_name: 'Saved Skill', instructions: 'Saved instructions', input: 'Saved input', admitted_at: 1};
+  const source = {id: 'source', state: 'finished' as const, outcome: 'failure', participants: [], output: 'Exact source output', error: 'Exact source error'};
+  const follow = {id: 'follow', state: 'finished' as const, outcome: 'success', participants: [], output: 'Follow-up output', hook: saved};
+  const workspace: Workspace = {employees: [], configuration: null, provider: 'test', model: null, work: [
+    {id: 'task', input: 'Work', status: 'pending', assignees: [], attempts: [source, follow,
+      {...source, id: 'latest', output: 'Wrong latest output'},
+      {...follow, id: 'second-follow', hook: {...saved, source_run_id: 'latest'}},
+      {...follow, id: 'missing-follow', hook: {...saved, source_run_id: 'foreign'}}]},
+    {id: 'other-task', input: 'Other', status: 'pending', assignees: [], attempts: [
+      {...source, output: 'Wrong cross-Task output'}, {...source, id: 'foreign', output: 'Wrong foreign output'},
+      {...follow, hook: {...saved, hook_id: 'two'}}]},
+  ]};
+  const view = render(<HookDevices workspace={workspace} onOpenWork={open} onOpenHook={open} />);
+  const user = userEvent.setup();
+  const outer = await screen.findByRole('button', {name: 'Recorded attempts for Hook: Manual · Hook ID: one'});
+  const before = fetcher.mock.calls.length;
+  outer.focus(); await user.keyboard('{Enter}');
+  const region = screen.getByRole('region', {name: 'Recorded Hook attempt · Task task · Run follow'});
+  const details = within(region).getByRole('button', {name: 'Source attempt details · Run ID: source'});
+  details.focus(); await user.keyboard('{Enter}');
+  expect(details.getAttribute('aria-expanded')).toBe('true');
+  expect(document.activeElement).toBe(details);
+  expect(within(region).getByText('Exact source output')).toBeTruthy();
+  expect(within(region).getByText('Exact source error')).toBeTruthy();
+  expect(within(region).getByText('Source execution state: finished · Outcome: failure')).toBeTruthy();
+  expect(within(region).queryByText('Wrong latest output')).toBeNull();
+  // Other collapsed Hooks retain their own source DOM; inspect this follow-up's boundary.
+  expect(within(region).queryByText('Wrong cross-Task output')).toBeNull();
+  await user.keyboard(' '); expect(details.getAttribute('aria-expanded')).toBe('false');
+  await user.keyboard(' ');
+  const second = screen.getByRole('region', {name: 'Recorded Hook attempt · Task task · Run second-follow'});
+  fireEvent.click(within(second).getByRole('button', {name: /Source attempt details/}));
+  expect(within(second).getByText('Wrong latest output')).toBeTruthy();
+  const missing = screen.getByRole('region', {name: 'Recorded Hook attempt · Task task · Run missing-follow'});
+  fireEvent.click(within(missing).getByRole('button', {name: /Source attempt details/}));
+  expect(within(missing).getByText(/Source record missing from this Task/)).toBeTruthy();
+  expect(within(missing).queryByText('Wrong foreign output')).toBeNull();
+  const duplicate = screen.getByRole('button', {name: 'Recorded attempts for Hook: Manual · Hook ID: two'});
+  fireEvent.click(duplicate);
+  const other = screen.getByRole('region', {name: 'Recorded Hook attempt · Task other-task · Run follow'});
+  fireEvent.click(within(other).getByRole('button', {name: /Source attempt details/}));
+  expect(within(other).getByText('Wrong cross-Task output')).toBeTruthy();
+  details.focus();
+  const refreshed = {...workspace, work: workspace.work.map(work => work.id !== 'task' ? work : {...work,
+    attempts: work.attempts.map(attempt => attempt.id !== 'source' ? attempt : {...attempt, output: 'Refreshed source output', error: null})})};
+  view.rerender(<HookDevices workspace={refreshed} connected={false} />);
+  expect(within(region).getByText('Refreshed source output')).toBeTruthy();
+  expect(within(region).getByText('No recorded source error available.')).toBeTruthy();
+  expect(screen.getAllByText(/Disconnected — stale saved-work snapshot/)).toHaveLength(2);
+  expect(document.activeElement).toBe(details);
+  expect(details.getAttribute('aria-expanded')).toBe('true');
+  view.rerender(<HookDevices workspace={{...workspace, work: workspace.work.map(work => ({...work, attempts: work.attempts.filter(attempt => attempt.id !== 'source')}))}} />);
+  expect(within(region).getByText(/Source record missing from this Task/)).toBeTruthy();
+  expect(within(region).queryByText('Exact source output')).toBeNull();
+  expect(document.activeElement).toBe(details);
+  view.rerender(<HookDevices workspace={null} connected={false} />);
+  expect(screen.getAllByText(/Workspace unavailable. Refresh connection/)).toHaveLength(2);
+  expect(screen.queryByText(/Source record missing from this Task/)).toBeNull();
+  expect(fetcher).toHaveBeenCalledTimes(before);
+  expect(open).not.toHaveBeenCalled();
+});
