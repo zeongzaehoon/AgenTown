@@ -1610,3 +1610,41 @@ test('Give work is unavailable offline and a removed assignee cannot be saved', 
   expect(draftInput().value).toBe('Retain text');
   expect(f.calls.every(call => call.path === '/api/state')).toBe(true);
 });
+
+test.each([true, false])('Add employee focuses the existing draft without requests or workspace changes (empty: %s)', async empty => {
+  vi.spyOn(window, 'setInterval').mockImplementation(() => 0);
+  const f = empty ? fixture() : savedResults();
+  const before = JSON.stringify(f.state);
+  const user = userEvent.setup(); render(<App />); await connected();
+  fireEvent.change(draftInput(), {target: {value: 'Keep work draft'}});
+  const name = screen.getByLabelText('Employee name') as HTMLInputElement;
+  fireEvent.change(name, {target: {value: 'Keep employee draft'}});
+  if (!empty) {
+    fireEvent.change(screen.getByLabelText('Assign to'), {target: {value: 'e'}});
+    await user.click(screen.getByText('Attempt 1 · Result available · Unverified'));
+    await waitFor(() => expect([...document.querySelectorAll<HTMLDetailsElement>('#detail details')].every(detail => detail.open)).toBe(true));
+  }
+  const expanded = [...document.querySelectorAll<HTMLDetailsElement>('#detail details')];
+  const assignment = (screen.getByLabelText('Assign to') as HTMLSelectElement).value;
+  const selected = history().value;
+  for (const offline of [false, true]) {
+    if (offline) {
+      f.disconnect(); refresh();
+      await waitFor(() => expect(document.querySelector('#connection')!.textContent).toContain('Disconnected'));
+      expect((screen.getByRole('button', {name: 'Create employee'}) as HTMLButtonElement).disabled).toBe(true);
+    }
+    for (const key of ['{Enter}', ' ']) {
+      const calls = vi.mocked(fetch).mock.calls.length;
+      screen.getByRole('button', {name: 'Add employee'}).focus();
+      await user.keyboard(key);
+      expect(document.activeElement).toBe(name);
+      expect(name.value).toBe('Keep employee draft');
+      expect(draftInput().value).toBe('Keep work draft');
+      expect((screen.getByLabelText('Assign to') as HTMLSelectElement).value).toBe(assignment);
+      expect(history().value).toBe(selected);
+      for (const detail of expanded) { expect(detail.isConnected).toBe(true); expect(detail.open).toBe(true); }
+      expect(vi.mocked(fetch).mock.calls.length).toBe(calls);
+      expect(JSON.stringify(f.state)).toBe(before);
+    }
+  }
+});

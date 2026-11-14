@@ -151,6 +151,7 @@ export function App() {
   const [loopAvailabilityState, setLoopAvailability] = useState({id: '', blocked: true});
   const loopAvailability = useCallback((blocked: boolean) => setLoopAvailability({id: selected, blocked}), [selected]);
   const pendingFocus = useRef<'input' | 'execute' | 'draft' | null>(null);
+  const employeeNameRef = useRef<HTMLInputElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const executeRef = useRef<HTMLButtonElement>(null);
   const [resubmission, setResubmission] = useState<string | null>(null);
@@ -368,7 +369,7 @@ export function App() {
           historyRef.current?.focus();
         }}>I inspected execution history</button>
       </section>}
-      <CompanyOverview assigningWork={busy.has('work') || !!replacement} onGiveWork={id => {
+      <CompanyOverview onAddEmployee={() => employeeNameRef.current?.focus()} assigningWork={busy.has('work') || !!replacement} onGiveWork={id => {
         if (!connected || busy.has('work') || replacement || !state?.employees.some(current => current.id === id)) return;
         setEmployee(id);
         inputRef.current?.focus();
@@ -396,7 +397,7 @@ export function App() {
         });}}>
           <DraftStatus labels={name.trim() ? ['Employee name'] : []} />
           <button type="button" disabled={busy.has('employee') || !name} onClick={() => setName('')}>Discard employee draft</button>
-          <label htmlFor="name">Employee name</label><input id="name" name="name" required maxLength={200} autoComplete="off" value={name} onChange={e => setName(e.target.value)} />
+          <label htmlFor="name">Employee name</label><input id="name" ref={employeeNameRef} name="name" required maxLength={200} autoComplete="off" value={name} onChange={e => setName(e.target.value)} />
           <button disabled={!!creationRecovery || !connected || busy.has('employee')}>Create employee</button>
         </form></section>
         <section><h2>2. Give them work</h2><form id="work-form" onSubmit={event => {event.preventDefault(); if (!connected || !assignee || replacement) return; setInputTouched(true); if (workInputError(input, assignee)) { inputRef.current?.focus(); return; } void mutate('work', async signal => {

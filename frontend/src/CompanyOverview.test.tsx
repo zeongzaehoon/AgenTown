@@ -292,3 +292,18 @@ test.each(['{Enter}', ' '])('Give work forwards employee ID by keyboard (%s)', a
   view.rerender(<CompanyOverview {...props} workspace={{...workspace(), employees: []}} />);
   expect(screen.queryByRole('button', {name: /^Give work:/})).toBeNull();
 });
+
+test.each([true, false])('Add employee is keyboard navigation in empty and populated offices (empty: %s)', async empty => {
+  const user = userEvent.setup();
+  const add = vi.fn();
+  render(<CompanyOverview workspace={empty ? {...workspace(), employees: [], work: []} : workspace()}
+    connected error="" onOpenWork={vi.fn()} onAddEmployee={add} />);
+  const office = within(screen.getByRole('region', {name: 'Employee office'}));
+  const control = office.getByRole('button', {name: 'Add employee'});
+  expect(control.getAttribute('type')).toBe('button');
+  expect(control.getAttribute('aria-controls')).toBe('employee-form');
+  control.focus(); await user.keyboard('{Enter}');
+  expect(add).toHaveBeenCalledTimes(1);
+  control.focus(); await user.keyboard(' ');
+  expect(add).toHaveBeenCalledTimes(2);
+});

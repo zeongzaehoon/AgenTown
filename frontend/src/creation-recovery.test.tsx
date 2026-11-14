@@ -64,6 +64,15 @@ for (const target of ['Create employee', 'Save work']) {
       expect(f.mutations).toHaveLength(1);
       expect(button('Create employee').disabled).toBe(true);
       expect(button('Save work').disabled).toBe(true);
+      for (const key of ['{Enter}', ' ']) {
+        button('Add employee').focus();
+        await userEvent.setup().keyboard(key);
+        expect(document.activeElement).toBe(field('Employee name'));
+        retained();
+        expect(f.mutations).toHaveLength(1);
+        expect(button('Create employee').disabled).toBe(true);
+        expect(button('Save work').disabled).toBe(true);
+      }
       expect(button('I inspected employees and saved work').disabled).toBe(true);
       await act(async () => { f.polls.forEach(poll => poll()); });
       retained();
@@ -102,6 +111,12 @@ test('successful employee creation preserves name edits made while the request i
   let finish!: (response: Response) => void;
   f.respond(() => new Promise(resolve => { finish = resolve; }));
   act(() => { button('Create employee').click(); button('Create employee').click(); });
+  button('Add employee').focus();
+  await userEvent.setup().keyboard(' ');
+  expect(document.activeElement).toBe(field('Employee name'));
+  retained();
+  expect(button('Create employee').disabled).toBe(true);
+  expect(f.mutations).toEqual(['/api/employees']);
   fireEvent.change(field('Employee name'), {target: {value: 'Next employee'}});
   f.state.employees.push({id: 'new', name: 'Draft employee'});
   await act(async () => finish(new Response('{"id":"new"}')));

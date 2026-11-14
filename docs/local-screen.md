@@ -4682,3 +4682,37 @@ navigation assertion also verifies the accepted **Work & results** focus
 behavior. Independent UI/UX and quality reviews inspected the exact verification
 artifacts and found no blocking issues. Live provider calls remain skipped, not
 passed.
+
+## Add an employee from the office (C123-T1)
+
+Launch `agentown-web --database /absolute/path/product.sqlite`, or open the
+desktop workspace. No credentials are needed for this navigation.
+
+1. With an empty workspace, Tab to **Company overview → Employee office → Add
+   employee**. Press Enter or Space: focus moves to the existing **Employee
+   name** field. Enter a name and explicitly choose **Create employee** to save.
+2. With employees and saved work, select saved detail, expand a result, choose
+   an assignment, and enter employee-name and work drafts. Activate **Add
+   employee** again with Enter or Space. Both drafts, assignment, selected
+   detail and expanded results remain in place.
+3. Inspect network traffic: Add employee sends no request, including no refresh,
+   creation, assignment or execution. It only focuses the field. Disconnection,
+   busy creation and uncertain-creation recovery still govern explicit submission;
+   navigation does not clear those safeguards or resend anything.
+
+Scoped deterministic checks (with frontend dependencies installed):
+
+```sh
+cd frontend
+npm test -- src/CompanyOverview.test.tsx src/App.test.tsx src/creation-recovery.test.tsx
+```
+
+Component/App cases cover empty/populated offices, Enter/Space, focus, drafts,
+assignment, saved detail, expanded results, disconnection and zero navigation
+requests. Creation recovery cases retain the explicit submission safeguards.
+Supervisor frontend verification passed 1,332 frontend tests, TypeScript
+checking, the production build, and 505 Python tests with 2 skipped. Independent
+UI/UX review inspected the matching artifacts and found no blocking issues.
+Fresh installed-browser evidence was deferred by this profile; C122's preceding
+full profile remains the latest installed-browser baseline. Live provider
+validation remains skipped, not passed.

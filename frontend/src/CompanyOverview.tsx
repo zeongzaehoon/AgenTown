@@ -22,7 +22,8 @@ const employeeOutcomeActions: {outcome: EmployeeOutcomeNavigation['outcome']; la
   {outcome: 'other', label: 'Other recorded work'},
 ];
 
-export function CompanyOverview({workspace, connected, error, onOpenWork, selectedEmployee = '', onSelectEmployee, onOpenHook, onOpenLoop, onOpenSkill, onOpenClient, onOpenTeam, onSelectTeamMember, onOpenSession, onOpenHookWork, onOpenSkillWork, onOpenFailedWork, onOpenEmployeeOutcome, onGiveWork, assigningWork = false}: {
+export function CompanyOverview({workspace, connected, error, onOpenWork, selectedEmployee = '', onSelectEmployee, onOpenHook, onOpenLoop, onOpenSkill, onOpenClient, onOpenTeam, onSelectTeamMember, onOpenSession, onOpenHookWork, onOpenSkillWork, onOpenFailedWork, onOpenEmployeeOutcome, onGiveWork, onAddEmployee, assigningWork = false}: {
+  onAddEmployee?: () => void;
   onGiveWork?: (employeeId: string) => void;
   assigningWork?: boolean;
   onOpenEmployeeOutcome?: (request: EmployeeOutcomeNavigation) => void;
@@ -102,6 +103,8 @@ export function CompanyOverview({workspace, connected, error, onOpenWork, select
       {!employees.length && <p>No employees yet. Create an employee below to start assigning work.</p>}
       <section className="company-office" aria-labelledby="office-title">
         <h3 id="office-title">Employee office</h3>
+        <button type="button" disabled={!onAddEmployee} aria-controls="employee-form" aria-describedby="add-employee-help" onClick={() => onAddEmployee?.()}>Add employee</button>
+        <p id="add-employee-help">Add employee focuses your employee-name draft below. Create employee is a separate action.</p>
         <p>Choose a character to view assigned work. Desks show recorded assignments, not live presence.</p>
         <p id="give-work-help">Give work selects an employee and focuses your work draft. Saving and execution are separate actions.{!connected && " Giving work is unavailable while disconnected. Refresh connection first."}</p>
         {!employees.length && <p>The office is empty.</p>}
