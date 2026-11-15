@@ -787,8 +787,10 @@ test.each(['setup', 'diagnostic', 'shared-data'])('%s responses spanning disconn
   const user = userEvent.setup();
   const view = render(<Connections workspaceConnected openClient={{id: 'codex'}} />);
   await screen.findByLabelText('Client');
-  defer = true;
   const button = screen.getByRole('button', {name: surface === 'setup' ? 'Refresh setup' : surface === 'diagnostic' ? 'Check local server' : 'Check shared data'});
+  // Retain an accepted observation before abandoning a later local check.
+  await user.click(button);
+  defer = true;
   await user.click(button);
   const calls = fetcher.mock.calls.length;
   view.rerender(<Connections workspaceConnected={false} />);
@@ -1464,4 +1466,78 @@ test.each(['diagnostic', 'shared-data'])('%s observation times belong only to ac
   await settle(5, passed);
   // Detached observation nodes retain the last accepted time after unmount.
   expect(times()).toEqual(retained);
+});
+
+test.each([
+  ['diagnostic', 'success'], ['diagnostic', 'failure'],
+  ['shared-data', 'success'], ['shared-data', 'failure'],
+])('%s disconnect releases waiting and isolates late %s from explicit retries', async (kind, late) => {
+  const path = kind === 'diagnostic' ? diagnosticPath : sharedPath;
+  const label = kind === 'diagnostic' ? 'Check local server' : 'Check shared data';
+  const region = kind === 'diagnostic' ? 'Local server diagnostic' : 'Shared employee and work access';
+  const result = kind === 'diagnostic' ? diagnosticResult('passed') : sharedResult(7, 8);
+  const passed = kind === 'diagnostic' ? 'Local server diagnostic passed' : 'Shared-data check passed.';
+  const requests: {resolve: (value: Response) => void; reject: (error: Error) => void; signal: AbortSignal}[] = [];
+  vi.stubGlobal('fetch', vi.fn((input: string, init?: RequestInit) => input === path
+    ? new Promise<Response>((resolve, reject) => requests.push({resolve, reject, signal: init!.signal as AbortSignal}))
+    : Promise.resolve(new Response(JSON.stringify(setup)))));
+  const user = userEvent.setup();
+  const view = render(<Connections workspaceConnected openClient={{id: 'codex'}} />);
+  await screen.findByLabelText('Client');
+  const section = screen.getByRole('region', {name: region});
+  const scope = within(section);
+  const button = scope.getByRole('button', {name: label});
+  const times = () => Array.from(section.querySelectorAll('time')).map(time => time.dateTime);
+  fireEvent.click(button);
+  await act(async () => requests[0].resolve(new Response(JSON.stringify(result))));
+  const retained = times();
+  expect(retained).toHaveLength(kind === 'diagnostic' ? 1 : 2);
+  fireEvent.click(button);
+  const cancel = scope.getByRole('button', {name: /Cancel waiting/});
+  for (let tabs = 0; tabs < 30 && document.activeElement !== cancel; tabs++) await user.tab();
+  expect(document.activeElement).toBe(cancel);
+  view.rerender(<Connections workspaceConnected={false} />);
+  expect(requests[1].signal.aborted).toBe(true);
+  expect(section.getAttribute('aria-busy')).toBe('false');
+  expect(document.activeElement).toBe(button);
+  expect((button as HTMLButtonElement).disabled).toBe(false);
+  expect(scope.queryByRole('button', {name: /Cancel waiting/})).toBeNull();
+  expect(scope.getByText(passed)).toBeTruthy();
+  expect(scope.getAllByText(/Previous .*potentially stale/).length).toBeGreaterThan(0);
+  expect(times()).toEqual(retained);
+  if (kind === 'shared-data') expect(scope.getByText('Employees: 7. Saved work: 8.')).toBeTruthy();
+  expect(requests).toHaveLength(2);
+  // A disconnected check is still explicitly available; reconnect stays passive.
+  fireEvent.click(button);
+  fireEvent.click(button);
+  expect(requests).toHaveLength(3);
+  await act(async () => requests[2].resolve(new Response(JSON.stringify(result))));
+  expect(scope.getAllByText(/Previous .*potentially stale/).length).toBeGreaterThan(0);
+  const disconnectedTimes = times();
+  view.rerender(<Connections workspaceConnected />);
+  expect(requests).toHaveLength(3);
+  expect(times()).toEqual(disconnectedTimes);
+  fireEvent.click(button);
+  fireEvent.click(button);
+  expect(requests).toHaveLength(4);
+  await act(async () => {
+    if (late === 'failure') requests[1].reject(new Error('abandoned failure'));
+    else requests[1].resolve(new Response(JSON.stringify(kind === 'diagnostic' ? diagnosticResult('failed') : sharedResult(99, 99))));
+  });
+  expect(section.getAttribute('aria-busy')).toBe('true');
+  expect((button as HTMLButtonElement).disabled).toBe(true);
+  expect(times()).toEqual(disconnectedTimes);
+  fireEvent.click(button);
+  expect(requests).toHaveLength(4);
+  await act(async () => requests[3].resolve(new Response(JSON.stringify(result))));
+  expect(scope.getByText(passed)).toBeTruthy();
+  expect(scope.queryByText(/Previous .*potentially stale/)).toBeNull();
+  if (kind === 'shared-data') expect(scope.getByText('Employees: 7. Saved work: 8.')).toBeTruthy();
+  // Disconnect must also preserve focus deliberately moved outside the check.
+  fireEvent.click(button);
+  const outside = screen.getByLabelText('Client');
+  outside.focus();
+  view.rerender(<Connections workspaceConnected={false} />);
+  expect(document.activeElement).toBe(outside);
+  expect(requests[4].signal.aborted).toBe(true);
 });

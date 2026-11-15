@@ -5635,3 +5635,63 @@ Scoped checks: `cd frontend`, then `npx tsc --noEmit` and
 `npx vitest run src/Connections.test.tsx`. The supervisor runs the applicable
 frontend verification profile after implementation handoff; live provider calls
 remain skipped.
+
+### Disconnect recovery for pending local checks (C144-T1)
+
+Launch `agentown-web --database /absolute/path/product.sqlite3 --port 8765`,
+open <http://127.0.0.1:8765>, connect the workspace, and open **Connections**.
+Select Codex and explicitly run both local checks once to retain observations.
+No provider credentials or external client setup are needed.
+
+For deterministic pending requests, install this temporary browser-console fixture.
+It holds only local checks; workspace disconnection is simulated separately.
+
+```js
+window.disconnectRecoveryFetch = window.fetch;
+window.localCheckRequests = [];
+window.workspaceOffline = false;
+window.fetch = (input, init) => {
+  const path = String(input);
+  if (path === '/api/state' && window.workspaceOffline)
+    return Promise.reject(new Error('Simulated workspace disconnect'));
+  if (['/api/connections/v1/diagnostic', '/api/connections/v1/shared-data'].includes(path))
+    return new Promise((resolve, reject) => {
+      window.localCheckRequests.push({path, init, resolve, reject});
+    });
+  return window.disconnectRecoveryFetch(input, init);
+};
+```
+
+1. Start both local checks. Tab to either **Cancel waiting** control. Set
+   `window.workspaceOffline = true` and select **Refresh connection**. Once the
+   workspace shows Disconnected, both waiting indicators and cancel controls
+   disappear, both check buttons become available, and previous outcomes, counts
+   and receipt times remain unchanged and potentially stale. Refresh connection
+   moves focus itself; to check automatic recovery from a focused cancel control,
+   leave focus there and let the workspace's next state refresh fail instead.
+   Focus should return to that check button. Focus elsewhere must stay there.
+2. Set `window.workspaceOffline = false`, then select **Refresh connection**.
+   Reconnection must leave evidence stale and must not add local-check requests.
+   Explicitly retry either check immediately; repeated activation must admit only
+   one request for that check. Local checks are also available before reconnecting,
+   but their responses remain stale while the workspace is disconnected.
+3. Settle an abandoned request while its retry is pending:
+   `window.localCheckRequests[0].resolve(new Response(JSON.stringify({schema_version: 1, status: 'passed', code: 'ok', message: 'ok', recovery: ''})))`.
+   It must not change observations/times or end the newer wait. Repeat with
+   `window.localCheckRequests[1].reject(new Error('Simulated late failure'))`.
+   Neither late result may enable duplicate admission or replace retained counts.
+4. Cancel the remaining retry explicitly, restore
+   `window.fetch = window.disconnectRecoveryFetch`, and run each check again.
+   Only an accepted explicit response may update its receipt time; successful
+   checks requested while connected can refresh evidence. Repeat from a fresh
+   screen without previous observations: disconnect ends waiting without
+   inventing an outcome or receipt time. Stopping waiting does not confirm that
+   server processing stopped; a real immediate retry may report busy.
+
+Deterministic Connections interaction tests cover both checks and late success
+and failure, including retry ownership, duplicate admission, keyboard focus,
+retained counts and receipt times. This implementation workspace has no frontend
+node_modules or local TypeScript/Vitest binaries, so scoped execution is pending:
+`cd frontend && npx tsc --noEmit && npx vitest run src/Connections.test.tsx`.
+Supervisor verification and browser validation remain pending. Live provider
+calls are skipped, not passed.

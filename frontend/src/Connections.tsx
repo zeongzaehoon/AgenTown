@@ -138,6 +138,12 @@ function LocalDiagnostic({workspaceConnected, configuration}: {workspaceConnecte
     setCancelled(true);
     endWaiting();
   }
+  // Release ownership and admission during the disconnect commit, before an
+  // abandoned response can settle or an explicit retry can be admitted.
+  // Depend only on connection transitions: checks remain usable disconnected.
+  useLayoutEffect(() => {
+    if (!workspaceConnected) cancel();
+  }, [workspaceConnected]);
   async function check() {
     if (lock.current) return;
     lock.current = true;
@@ -242,6 +248,12 @@ function SharedDataCheck({workspaceConnected, configuration}: {workspaceConnecte
     setCancelled(true);
     endWaiting();
   }
+  // Release ownership and admission during the disconnect commit, before an
+  // abandoned response can settle or an explicit retry can be admitted.
+  // Depend only on connection transitions: checks remain usable disconnected.
+  useLayoutEffect(() => {
+    if (!workspaceConnected) cancel();
+  }, [workspaceConnected]);
   async function check() {
     if (lock.current) return;
     lock.current = true;
