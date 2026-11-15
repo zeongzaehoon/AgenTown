@@ -167,9 +167,12 @@ test('many assigned choices survive polling but assignment, disappearance and ta
   await userEvent.keyboard('{Enter}');
   expect(open.mock.calls).toEqual([[{taskId: 'task-149', hookId: 'one', employeeId: 'a'}]]);
   for (const change of ['assignment', 'disappearance']) {
+    action.focus();
     const work = change === 'assignment' ? workspace.work.map(item => item.id === 'task-149' ? {...item, assignees: ['b']} : item) : workspace.work.filter(item => item.id !== 'task-149');
     view.rerender(<HookDevices workspace={{...workspace, work}} onOpenWork={open} />);
     expect(chooser.value).toBe(''); expect(action.disabled).toBe(true);
+    expect(document.activeElement).toBe(screen.getByText(/Previously chosen work or employee target changed/));
+    expect(second.value).toBe('task-2');
     view.rerender(<HookDevices workspace={{...workspace}} onOpenWork={open} />);
     expect(chooser.value).toBe(''); expect(action.disabled).toBe(true);
     await userEvent.selectOptions(chooser, 'task-149');
@@ -628,4 +631,26 @@ test.each(['removed', 'empty', 'survivor', 'outside', 'source'])('recorded histo
     expect(document.activeElement).toBe(survivor);
   } else expect(screen.getAllByText(/No matching records in loaded history/).length).toBeGreaterThan(0);
   expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1);
+});
+
+test.each(['selection', 'outside'])('invalidated choice preserves focus on surviving %s control', async target => {
+  const fetcher = vi.fn(async () => new Response(JSON.stringify({hooks})));
+  vi.stubGlobal('fetch', fetcher);
+  const open = vi.fn();
+  const workspace: Workspace = {employees: [], configuration: null, provider: 'test', model: null,
+    work: ['chosen', 'keep'].map(id => ({id, input: id, status: 'pending', assignees: ['a'], attempts: []}))};
+  const content = (snapshot: Workspace) => <><input aria-label="Outside draft" defaultValue="Keep draft" /><HookDevices workspace={snapshot} onOpenWork={open} /></>;
+  const view = render(content(workspace));
+  const chooser = await screen.findByLabelText('Assigned work for Hook: Manual · Hook ID: one · Employee ID: a') as HTMLSelectElement;
+  await userEvent.selectOptions(chooser, 'chosen');
+  const outside = screen.getByLabelText('Outside draft') as HTMLInputElement;
+  const focused = target === 'selection' ? chooser : outside;
+  focused.focus();
+  view.rerender(content({...workspace, work: workspace.work.slice(1)}));
+  expect(document.activeElement).toBe(focused);
+  expect(chooser.value).toBe('');
+  expect(outside.value).toBe('Keep draft');
+  expect((screen.getByRole('button', {name: 'Open assigned work for Hook: Manual · Hook ID: one'}) as HTMLButtonElement).disabled).toBe(true);
+  expect(open).not.toHaveBeenCalled();
+  expect(fetcher).toHaveBeenCalledTimes(1);
 });

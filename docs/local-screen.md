@@ -5233,3 +5233,30 @@ src/OverviewLoops.test.tsx src/recorded-attempt-navigation.test.tsx` with depend
 available. Local TypeScript checking passed; the affected component file passed
 62 tests and the navigation file passed 10 tests. Supervisor-selected consolidated
 verification and browser exercise are pending for this snapshot. Live provider validation remains skipped, not passed.
+
+### Chosen Skill / Hook work disappears (C135)
+
+Use the deterministic workspace/configuration transport fixtures in
+`frontend/src/App.test.tsx`, test “Company chooser … recovers only on accepted
+polling snapshots”. Launch agentown-web with the usual local-screen command
+above; use two saved Tasks (`task`, `keep`), Skill `one`, and employee Hook
+`one` targeting `a`; assign both Tasks to `a`. No provider call is needed.
+
+1. Open Company → Skill library or Hook devices. After connection, explicitly
+   refresh that configuration surface. Choose `task`, then Tab to its Open.
+2. Accept a workspace snapshot removing `task`, retaining `keep`. For Hooks,
+   also repeat with `task` retained but its assignment to `a` removed.
+3. Focus moves to that chooser’s explanation. Its polite status says the
+   previous choice is unavailable/changed and asks for another choice. The
+   chooser is blank and Open is disabled; `keep` is never selected automatically.
+4. Repeat with focus on the selection control or an outside draft. That control
+   keeps focus and the draft keeps its text. A different card’s surviving choice
+   stays selected. Restoring the removed Task does not restore consent or choice.
+5. An unchanged accepted snapshot or obsolete response must preserve Open focus
+   and the exact choice. A failed read retains the choice and uses the existing
+   disconnected explanation; reconnect and refresh configuration before opening.
+   No preview, execution, or Loop mutation should appear in the request log.
+
+Component regressions additionally cover independent card choices and surviving
+selection/outside focus. Supervisor browser validation is pending for this
+snapshot; deterministic tests do not establish live LLM validation.

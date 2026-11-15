@@ -1934,3 +1934,63 @@ test('Company Loop polling returns a removed exact-Run control to its expanded s
   expect(vi.mocked(fetch).mock.calls.every(([path, options]) => path === '/api/state' ? options?.method === 'POST'
     : ['/api/config/v1/skills', '/api/config/v1/hooks', '/api/config/v1/loops', '/api/loops/v1', '/api/teams'].includes(String(path)) && options?.method === 'GET')).toBe(true);
 });
+
+test.each(['Skill removal', 'Hook removal', 'Hook assignment'])('Company chooser %s recovers only on accepted polling snapshots', async scenario => {
+  const kind = scenario.startsWith('Skill') ? 'Skill' : 'Hook';
+  const polls: Array<() => void> = [];
+  vi.spyOn(window, 'setInterval').mockImplementation(callback => { polls.push(callback as () => void); return 0; });
+  const saved = {run_id: 'run', preview_id: 'p', skill_id: 'one', skill_name: 'Manual', instructions: 'Saved', input: 'Saved', admitted_at: 1,
+    hook_id: 'one', hook_name: 'Manual', event: 'run_completed', agent_id: 'a', source_run_id: 'source', source_outcome: 'success'};
+  const f = fixture({...initial(), work: ['task', 'keep'].map(id => ({id, input: 'Same label', status: 'completed', assignees: ['a'], attempts: [
+    {id: 'run', state: 'finished', outcome: 'success', participants: [], skill: saved, hook: saved}]}))});
+  const transport = globalThis.fetch;
+  vi.stubGlobal('fetch', vi.fn((path: string, options: RequestInit) => {
+    if (path === '/api/config/v1/skills') return Promise.resolve(new Response(JSON.stringify({skills: [{id: 'one', name: 'Manual', enabled: true}]})));
+    if (path === '/api/config/v1/hooks') return Promise.resolve(new Response(JSON.stringify({hooks: [{id: 'one', name: 'Manual', enabled: true, target_id: 'a', target_kind: 'agent', event: 'run_completed', skill_id: 'one'}]})));
+    return transport(path, options);
+  }));
+  render(<App />); await connected();
+  const refreshDevice = await screen.findByRole('button', {name: kind === 'Skill' ? 'Refresh Skill books' : 'Refresh Hook devices'});
+  await waitFor(() => expect((refreshDevice as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.click(refreshDevice);
+  const chooser = await screen.findByRole('combobox', {name: new RegExp(kind === 'Skill' ? '^Saved work for Skill:' : '^Assigned work for Hook:')}) as HTMLSelectElement;
+  await waitFor(() => expect(chooser.disabled).toBe(false));
+  await userEvent.selectOptions(chooser, 'task');
+  const action = screen.getByRole('button', {name: kind === 'Skill' ? 'Open saved work for Skill: Manual · Skill ID: one' : 'Open assigned work for Hook: Manual · Hook ID: one'});
+  action.focus();
+  const currentTransport = globalThis.fetch;
+  let resolveOld!: (response: Response) => void;
+  let hold = true;
+  vi.stubGlobal('fetch', vi.fn((path: string, options: RequestInit) => path === '/api/state' && hold
+    ? new Promise<Response>(resolve => { resolveOld = resolve; }) : currentTransport(path, options)));
+  refresh(); hold = false; refresh(); await connected();
+  await act(async () => resolveOld(new Response(JSON.stringify({...f.state, work: []}))));
+  expect(document.activeElement).toBe(action);
+  expect(chooser.value).toBe('task');
+  const help = document.getElementById(chooser.getAttribute('aria-describedby')!)!;
+  expect(help.textContent).not.toContain('Previously');
+  // Failed reads retain the last accepted choice. Reconnect and refresh the
+  // independent configuration before checking accepted workspace invalidation.
+  f.disconnect(); refresh();
+  await waitFor(() => expect(document.querySelector('#connection')!.textContent).toContain('Disconnected'));
+  expect(chooser.value).toBe('task');
+  expect(help.textContent).not.toContain('Previously');
+  f.reconnect(); refresh(); await connected();
+  fireEvent.click(refreshDevice);
+  await waitFor(() => expect(chooser.disabled).toBe(false));
+  action.focus();
+  f.state.work = scenario === 'Hook assignment'
+    ? f.state.work.map(work => work.id === 'task' ? {...work, assignees: []} : work)
+    : f.state.work.filter(work => work.id === 'keep');
+  act(() => polls.forEach(poll => poll()));
+  await waitFor(() => expect(document.activeElement).toBe(help));
+  expect(help.textContent).toContain('Previously chosen work');
+  expect(help.getAttribute('role')).toBe('status');
+  expect(chooser.value).toBe('');
+  expect((action as HTMLButtonElement).disabled).toBe(true);
+  expect(Array.from(chooser.options).some(option => option.value === 'keep')).toBe(true);
+  expect(screen.queryByRole('region', {name: /Requested (Skill|Hook) inspection/})).toBeNull();
+  expect(f.calls.every(call => call.path === '/api/state')).toBe(true);
+  expect(vi.mocked(fetch).mock.calls.every(([path, options]) => path === '/api/state' ? options?.method === 'POST'
+    : ['/api/config/v1/skills', '/api/config/v1/hooks', '/api/config/v1/loops', '/api/loops/v1', '/api/teams'].includes(String(path)) && options?.method === 'GET')).toBe(true);
+});

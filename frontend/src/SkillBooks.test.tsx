@@ -139,7 +139,8 @@ test('many saved Tasks retain exact per-book choices across polling and require 
   expect(open.mock.calls).toEqual([[{taskId: 'task-149', skillId: 'two'}]]);
   view.rerender(<SkillBooks {...props} workspace={{...workspace, work: workspace.work.slice(0, 149)}} />);
   expect(second.value).toBe(''); expect(action.disabled).toBe(true);
-  expect(screen.getByText(/Previously chosen work is no longer available/)).toBeTruthy();
+  expect(document.activeElement).toBe(screen.getByText(/Previously chosen work is no longer available/));
+  expect(document.activeElement?.getAttribute('role')).toBe('status');
   view.rerender(<SkillBooks {...props} workspace={{...workspace}} />);
   expect(second.value).toBe(''); expect(action.disabled).toBe(true);
   expect(first.value).toBe('task-2');
@@ -512,4 +513,26 @@ test.each(['removed', 'empty', 'survivor', 'outside', 'source'])('recorded histo
     expect(document.activeElement).toBe(survivor);
   } else expect(screen.getAllByText(/No matching records in loaded history/).length).toBeGreaterThan(0);
   expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1);
+});
+
+test.each(['selection', 'outside'])('invalidated choice preserves focus on surviving %s control', async target => {
+  const fetcher = vi.fn(async () => new Response(JSON.stringify({skills})));
+  vi.stubGlobal('fetch', fetcher);
+  const open = vi.fn();
+  const workspace: Workspace = {employees: [], configuration: null, provider: 'test', model: null,
+    work: ['chosen', 'keep'].map(id => ({id, input: id, status: 'pending', assignees: [], attempts: []}))};
+  const content = (snapshot: Workspace) => <><input aria-label="Outside draft" defaultValue="Keep draft" /><SkillBooks workspace={snapshot} onOpenWork={open} /></>;
+  const view = render(content(workspace));
+  const chooser = await screen.findByLabelText('Saved work for Skill: Manual · Skill ID: one') as HTMLSelectElement;
+  await userEvent.selectOptions(chooser, 'chosen');
+  const outside = screen.getByLabelText('Outside draft') as HTMLInputElement;
+  const focused = target === 'selection' ? chooser : outside;
+  focused.focus();
+  view.rerender(content({...workspace, work: workspace.work.slice(1)}));
+  expect(document.activeElement).toBe(focused);
+  expect(chooser.value).toBe('');
+  expect(outside.value).toBe('Keep draft');
+  expect((screen.getByRole('button', {name: 'Open saved work for Skill: Manual · Skill ID: one'}) as HTMLButtonElement).disabled).toBe(true);
+  expect(open).not.toHaveBeenCalled();
+  expect(fetcher).toHaveBeenCalledTimes(1);
 });
