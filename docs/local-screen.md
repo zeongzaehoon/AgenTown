@@ -5199,3 +5199,37 @@ snapshots, surviving/outside focus, failed/malformed responses, and obsolete
 connection responses. Run `./node_modules/.bin/vitest run
 src/OverviewLoops.test.tsx src/App.test.tsx` from `frontend/` with dependencies
 available to repeat the focused interaction coverage.
+
+### Linked work removal in retained Company Loops (C134-T1)
+
+Launch `agentown-web` and open **Company overview → Bounded Loop activity**.
+Use deterministic workspace/Loop responses; no provider credentials are needed.
+For the local MCP owner, explicitly choose **Inspect company Loops through local
+MCP** before inspecting its sessions.
+
+1. Expand a session's **Attempt details** and Tab to **Open work: … · Loop …**
+   for web, or **Inspect local MCP session … in work** for local MCP.
+2. Let an accepted `/api/state` poll omit that linked Task while the Loop
+   inspection retains its session. Focus returns to the same session's attempt
+   details control. A polite status names the unavailable Task and Loop. Saved
+   settings, attempt records and expansion remain available.
+3. Repeat with the last work item removed. The retained session still provides
+   its details and receives focus recovery. Repeat with focus on a surviving
+   control or an outside draft: focus stays there, and the draft and any surviving
+   work selection stay intact.
+4. An unchanged workspace must keep focus on the linked-work button. Failed
+   workspace reads must retain it. Hold an older workspace poll, supersede it
+   with **Refresh connection**, then resolve the old response without the Task:
+   it must neither remove the button nor announce unavailability. Only a current
+   accepted response may recover focus.
+5. Inspect network requests: this recovery performs no preview, execution,
+   retry, start, advance or stop mutation. Local company inspection is an explicit
+   read through its POST inspection endpoint; workspace polls use POST `/api/state`.
+
+Deterministic coverage is in `OverviewLoops.test.tsx` and
+`recorded-attempt-navigation.test.tsx`. From `frontend/`, run
+`./node_modules/.bin/tsc --noEmit` and `./node_modules/.bin/vitest run
+src/OverviewLoops.test.tsx src/recorded-attempt-navigation.test.tsx` with dependencies
+available. Local TypeScript checking passed; the affected component file passed
+62 tests and the navigation file passed 10 tests. Supervisor-selected consolidated
+verification and browser exercise are pending for this snapshot. Live provider validation remains skipped, not passed.

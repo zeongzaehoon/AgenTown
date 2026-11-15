@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, expect, test, vi } from 'vitest';
 import { App } from './App';
@@ -7,7 +7,7 @@ import { ConnectionActivity, type ActivityNavigation } from './ConnectionActivit
 // Isolate setup configuration; keep the real activity loading and navigation flow.
 vi.mock('./Connections', async importOriginal => ({...await importOriginal<typeof import('./Connections')>(), Connections: (props: ActivityNavigation & {workspaceConnected: boolean}) =>
   <ConnectionActivity {...props} clientId="codex" connected={props.workspaceConnected} />}));
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 test('opens and refocuses an older recorded result, reports missing Runs, and guards disconnect without changing drafts', async () => {
   let disconnected = false;
@@ -223,4 +223,89 @@ test.each(['Skill use', 'Hook execution', 'Hook source'])('Company %s keyboard n
   expect(instructions.value).toBe('Unsaved manual draft');
   expect(calls.filter(({path}) => /preview|execute|retry|stop|acknowledge|start/.test(path))).toEqual([]);
   expect(calls.filter(({path, method}) => path.startsWith('/api/config/') && method !== 'GET')).toEqual([]);
+});
+
+
+test.each(['web', 'local MCP'].flatMap(owner => [false, true].map(lastWork => ({owner, lastWork}))))(
+  'Company $owner accepted workspace polling recovers linked focus (last work: $lastWork)', async ({owner, lastWork}) => {
+  const uid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+  const taskId = uid(1), agentId = uid(2), sessionId = uid(3);
+  const runs = [uid(10), uid(11), uid(12)];
+  let disconnected = false;
+  let held = false;
+  let resolveOld!: (response: Response) => void;
+  const ticks: (() => void)[] = [];
+  vi.spyOn(globalThis, 'setInterval').mockImplementation((callback) => {
+    ticks.push(callback as () => void); return ticks.length as unknown as ReturnType<typeof setInterval>;
+  });
+  vi.spyOn(globalThis, 'clearInterval').mockImplementation(() => {});
+  let missingTask = false;
+  const calls: {path: string; method: string}[] = [];
+  const saved = {id: taskId, input: 'Saved Loop work', assignees: [agentId], status: 'completed', attempts: runs.slice(0, 2).map(id => ({
+    id, participants: [agentId], state: 'finished', outcome: 'success', output: `Result ${id}`, error: null,
+    provider: 'test', model: 'test', started: 10, ended: 20,
+  }))};
+  const session = {schema_version: 1, session_id: sessionId, started_at: 1, expires_at: 100, state: 'complete', admitted: 3, next_at: 0, provider: 'test', model: 'test',
+    preview: {schema_version: 1, preview_id: uid(4), policy_id: uid(5), policy_name: 'Recorded Loop', task_id: taskId, agent_id: agentId,
+      input: 'Saved Loop work', max_iterations: 3, interval_seconds: 60, expected_runs: 0, policy_enabled: true, created_at: 1}};
+  const inspection = {schema_version: 1, control: {state: 'competing_owner', can_control: false, message: 'Recorded only'}, sessions: [session],
+    attempts: runs.map((run_id, i) => ({session_id: sessionId, run_id, ordinal: i + 1, execution: null})), cancellation: ''};
+  vi.stubGlobal('fetch', vi.fn(async (path: string, init?: RequestInit) => {
+    calls.push({path, method: init?.method ?? 'GET'});
+    if (path === '/api/state' && held) return new Promise<Response>(resolve => {resolveOld = resolve;});
+    if (disconnected) throw new TypeError('network');
+    if (path === '/api/state') return new Response(JSON.stringify({employees: [{id: agentId, name: 'Writer'}], configuration: null,
+      provider: 'test', model: 'test', work: [...(lastWork ? [] : [{id: 'other', input: 'Other work', assignees: [agentId], status: 'pending', attempts: []}]), ...(missingTask ? [] : [saved])]}));
+    if (path === '/api/loops/v1') return new Response(JSON.stringify(owner === 'web' ? inspection : {...inspection, sessions: [], attempts: []}));
+    if (path === '/api/connections/v1/loops/inspect-company') return new Response(JSON.stringify({schema_version: 1, scope: 'company', status: 'confirmed', code: 'company_loops_inspected', recovery: 'Inspect explicitly', data: inspection}));
+    if (path.startsWith('/api/config/v1/')) return new Response(JSON.stringify({[path.split('/').at(-1)!]: []}));
+    if (path === '/api/teams') return new Response('{"teams":[]}');
+    return new Response('{}');
+  }));
+  render(<App />);
+  await screen.findByText(lastWork ? 'Saved Loop work' : 'Other work', {selector: 'pre'});
+  await act(async () => {});
+  fireEvent.click(screen.getByRole('button', {name: 'Open configuration'}));
+  await act(async () => {});
+  fireEvent.click(screen.getByRole('button', {name: 'Refresh configuration'}));
+  await act(async () => {});
+  const draft = screen.getByLabelText('What would you like help with?') as HTMLTextAreaElement;
+  fireEvent.change(draft, {target: {value: 'Retain polling draft'}});
+  const selected = screen.getByLabelText('Saved work') as HTMLSelectElement;
+  const previousSelection = selected.value;
+  if (owner === 'local MCP') {
+    fireEvent.click(screen.getByRole('button', {name: 'Inspect company Loops through local MCP'}));
+    await act(async () => {});
+  }
+  const disclosure = screen.getByRole('button', {name: `Attempt details for ${owner === 'local MCP' ? 'local MCP ' : ''}Loop ${sessionId}`});
+  fireEvent.click(disclosure);
+  const navigation = screen.getByRole('button', {name: owner === 'local MCP' ? `Inspect local MCP session ${sessionId} in work` : `Open work: Saved Loop work · Loop ${sessionId}`});
+  const notice = screen.getByLabelText(`${owner === 'web' ? 'Web' : 'Local MCP'} Loop activity linked work availability`);
+  const tick = async () => {await act(async () => {ticks.forEach(callback => callback());});};
+  navigation.focus();
+  await tick(); // Identical accepted workspace must preserve its focused control.
+  expect(document.activeElement).toBe(navigation); expect(notice.textContent).toBe('');
+  disconnected = true;
+  await tick();
+  expect(document.activeElement).toBe(navigation); expect(notice.textContent).toBe('');
+  disconnected = false;
+  await tick();
+  // A pending old poll is superseded by an explicit current workspace read.
+  held = true; await tick(); held = false;
+  fireEvent.click(screen.getByRole('button', {name: 'Refresh connection'}));
+  await act(async () => {});
+  await act(async () => {resolveOld(new Response(JSON.stringify({employees: [{id: agentId, name: 'Writer'}], configuration: null, provider: 'test', model: 'test', work: []})));});
+  expect(document.activeElement).toBe(navigation); expect(notice.textContent).toBe('');
+  missingTask = true;
+  await tick();
+  expect(document.activeElement).toBe(disclosure);
+  expect(notice.textContent).toContain(`linked Task ${taskId} is unavailable`);
+  expect(notice.textContent).toContain(`Loop ${sessionId}`);
+  expect(disclosure.getAttribute('aria-expanded')).toBe('true');
+  expect(screen.getAllByText('Saved session settings').length).toBeGreaterThan(0);
+  expect(draft.value).toBe('Retain polling draft');
+  if (!lastWork) expect(selected.value).toBe(previousSelection);
+  expect(calls.every(({path, method}) => path === '/api/state' ? method === 'POST'
+    : path === '/api/connections/v1/loops/inspect-company' ? method === 'POST'
+    : method === 'GET' && ['/api/loops/v1', '/api/teams', '/api/config/v1/loops', '/api/config/v1/hooks', '/api/config/v1/skills'].includes(path))).toBe(true);
 });

@@ -1,7 +1,7 @@
 import type { RecordedAttemptNavigation } from './ConnectionActivity';
 import { inspectCompanyLoops, localLoop, sameLocalSession } from './work-loop-api';
 import { canControl, controlText, sourceText, type LoopControl } from './loop-control';
-import { useEffect, useRef, useState } from 'react';
+import { Component, createRef, useEffect, useRef, useState, type ReactNode } from 'react';
 import { ApiError, api, type Workspace, type Attempt } from './api';
 import { loopLabel } from './LoopExecution';
 import { executionLabel } from './WorkLoop';
@@ -34,6 +34,48 @@ function useSessionRemoval(owner: string) {
     setAnnouncement([sessionNotice, attemptNotice].filter(Boolean).join(' '));
   }
   return {list, destination, announcement, accept};
+}
+
+type LinkedWorkRecoveryProps = {
+  workspace: Workspace | null;
+  sessions: LoopSession[];
+  owner: string;
+  children: ReactNode;
+};
+
+// Read focus before React removes the navigation button. An effect runs too late:
+// by then browsers have already returned focus to the document body.
+class LinkedWorkRecovery extends Component<LinkedWorkRecoveryProps, {notice: string}, {sessionId: string; taskId: string} | null> {
+  state = {notice: ''};
+  root = createRef<HTMLDivElement>();
+
+  getSnapshotBeforeUpdate(previous: LinkedWorkRecoveryProps) {
+    const {workspace, sessions} = this.props;
+    if (!workspace || workspace === previous.workspace) return null;
+    const focused = document.activeElement;
+    if (!(focused instanceof HTMLButtonElement) || !this.root.current?.contains(focused)) return null;
+    const taskId = focused.dataset.linkedTaskId;
+    const sessionId = focused.closest<HTMLElement>('li[data-session-id]')?.dataset.sessionId;
+    if (!taskId || !sessionId || !previous.workspace?.work.some(work => work.id === taskId)
+      || workspace.work.some(work => work.id === taskId)
+      || !sessions.some(session => session.session_id === sessionId)) return null;
+    return {sessionId, taskId};
+  }
+
+  componentDidUpdate(_previous: LinkedWorkRecoveryProps, _state: {notice: string}, snapshot: {sessionId: string; taskId: string} | null) {
+    if (!snapshot) return;
+    const row = Array.from(this.root.current?.querySelectorAll<HTMLElement>('li[data-session-id]') ?? [])
+      .find(row => row.dataset.sessionId === snapshot.sessionId);
+    row?.querySelector<HTMLButtonElement>('button[data-attempt-disclosure]')?.focus();
+    this.setState({notice: `${this.props.owner}: linked Task ${snapshot.taskId} is unavailable in the current workspace for Loop ${snapshot.sessionId}. Focus returned to its attempt details control. Recorded details remain available here.`});
+  }
+
+  render() {
+    return <div ref={this.root}>
+      <p role="status" aria-label={`${this.props.owner} linked work availability`}>{this.state.notice}</p>
+      {this.props.children}
+    </div>;
+  }
 }
 
 /** Polling and navigation inspect only; stopping requires explicit session consent. */
@@ -114,7 +156,7 @@ export function OverviewLoops({workspace, connected, onOpenWork, onOpenSession, 
     <button ref={removal.destination} type="button" aria-disabled={!connected || busy} onClick={() => { if (connected && !lock.current) refresh.current(); }}>Inspect Loop sessions again</button>
     <p>Loop admissions are separate from ordinary request counts. Expand session details here to inspect recorded attempts, or open saved work. Stop requires fresh inspection and granted local authority; otherwise stop through the owning MCP or web server. Stop prevents new admissions and requests local cancellation. Remote completion may remain unknown. Nothing starts or resumes here.</p>
     {inspection && !inspection.sessions.length && <p>No recorded Loop sessions.</p>}
-    {!!inspection?.sessions.length && <ul ref={removal.list} aria-label="Recorded Loop sessions">{inspection.sessions.map(session => {
+    {!!inspection?.sessions.length && <LinkedWorkRecovery workspace={workspace} sessions={inspection.sessions} owner="Web Loop activity"><ul ref={removal.list} aria-label="Recorded Loop sessions">{inspection.sessions.map(session => {
       const work = workspace?.work.find(w => w.id === session.preview.task_id);
       const employee = workspace?.employees.find(e => e.id === session.preview.agent_id);
       return <li key={session.session_id} data-session-id={session.session_id}>
@@ -148,10 +190,10 @@ export function OverviewLoops({workspace, connected, onOpenWork, onOpenSession, 
           </article>)}
         </section>}
         <p>Work ID: {session.preview.task_id}</p>
-        {work ? <button type="button" onClick={() => onOpenSession ? onOpenSession({taskId: work.id, sessionId: session.session_id}) : onOpenWork(work.id)}>Open work: {work.input.slice(0, 55)} · Loop {session.session_id}</button>
+        {work ? <button data-linked-task-id={work.id} type="button" onClick={() => onOpenSession ? onOpenSession({taskId: work.id, sessionId: session.session_id}) : onOpenWork(work.id)}>Open work: {work.input.slice(0, 55)} · Loop {session.session_id}</button>
           : <p>{workspace ? 'Linked work is unavailable in the loaded workspace.' : 'Loading linked work…'}</p>}
       </li>;
-    })}</ul>}
+    })}</ul></LinkedWorkRecovery>}
   </section>;
 }
 
@@ -239,7 +281,7 @@ function CompanyMcpLoops({workspace, connected, onOpenSession, onOpenRecordedTas
     <p>Read recorded sessions across all work. Inspection and opening work grant no consent and never preview, start or stop work. Stop requires fresh inspection and granted local authority. Stop prevents new admissions and requests local cancellation; remote completion may remain unknown.</p>
     {inspection && <>
       <p aria-label="Retained MCP owner authority">{fresh ? '' : 'Stale authority: '}{controlText(inspection.control)}</p>
-      <ul ref={removal.list} aria-label="Company local MCP sessions">{inspection.sessions.map(s => {
+      <LinkedWorkRecovery workspace={workspace} sessions={inspection.sessions} owner="Local MCP Loop activity"><ul ref={removal.list} aria-label="Company local MCP sessions">{inspection.sessions.map(s => {
         const work = workspace?.work.find(w => w.id === s.preview.task_id);
         return <li key={s.session_id} data-session-id={s.session_id}>
           <p>Task: {s.preview.task_id} · Session: {s.session_id} · Persisted state: {s.state}</p>
@@ -270,10 +312,10 @@ function CompanyMcpLoops({workspace, connected, onOpenSession, onOpenRecordedTas
               {a.execution?.error && <><p>Error</p><p>{a.execution.error}</p></>}
             </article>)}
           </section>}
-          {work && onOpenSession ? <button type="button" disabled={busy} onClick={() => onOpenSession({taskId: s.preview.task_id, sessionId: s.session_id})}>Inspect local MCP session {s.session_id} in work</button>
+          {work && onOpenSession ? <button data-linked-task-id={work.id} type="button" disabled={busy} onClick={() => onOpenSession({taskId: s.preview.task_id, sessionId: s.session_id})}>Inspect local MCP session {s.session_id} in work</button>
             : <p>{workspace ? 'Linked work is unavailable in the loaded workspace. Session records remain inspectable here; reload the workspace before opening work.' : 'Linked work is not loaded yet.'}</p>}
         </li>;
-      })}</ul>
+      })}</ul></LinkedWorkRecovery>
     </>}
   </section>;
 }

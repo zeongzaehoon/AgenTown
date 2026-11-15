@@ -1109,3 +1109,43 @@ test.each(['web', 'local'] as const)('%s accepted attempt removal recovers withi
     : path === '/api/connections/v1/loops/inspect-company' ? init?.method === 'POST'
     : ['/api/teams', '/api/config/v1/loops', '/api/config/v1/hooks', '/api/config/v1/skills'].includes(path) && init?.method === 'GET')).toBe(true);
 });
+
+test.each(['web', 'local'] as const)('%s workspace removal recovers linked navigation only and retains expanded records', async owner => {
+  const local = owner === 'local';
+  const saved = companySession(1);
+  const inspection = {...initial(), sessions: [saved], attempts: [{session_id: saved.session_id, run_id: uid(101), ordinal: 1, execution: {output: 'Retained output', error: null}}]};
+  const fetcher = vi.fn(async (path: string, init?: RequestInit) => {
+    if (path === '/api/loops/v1') {expect(init?.method).toBe('GET'); return new Response(JSON.stringify(local ? {...inspection, sessions: [], attempts: []} : inspection));}
+    expect(path).toBe('/api/connections/v1/loops/inspect-company'); expect(init?.method).toBe('POST');
+    return new Response(JSON.stringify({...companyReply([saved]), data: inspection}));
+  });
+  vi.stubGlobal('fetch', fetcher);
+  const loaded = {...workspace, work: [{...workspace.work[0], id: saved.preview.task_id}, {...workspace.work[0], id: 'survivor'}]};
+  const open = vi.fn();
+  const ui = (value: Workspace) => <><input aria-label="Outside draft" defaultValue="Retain draft" /><OverviewLoops connected workspace={value} onOpenWork={open} onOpenSession={open} /></>;
+  const view = render(ui(loaded));
+  await act(async () => {});
+  if (local) await act(async () => {fireEvent.click(screen.getByRole('button', {name: 'Inspect company Loops through local MCP'}));});
+  const disclosure = screen.getByRole('button', {name: `Attempt details for ${local ? 'local MCP ' : ''}Loop ${saved.session_id}`});
+  fireEvent.click(disclosure);
+  const navigation = () => screen.getByRole('button', {name: local ? `Inspect local MCP session ${saved.session_id} in work` : `Open work: Saved request · Loop ${saved.session_id}`});
+  const notice = screen.getByLabelText(`${local ? 'Local MCP' : 'Web'} Loop activity linked work availability`);
+  navigation().focus(); const original = document.activeElement;
+  view.rerender(ui({...loaded}));
+  expect(document.activeElement).toBe(original); expect(notice.textContent).toBe('');
+  for (const target of ['outside', 'surviving', 'linked', 'last']) {
+    view.rerender(ui(loaded));
+    const focus = target === 'outside' ? screen.getByLabelText('Outside draft') : target === 'surviving' ? disclosure : navigation();
+    focus.focus();
+    view.rerender(ui({...loaded, work: target === 'last' ? [] : [loaded.work[1]]}));
+    expect(document.activeElement).toBe(target === 'linked' || target === 'last' ? disclosure : focus);
+    expect(disclosure.getAttribute('aria-expanded')).toBe('true');
+    expect(screen.getByText('Retained output')).toBeTruthy();
+    expect((screen.getByLabelText('Outside draft') as HTMLInputElement).value).toBe('Retain draft');
+    if (target === 'linked' || target === 'last') {
+      expect(notice.textContent).toContain(`linked Task ${saved.preview.task_id} is unavailable`);
+      expect(notice.textContent).toContain(`Loop ${saved.session_id}`);
+    } else expect(notice.textContent).toBe('');
+  }
+  expect(open).not.toHaveBeenCalled();
+});
