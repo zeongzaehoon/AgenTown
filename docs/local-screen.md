@@ -4984,3 +4984,40 @@ SkillBooks, HookDevices and CompanyOverview. Tests used the existing dependency
 installation with `--configLoader runner`. Supervisor-selected consolidated
 checks and browser validation remain pending. Live LLM calls are skipped, not
 passed; fixture outputs do not prove provider execution.
+
+### Team-room focus after company polling (C129-T1)
+
+Launch `agentown-web --database /absolute/path/to/saved.sqlite --port 8765`
+with saved employees, teams and assigned work, then open http://127.0.0.1:8765.
+No provider execution is needed. Use a disposable fixture database and a second
+local product client to change saved assignments while leaving browser focus in
+Company. Do not execute work.
+
+1. Give two rooms different members and assign one saved request to both members.
+   Tab to that request's **Open member assignment** button in the first room.
+   In the second client remove only that room member's assignment. After the
+   next accepted company poll, focus moves to **Refresh team rooms** and the
+   Team room removals status identifies the Task and first Team ID. The same
+   Task card remains available in the other room.
+2. Tab to a team employee character. With a fixture snapshot that no longer
+   includes that employee, the character becomes **Unavailable employee**.
+   Focus returns to **Refresh team rooms** and the status identifies the employee
+   name, employee ID and Team ID. If membership is refreshing, focus instead
+   moves to the **Team rooms** heading because its refresh button is disabled.
+3. Leave focus on a surviving card, or in an unsaved work/team draft. Accepting
+   unrelated workspace changes preserves that focus and all drafts. Stop the
+   server: failed reads retain the last room controls and do not announce
+   removals. Restart with unchanged data: focus stays put. An obsolete response
+   cannot remove controls or announce identities.
+4. Refresh room membership separately and confirm its existing room/member
+   removal announcements and focus recovery still work. Navigation and polling
+   inspect saved state only; neither starts work nor saves configuration.
+
+Deterministic coverage: `TeamRooms.test.tsx` exercises shared room identities,
+unchanged snapshots, disconnected retained data, replacement employee text,
+surviving/outside focus and the busy-heading fallback. `App.test.tsx` exercises
+accepted polling after failure/obsolete responses and draft retention using
+read-only fixtures (including POST `/api/state`). Run scoped tests with
+`cd frontend && npx vitest run src/TeamRooms.test.tsx src/App.test.tsx --configLoader runner`
+and TypeScript with `npx tsc --noEmit`. Supervisor-selected verification and
+browser validation remain pending; live provider tests are skipped, not passed.

@@ -1706,3 +1706,48 @@ test('Company work navigation waits for each device refresh after reconnect and 
   expect(requests.every(path => !path.includes('/connections/') && !path.includes('/execute') && !path.includes('/preview'))).toBe(true);
   expect(f.calls.every(call => call.path === '/api/state')).toBe(true);
 });
+
+test.each(['assignment', 'employee'] as const)('workspace polling recovers removed team-room %s while retaining drafts and rejecting obsolete reads', async target => {
+  const polls: Array<() => void> = [];
+  const poll = () => polls.forEach(callback => callback());
+  vi.spyOn(window, 'setInterval').mockImplementation(callback => { polls.push(callback as () => void); return 0; });
+  const f = fixture({...initial(), employees: [{id: 'e', name: 'Writer'}], work: [
+    {id: 'w', input: 'Saved text', status: 'pending', assignees: ['e'], attempts: []},
+  ]});
+  const originalFetch = globalThis.fetch;
+  vi.stubGlobal('fetch', vi.fn((path: string, options: RequestInit) => path === '/api/teams'
+    ? Promise.resolve(new Response(JSON.stringify({teams: [{id: 't', name: 'Writers', members: ['e']}]})))
+    : originalFetch(path, options)));
+  render(<App />); await connected();
+  const name = target === 'assignment' ? 'Open member assignment: Saved text · Task ID: w · Team ID: t'
+    : 'Select team member: Writer · ID: e · Team ID: t';
+  const control = await screen.findByRole('button', {name});
+  fireEvent.change(screen.getByLabelText('What would you like help with?'), {target: {value: 'Keep draft'}});
+  fireEvent.click(screen.getByRole('button', {name: 'Manage team: Writers · ID: t'}));
+  await screen.findByLabelText('Team name');
+  fireEvent.change(screen.getByLabelText('Team name'), {target: {value: 'Keep team draft'}});
+  control.focus();
+  f.disconnect(); act(() => poll());
+  await waitFor(() => expect(document.querySelector('#connection')!.textContent).toContain('Disconnected'));
+  expect(document.activeElement).toBe(control);
+  expect(screen.getByRole('status', {name: 'Team room removals'}).textContent).toBe('');
+  f.reconnect();
+  const transport = globalThis.fetch;
+  let resolveOld!: (response: Response) => void;
+  let hold = true;
+  vi.stubGlobal('fetch', vi.fn((path: string, options: RequestInit) => path === '/api/state' && hold
+    ? new Promise<Response>(resolve => { resolveOld = resolve; }) : transport(path, options)));
+  refresh(); hold = false; refresh(); await connected();
+  await act(async () => resolveOld(new Response(JSON.stringify({...f.state, employees: [], work: []}))));
+  expect(document.activeElement).toBe(control);
+  expect(screen.getByRole('status', {name: 'Team room removals'}).textContent).toBe('');
+  if (target === 'assignment') f.state.work = [];
+  else f.state.employees = [];
+  act(() => poll());
+  await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', {name: 'Refresh team rooms'})));
+  expect(screen.getByRole('status', {name: 'Team room removals'}).textContent).toContain(target === 'assignment' ? 'Task ID: w · Team ID: t' : 'Writer · ID: e · Team ID: t');
+  expect((screen.getByLabelText('What would you like help with?') as HTMLTextAreaElement).value).toBe('Keep draft');
+  expect((screen.getByLabelText('Team name') as HTMLInputElement).value).toBe('Keep team draft');
+  expect(f.calls.every(call => call.path === '/api/state')).toBe(true);
+  expect(vi.mocked(fetch).mock.calls.every(([path, options]) => path === '/api/state' ? options?.method === 'POST' : ['/api/config/v1/skills', '/api/config/v1/hooks', '/api/config/v1/loops', '/api/loops/v1', '/api/teams'].includes(String(path)) && options?.method === 'GET')).toBe(true);
+});

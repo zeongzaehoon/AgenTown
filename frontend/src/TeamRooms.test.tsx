@@ -286,3 +286,44 @@ test.each(['failure', 'abort', 'obsolete'] as const)('rejected membership refres
     expect(screen.getByRole('status', {name: 'Team room removals'}).textContent).toBe('');
   }
 });
+
+test.each(['assignment', 'employee', 'busy', 'survivor', 'outside'] as const)('workspace removal recovers only the removed room control: %s', async target => {
+  let finish!: (value: Response) => void;
+  vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(resolve => { finish = resolve; })));
+  const props = {connected: true, selectedEmployee: '', onOpenWork: vi.fn(), onSelectEmployee: vi.fn()};
+  const rooms = [{id: 't0', name: 'Editors', members: ['a']}, {id: 't1', name: 'Editors', members: ['b']}];
+  const view = render(<><button>Outside rooms</button><TeamRooms {...props} workspace={workspace} /></>);
+  await act(async () => finish(response({teams: rooms})));
+  const refresh = screen.getByRole('button', {name: 'Refresh team rooms'});
+  const control = screen.getByRole('button', {name: target === 'outside' ? 'Outside rooms'
+    : target === 'employee' ? 'Select team member: Alex · ID: a · Team ID: t0'
+    : `Open member assignment: Shared work · Task ID: w · Team ID: ${target === 'survivor' ? 't1' : 't0'}`});
+  control.focus();
+  // An unchanged accepted snapshot and disconnection retain focus and identity.
+  view.rerender(<><button>Outside rooms</button><TeamRooms {...props} workspace={{...workspace}} /></>);
+  expect(document.activeElement).toBe(control);
+  view.rerender(<><button>Outside rooms</button><TeamRooms {...props} connected={false} workspace={workspace} /></>);
+  expect(document.activeElement).toBe(control);
+  expect(screen.getByRole('status', {name: 'Team room removals'}).textContent).toBe('');
+  view.rerender(<><button>Outside rooms</button><TeamRooms {...props} workspace={workspace} /></>);
+  if (target === 'busy') {
+    fireEvent.click(refresh);
+    control.focus();
+  }
+  const next = {...workspace, employees: workspace.employees.filter(employee => employee.id !== 'a'),
+    work: workspace.work.map(work => ({...work, assignees: ['b']}))};
+  view.rerender(<><button>Outside rooms</button><TeamRooms {...props} workspace={next} /></>);
+  const notice = screen.getByRole('status', {name: 'Team room removals'});
+  if (target === 'outside' || target === 'survivor') {
+    expect(document.activeElement).toBe(control);
+    expect(notice.textContent).toBe('');
+  } else {
+    expect(document.activeElement).toBe(target === 'busy' ? screen.getByRole('heading', {name: 'Team rooms'}) : refresh);
+    expect(notice.textContent).toContain(target === 'employee' ? 'Alex · ID: a · Team ID: t0' : 'Task ID: w · Team ID: t0');
+    expect(notice.textContent).toContain('was removed');
+  }
+  // The same Task survives in another room; it must not mask removal in t0.
+  expect(screen.getByRole('button', {name: 'Open member assignment: Shared work · Task ID: w · Team ID: t1'})).toBeTruthy();
+  expect(screen.getByText('Unavailable employee · ID: a')).toBeTruthy();
+  if (target === 'busy') await act(async () => finish(response({teams: rooms})));
+});

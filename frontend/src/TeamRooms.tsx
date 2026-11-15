@@ -13,10 +13,29 @@ export function TeamRooms({workspace, connected, selectedEmployee, onSelectEmplo
   const [announcement, setAnnouncement] = useState('');
   const grid = useRef<HTMLDivElement>(null);
   const refreshButton = useRef<HTMLButtonElement>(null);
+  const heading = useRef<HTMLHeadingElement>(null);
+  const focusedControl = useRef<HTMLButtonElement | null>(null);
+  const previousWorkspace = useRef(workspace);
+  useLayoutEffect(() => {
+    if (previousWorkspace.current === workspace) return;
+    previousWorkspace.current = workspace;
+    // Failed/disconnected reads retain the workspace. Only accepted data can
+    // remove a room-specific control; shared Task IDs in other rooms differ.
+    if (!workspace) return;
+    const control = focusedControl.current;
+    if (control && !control.isConnected && document.activeElement === document.body) {
+      setAnnouncement(`${control.getAttribute('aria-label')} was removed from this team room view. Team rooms remain available.`);
+      (busy ? heading.current : refreshButton.current)?.focus();
+      focusedControl.current = null;
+    } else {
+      setAnnouncement('');
+    }
+  }, [workspace]);
   const recoverFocus = useRef(false);
   useLayoutEffect(() => {
     if (!busy && recoverFocus.current) {
       recoverFocus.current = false;
+      focusedControl.current = null;
       refreshButton.current?.focus();
     }
   }, [busy, teams]);
@@ -72,13 +91,19 @@ export function TeamRooms({workspace, connected, selectedEmployee, onSelectEmplo
   }, [connected]);
   const stale = !membershipFresh || !connected;
   return <section className="team-rooms" aria-labelledby="team-rooms-title">
-    <h3 id="team-rooms-title">Team rooms</h3>
+    <h3 ref={heading} tabIndex={-1} id="team-rooms-title">Team rooms</h3>
     <p>Persistent teams group employees. Membership does not imply collaboration or execution. Member workload comes from recorded employee assignments, not team-owned work. Shared members and requests appear in each relevant room; counts must not be added across rooms.</p>
     <p role="status">{teams !== null && stale ? `Team rooms are stale — showing the last successful snapshot.${busy ? ' Refreshing team rooms…' : ' Refresh team rooms after reconnecting.'}` : !connected ? 'Disconnected — team rooms unavailable. Reconnect and refresh team rooms.' : busy ? 'Loading team rooms…' : teams === null ? 'Team rooms unavailable. Refresh to try again.' : teams.length ? 'Showing persisted team rooms.' : 'No team rooms yet. Create a team in Teams.'}</p>
     {error && <p role="alert">{error}</p>}
     <p role="status" aria-label="Team room removals">{announcement}</p>
     <button ref={refreshButton} type="button" disabled={busy} onClick={() => void refresh()}>Refresh team rooms</button>
-    <div ref={grid} className="team-room-grid">{teams?.map(team => <section className="team-room" key={team.id} data-team-id={team.id} aria-label={`Team room: ${team.name} · ID: ${team.id}`}>
+    <div ref={grid} className="team-room-grid" onFocusCapture={event => {
+      const target = event.target;
+      focusedControl.current = target instanceof HTMLButtonElement && target.closest('[data-work-id], [data-member-id]') ? target : null;
+    }} onBlurCapture={event => {
+      // Native removal does not dispatch blur. Explicit navigation or blur does.
+      if (event.target.isConnected) focusedControl.current = null;
+    }}>{teams?.map(team => <section className="team-room" key={team.id} data-team-id={team.id} aria-label={`Team room: ${team.name} · ID: ${team.id}`}>
       <h4>{team.name}</h4><p>Team ID: {team.id}</p>
       {(stale || busy) && <p>{stale ? 'Stale team snapshot' : 'Refreshing team snapshot'}</p>}
       <button type="button" disabled={!onOpenTeam} aria-controls="teams-panel" onClick={() => onOpenTeam?.(team.id)}>Manage team: {team.name} · ID: {team.id}</button>
