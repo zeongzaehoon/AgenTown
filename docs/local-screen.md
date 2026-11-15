@@ -4917,3 +4917,70 @@ stop controls remain separate. Deterministic coverage lives in
 `npx vitest run src/OverviewLoops.test.tsx src/recorded-attempt-navigation.test.tsx`
 for these interactions. Browser validation is pending supervisor verification
 under the selected check profile; these steps do not claim a live provider test.
+
+### Open Company Skill/Hook recorded attempts (C128-T1)
+
+With the existing product Python environment and native bindings, create a fresh
+saved-history fixture using the same native contracts exercised by
+`python/tests/test_web.py::test_workspace_declared_sources_persist_by_run`.
+These commands persist deterministic results without calling a provider:
+
+```sh
+python - <<'PYFIXTURE'
+import tempfile
+from pathlib import Path
+from llm_engine import _native
+p = str(Path(tempfile.mkdtemp(prefix='agentown-company-records-')) / 'fixture.sqlite')
+employee = _native.create_agent(p, 'Fixture writer')[0]
+task = _native.create_assigned_work(p, 'Inspect saved Skill and Hook results', employee)[0]
+skill = _native.create_skill(p, 'Fixture manual', 'Use short sentences.')
+_native.set_skill_enabled(p, skill['id'], True)
+preview = _native.preview_skill(p, task, skill['id'])
+source = _native.start_skill_execution(p, task, preview['preview_id'], 'anthropic', 'fixture', 0, declared_source='cursor')
+_native.finish_execution(p, source[0], 'Saved Skill result (fixture)', None)
+hook = _native.create_hook(p, 'Fixture follow-up', skill['id'], 'agent', employee, 'run_completed')
+_native.set_hook_enabled(p, hook['id'], True)
+preview = _native.preview_hook(p, task, hook['id'])
+followup = _native.start_hook_execution(p, task, preview['preview_id'], 'anthropic', 'fixture', 1, declared_source='claude-code')
+_native.finish_execution(p, followup[0], 'Saved Hook result (fixture)', None)
+latest = _native.start_mcp_execution(p, task, 'anthropic', 'fixture', 2, True, 'codex')
+_native.finish_execution(p, latest[0], 'Newer ordinary result (fixture)', None)
+print('Database:', p, '\nTask:', task, '\nSkill Run:', source[0], '\nHook Run:', followup[0], '\nNewest Run:', latest[0])
+PYFIXTURE
+agentown-web --database /absolute/path/printed/above/fixture.sqlite --port 8765
+```
+
+1. Open http://127.0.0.1:8765, type an unsaved work draft, open the Fixture
+   manual book, and edit its Instructions without saving.
+2. In Company, keyboard-expand **Recorded use for Skill**. Tab to **Open saved
+   Task** for the printed Skill Run and press Enter. Saved work expands that
+   exact older attempt, focuses its summary and shows **Selected recorded
+   attempt**. The newest ordinary Run must not be selected.
+3. Collapse that saved-work attempt; return to the same Company action and press
+   Space. Expansion and summary focus must repeat. Both drafts remain unchanged.
+4. Expand **Recorded attempts for Hook**. Open the printed Hook execution Run,
+   then its source Run using the separate buttons. Each focuses the matching
+   saved-work summary. Source attempt details remain independently readable.
+5. Stop the local server and choose Refresh connection. Retained details remain
+   readable and opening actions explain reconnecting and remain keyboard-focusable
+   but cannot navigate. Restarting and refreshing connection does not clear the
+   existing configuration-refresh gates on the Skill/Hook work choosers.
+
+The deterministic component and App fixtures also cover a missing source Run:
+opening its persisted ID focuses **Recorded attempt unavailable** with that exact
+Task/Run pair and selects no substitute. Removing the Task from loaded history
+removes its Company recorded-use actions; App also rejects missing-Task requests.
+Opening never previews, executes, retries, stops or mutates configuration.
+Existing workspace and configuration refresh reads can continue while opening
+an attempt. The App interaction test permits only those specific read endpoints
+(including the existing POST `/api/state` snapshot request), rather than assuming
+that the total request count stays fixed while polling is active.
+
+Scoped checks (when dependencies are installed):
+`cd frontend && npx vitest run src/SkillBooks.test.tsx src/HookDevices.test.tsx src/recorded-attempt-navigation.test.tsx`
+and `npx tsc --noEmit`. Integration validation passed TypeScript checking,
+all 6 recorded-attempt navigation tests, and the 54 component tests across
+SkillBooks, HookDevices and CompanyOverview. Tests used the existing dependency
+installation with `--configLoader runner`. Supervisor-selected consolidated
+checks and browser validation remain pending. Live LLM calls are skipped, not
+passed; fixture outputs do not prove provider execution.

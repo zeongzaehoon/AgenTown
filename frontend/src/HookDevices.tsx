@@ -1,10 +1,11 @@
+import type { RecordedAttemptNavigation } from './ConnectionActivity';
 import type { Attempt, Workspace } from './api';
 export interface HookNavigation {taskId: string; hookId: string; employeeId: string}
 import { useEffect, useLayoutEffect, useId, useRef, useState } from 'react';
 import { configurationRequest, type HookRecord } from './configuration-api';
 
 /** Office inspection is read-only and independent of provider availability. */
-export function HookDevices({onOpenHook, onOpenWork, workspace, connected = true}: {onOpenHook?: (id: string) => void; onOpenWork?: (request: HookNavigation) => void; workspace?: Workspace | null; connected?: boolean}) {
+export function HookDevices({onOpenHook, onOpenWork, onOpenRecordedTask, workspace, connected = true}: {onOpenHook?: (id: string) => void; onOpenWork?: (request: HookNavigation) => void; onOpenRecordedTask?: (request: RecordedAttemptNavigation) => void; workspace?: Workspace | null; connected?: boolean}) {
   const [devices, setDevices] = useState<HookRecord[] | null>(null);
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState('');
@@ -79,7 +80,7 @@ export function HookDevices({onOpenHook, onOpenWork, workspace, connected = true
       {(!connected || disconnectedSnapshot) && <span>{!connected ? 'Disconnected — potentially stale configuration snapshot' : 'Potentially stale configuration snapshot — refresh to check'}</span>}
       {(busy || error) && <span>{busy ? 'Refreshing snapshot' : 'Stale snapshot'}</span>}
     </button>
-      <RecordedHookAttempts device={device} workspace={workspace} connected={connected} />
+      <RecordedHookAttempts onOpenRecordedTask={onOpenRecordedTask} device={device} workspace={workspace} connected={connected} />
       {device.target_kind !== 'agent' || !['run_completed', 'run_failed'].includes(device.event)
         ? <p>Local follow-up preview supports employee run-completed and run-failed Hooks only. Team and task-created Hooks remain configuration only.</p>
         : <AssignedWorkChooser device={device} workspace={workspace} connected={connected} busy={busy} stale={!!error || disconnectedSnapshot} onOpenWork={onOpenWork} />}
@@ -133,8 +134,8 @@ function AssignedWorkChooser({device, workspace, connected, busy, stale, onOpenW
 }
 
 /** Saved Hook identity is independent of current configuration and assignments. */
-function RecordedHookAttempts({device, workspace, connected}: {
-  device: HookRecord; workspace?: Workspace | null; connected: boolean;
+function RecordedHookAttempts({onOpenRecordedTask, device, workspace, connected}: {
+  device: HookRecord; workspace?: Workspace | null; connected: boolean; onOpenRecordedTask?: (request: RecordedAttemptNavigation) => void;
 }) {
   const id = useId();
   const [expanded, setExpanded] = useState(false);
@@ -152,8 +153,10 @@ function RecordedHookAttempts({device, workspace, connected}: {
         {!matches.length && <p>No matching records in loaded history. Other saved history may contain Hook attempts.</p>}
         {matches.map(({work, attempt, saved}) => <section key={`${work.id}:${attempt.id}`} aria-label={`Recorded Hook attempt · Task ${work.id} · Run ${attempt.id}`}>
           <p>Task ID: {work.id} · Run ID: {attempt.id}</p>
+          <RecordedAttemptAction taskId={work.id} runId={attempt.id} connected={connected} onOpen={onOpenRecordedTask} />
           <p>Saved Hook: {saved.hook_name} · Hook ID: {saved.hook_id}</p>
           <p>Source Run ID: {saved.source_run_id} · Event: {saved.event} · Source outcome: {saved.source_outcome}</p>
+          <RecordedAttemptAction taskId={work.id} runId={saved.source_run_id} connected={connected} onOpen={onOpenRecordedTask} />
           <SourceAttempt sourceRunId={saved.source_run_id} source={work.attempts.find(source => source.id === saved.source_run_id)} />
           <p>Saved employee ID: {saved.agent_id}</p>
           <p>Saved Skill: {saved.skill_name} · Skill ID: {saved.skill_id}</p>
@@ -189,4 +192,18 @@ function SourceAttempt({sourceRunId, source}: {sourceRunId: string; source?: Att
       </>}
     </div>
   </div>;
+}
+
+/** Keep unavailable actions focusable; historical IDs are never replaced by a newer Run. */
+function RecordedAttemptAction({taskId, runId, connected, onOpen}: {
+  taskId: string; runId: string; connected: boolean;
+  onOpen?: (request: RecordedAttemptNavigation) => void;
+}) {
+  const help = useId();
+  const canOpen = connected && !!onOpen;
+  return <>
+    <button type="button" aria-disabled={!canOpen} aria-controls="selected-work-inspection" aria-describedby={canOpen ? undefined : help}
+      onClick={() => { if (canOpen) onOpen?.({taskId, runId}); }}>Open saved Task: {taskId} · Run: {runId}</button>
+    {!canOpen && <p id={help}>{!connected ? 'Reconnect before opening saved work. Retained recorded details remain readable.' : 'Saved-work navigation unavailable.'}</p>}
+  </>;
 }

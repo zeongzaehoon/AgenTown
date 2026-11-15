@@ -441,3 +441,40 @@ test.each(['keyboard', 'native blur', 'outside'])('reconnect requires explicit f
   expect(open).toHaveBeenCalledTimes(1);
   expect(fetcher).toHaveBeenCalledTimes(4);
 });
+
+
+test('recorded navigation emits persisted identities, including missing sources, and guards unavailable callbacks', async () => {
+  const fetcher = vi.fn(async () => new Response(JSON.stringify({skills})));
+  vi.stubGlobal('fetch', fetcher);
+  const saved = {run_id: 'execution', preview_id: 'preview', skill_id: 'one', skill_name: 'Saved manual', instructions: 'Retained instructions', input: 'Saved input', admitted_at: 1};
+  const hook = {...saved, hook_id: 'one', hook_name: 'Saved Hook', event: 'run_completed', agent_id: 'a', source_run_id: 'missing', source_outcome: 'success'};
+  const workspace: Workspace = {employees: [], configuration: null, provider: 'test', model: null, work: [
+    {id: 'task', input: 'Saved work', status: 'completed', assignees: [], attempts: [
+      {id: 'execution', state: 'finished', outcome: 'success', participants: [], skill: saved, hook},
+      {id: 'latest', state: 'finished', outcome: 'success', participants: []}]}]};
+  const open = vi.fn();
+  const view = render(<SkillBooks workspace={workspace} onOpenRecordedTask={open} />);
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole('button', {name: 'Recorded use for Skill: Manual · Skill ID: one'}));
+  const action = screen.getByRole('button', {name: 'Open saved Task: task · Run: execution'});
+  const before = fetcher.mock.calls.length;
+  action.focus(); await user.keyboard('{Enter}');
+  action.focus(); await user.keyboard(' ');
+  expect(open.mock.calls).toEqual([[{taskId: 'task', runId: 'execution'}], [{taskId: 'task', runId: 'execution'}]]);
+
+  expect(fetcher).toHaveBeenCalledTimes(before);
+  view.rerender(<SkillBooks workspace={workspace} connected={false} onOpenRecordedTask={open} />);
+  const count = open.mock.calls.length;
+  action.focus(); await user.keyboard('{Enter}');
+  expect(document.activeElement).toBe(action);
+  expect(action.getAttribute('aria-disabled')).toBe('true');
+  expect(open).toHaveBeenCalledTimes(count);
+  expect(screen.getAllByText('Retained instructions')).toHaveLength(2);
+  view.rerender(<SkillBooks workspace={workspace} />);
+  await user.click(action);
+  expect(action.getAttribute('aria-disabled')).toBe('true');
+  expect(open).toHaveBeenCalledTimes(count);
+  view.rerender(<SkillBooks workspace={{...workspace, work: []}} onOpenRecordedTask={open} />);
+  expect(screen.queryByRole('button', {name: 'Open saved Task: task · Run: execution'})).toBeNull();
+  expect(fetcher).toHaveBeenCalledTimes(before);
+});

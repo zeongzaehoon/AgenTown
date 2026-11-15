@@ -144,3 +144,83 @@ test.each(['web', 'local MCP'])('Company %s Loop opens exact attempts, refocuses
   expect(draft.value).toBe('Retain this Loop navigation draft');
   expect(calls.filter(path => /preview|execute|retry|stop|acknowledge|start/.test(path))).toEqual([]);
 });
+
+test.each(['Skill use', 'Hook execution', 'Hook source'])('Company %s keyboard navigation opens exact older Runs without mutations', async surface => {
+  let disconnected = false;
+  let missingTask = false;
+  const calls: {path: string; method: string}[] = [];
+  const provenance = {run_id: 'execution', preview_id: 'preview', skill_id: 'manual', skill_name: 'Saved manual',
+    instructions: 'Retained instructions', input: 'Effective saved input', admitted_at: 1};
+  const hook = {...provenance, hook_id: 'trigger', hook_name: 'Saved trigger', event: 'run_completed', agent_id: 'writer',
+    source_run_id: 'older', source_outcome: 'success'};
+  const saved = {id: 'saved', input: 'Saved Skill and Hook work', status: 'completed', assignees: ['writer'], attempts: [
+    {id: 'older', state: 'finished', outcome: 'success', participants: ['writer'], output: 'Older source result'},
+    {id: 'execution', state: 'finished', outcome: 'success', participants: ['writer'], output: 'Hook result', skill: provenance, hook},
+    {id: 'latest', state: 'finished', outcome: 'success', participants: ['writer'], output: 'Latest result'},
+    {id: 'missing-source-execution', state: 'finished', outcome: 'failure', participants: ['writer'], hook: {...hook, run_id: 'missing-source-execution', source_run_id: 'absent'}},
+  ]};
+  vi.stubGlobal('fetch', vi.fn(async (path: string, options?: RequestInit) => {
+    calls.push({path, method: options?.method ?? 'GET'});
+    if (disconnected) throw new TypeError('network');
+    if (path === '/api/state') return new Response(JSON.stringify({employees: [{id: 'writer', name: 'Writer'}], configuration: null,
+      provider: 'test', model: 'test', work: [{id: 'other', input: 'Other request', status: 'pending', assignees: [], attempts: []}, ...(missingTask ? [] : [saved])]}));
+    if (path === '/api/config/v1/skills') return new Response(JSON.stringify({skills: [{id: 'manual', name: 'Manual', enabled: true, instructions: 'Current configuration'}]}));
+    if (path === '/api/config/v1/hooks') return new Response(JSON.stringify({hooks: [{id: 'trigger', name: 'Trigger', enabled: true, event: 'run_completed', target_kind: 'agent', target_id: 'writer', skill_id: 'manual'}]}));
+    if (path === '/api/config/v1/loops') return new Response('{"loops":[]}');
+    if (path === '/api/teams') return new Response('{"teams":[]}');
+    return new Response('{}');
+  }));
+  const user = userEvent.setup(); render(<App />);
+  await screen.findByText('Other request', {selector: 'pre'});
+  const draft = screen.getByLabelText('What would you like help with?') as HTMLTextAreaElement;
+  fireEvent.change(draft, {target: {value: 'Preserve unsaved work'}});
+  // A configuration draft also survives exact-attempt navigation.
+  await user.click(await screen.findByRole('button', {name: 'Open Skill book: Manual · ID: manual'}));
+  const instructions = await screen.findByLabelText('Instructions') as HTMLTextAreaElement;
+  await waitFor(() => expect(instructions.value).toBe('Current configuration'));
+  fireEvent.change(instructions, {target: {value: 'Unsaved manual draft'}});
+  await user.click(await screen.findByRole('button', {name: surface === 'Skill use'
+    ? 'Recorded use for Skill: Manual · Skill ID: manual' : 'Recorded attempts for Hook: Trigger · Hook ID: trigger'}));
+  const runId = surface === 'Hook source' ? 'older' : 'execution';
+  const action = screen.getByRole('button', {name: `Open saved Task: saved · Run: ${runId}`});
+  const before = calls.length;
+  action.focus(); await user.keyboard('{Enter}');
+  const detail = document.querySelector<HTMLDetailsElement>(`[data-attempt-id="${runId}"]`)!;
+  await waitFor(() => expect(document.activeElement).toBe(detail.querySelector('summary')));
+  expect(detail.open).toBe(true);
+  expect(detail.querySelector('summary')!.textContent).toContain('Selected recorded attempt');
+  expect(document.querySelector('[data-attempt-id="latest"] summary')!.textContent).not.toContain('Selected recorded attempt');
+  fireEvent.click(detail.querySelector('summary')!);
+  action.focus(); await user.keyboard(' ');
+  await waitFor(() => expect(document.activeElement).toBe(detail.querySelector('summary')));
+  expect(detail.open).toBe(true);
+  // Saved-work selection and periodic polling retain their configuration reads.
+  // Every request during navigation must stay inside this read-only boundary.
+  const allowedReads = ['/api/config/v1/skills', '/api/config/v1/hooks', '/api/config/v1/loops', '/api/loops/v1'];
+  expect(calls.slice(before).filter(({path, method}) =>
+    !(method === 'GET' && allowedReads.includes(path)) && !(method === 'POST' && path === '/api/state'))).toEqual([]);
+  expect(draft.value).toBe('Preserve unsaved work');
+  expect(instructions.value).toBe('Unsaved manual draft');
+  if (surface !== 'Skill use') {
+    await user.click(screen.getByRole('button', {name: 'Open saved Task: saved · Run: absent'}));
+    const unavailable = screen.getByText(/Recorded attempt unavailable in the current workspace snapshot/);
+    expect(unavailable.textContent).toContain('Run: absent');
+    expect(document.activeElement).toBe(unavailable);
+    expect(screen.queryByText(/Selected recorded attempt/)).toBeNull();
+  }
+  disconnected = true;
+  await user.click(screen.getByRole('button', {name: 'Refresh connection'}));
+  await waitFor(() => expect(action.getAttribute('aria-disabled')).toBe('true'));
+  const requestCount = calls.length;
+  action.focus(); await user.keyboard('{Enter}');
+  expect(document.activeElement).toBe(action);
+  expect(screen.getAllByText('Retained instructions').length).toBeGreaterThan(0);
+  expect(calls).toHaveLength(requestCount);
+  disconnected = false; missingTask = true;
+  await user.click(screen.getByRole('button', {name: 'Refresh connection'}));
+  await waitFor(() => expect(screen.queryByRole('button', {name: `Open saved Task: saved · Run: ${runId}`})).toBeNull());
+  expect(draft.value).toBe('Preserve unsaved work');
+  expect(instructions.value).toBe('Unsaved manual draft');
+  expect(calls.filter(({path}) => /preview|execute|retry|stop|acknowledge|start/.test(path))).toEqual([]);
+  expect(calls.filter(({path, method}) => path.startsWith('/api/config/') && method !== 'GET')).toEqual([]);
+});

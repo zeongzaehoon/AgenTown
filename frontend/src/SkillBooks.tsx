@@ -1,10 +1,11 @@
+import type { RecordedAttemptNavigation } from './ConnectionActivity';
 import type { Workspace } from './api';
 export interface SkillNavigation {taskId: string; skillId: string}
 import { useEffect, useLayoutEffect, useId, useRef, useState } from 'react';
 import { configurationRequest, type ConfigurationRecord } from './configuration-api';
 
 /** Office inspection is read-only and independent of provider availability. */
-export function SkillBooks({onOpenSkill, onOpenWork, workspace, connected = true}: {onOpenSkill?: (id: string) => void; onOpenWork?: (request: SkillNavigation) => void; workspace?: Workspace | null; connected?: boolean}) {
+export function SkillBooks({onOpenSkill, onOpenWork, onOpenRecordedTask, workspace, connected = true}: {onOpenSkill?: (id: string) => void; onOpenWork?: (request: SkillNavigation) => void; onOpenRecordedTask?: (request: RecordedAttemptNavigation) => void; workspace?: Workspace | null; connected?: boolean}) {
   const [books, setBooks] = useState<ConfigurationRecord[] | null>(null);
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState('');
@@ -78,7 +79,7 @@ export function SkillBooks({onOpenSkill, onOpenWork, workspace, connected = true
       {(!connected || disconnectedSnapshot) && <span>{!connected ? 'Disconnected — potentially stale configuration snapshot' : 'Potentially stale configuration snapshot — refresh to check'}</span>}
       {(busy || error) && <span>{busy ? 'Refreshing snapshot' : 'Stale snapshot'}</span>}
     </button>
-    <RecordedSkillUse book={book} workspace={workspace} connected={connected} />
+    <RecordedSkillUse onOpenRecordedTask={onOpenRecordedTask} book={book} workspace={workspace} connected={connected} />
       <SavedWorkChooser book={book} workspace={workspace} connected={connected} busy={busy} stale={!!error || disconnectedSnapshot} onOpenWork={onOpenWork} />
     </article>)}</div>
   </section>;
@@ -129,8 +130,8 @@ function SavedWorkChooser({book, workspace, connected, busy, stale, onOpenWork}:
 }
 
 /** Persisted IDs and context only; opening these details never requests execution. */
-function RecordedSkillUse({book, workspace, connected}: {
-  book: ConfigurationRecord; workspace?: Workspace | null; connected: boolean;
+function RecordedSkillUse({onOpenRecordedTask, book, workspace, connected}: {
+  book: ConfigurationRecord; workspace?: Workspace | null; connected: boolean; onOpenRecordedTask?: (request: RecordedAttemptNavigation) => void;
 }) {
   const id = useId();
   const [expanded, setExpanded] = useState(false);
@@ -150,6 +151,7 @@ function RecordedSkillUse({book, workspace, connected}: {
         {!matches.length && <p>No matching records in loaded history. Other saved history may contain Skill use.</p>}
         {matches.map(({work, attempt, contexts}) => <section key={`${work.id}:${attempt.id}`} aria-label={`Recorded Skill use · Task ${work.id} · Run ${attempt.id}`}>
           <p>Task ID: {work.id} · Run ID: {attempt.id}</p>
+          <RecordedAttemptAction taskId={work.id} runId={attempt.id} connected={connected} onOpen={onOpenRecordedTask} />
           <p>Execution state: {attempt.state} · Outcome: {attempt.outcome ?? 'Not recorded'}</p>
           {contexts.map((saved, index) => saved && <div key={index}>
             <p>{saved === attempt.hook ? 'Hook-backed Skill use' : 'Direct Skill use'}</p>
@@ -166,4 +168,18 @@ function RecordedSkillUse({book, workspace, connected}: {
       </>}
     </div>
   </div>;
+}
+
+/** Keep unavailable actions focusable; historical IDs are never replaced by a newer Run. */
+function RecordedAttemptAction({taskId, runId, connected, onOpen}: {
+  taskId: string; runId: string; connected: boolean;
+  onOpen?: (request: RecordedAttemptNavigation) => void;
+}) {
+  const help = useId();
+  const canOpen = connected && !!onOpen;
+  return <>
+    <button type="button" aria-disabled={!canOpen} aria-controls="selected-work-inspection" aria-describedby={canOpen ? undefined : help}
+      onClick={() => { if (canOpen) onOpen?.({taskId, runId}); }}>Open saved Task: {taskId} · Run: {runId}</button>
+    {!canOpen && <p id={help}>{!connected ? 'Reconnect before opening saved work. Retained recorded details remain readable.' : 'Saved-work navigation unavailable.'}</p>}
+  </>;
 }

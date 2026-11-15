@@ -94,8 +94,8 @@ export function CompanyOverview({workspace, connected, error, onOpenWork, onOpen
       </button>)}</div>
     </section>
     <TeamRooms onOpenWork={onOpenWork} workspace={workspace} connected={connected} selectedEmployee={selectedEmployee} onSelectEmployee={onSelectTeamMember ?? onSelectEmployee} onOpenTeam={onOpenTeam} />
-    <SkillBooks onOpenSkill={onOpenSkill} onOpenWork={onOpenSkillWork} workspace={workspace} connected={connected} />
-    <HookDevices onOpenHook={onOpenHook} onOpenWork={onOpenHookWork} workspace={workspace} connected={connected} />
+    <SkillBooks onOpenRecordedTask={onOpenRecordedTask} onOpenSkill={onOpenSkill} onOpenWork={onOpenSkillWork} workspace={workspace} connected={connected} />
+    <HookDevices onOpenRecordedTask={onOpenRecordedTask} onOpenHook={onOpenHook} onOpenWork={onOpenHookWork} workspace={workspace} connected={connected} />
     <LoopDevices onOpenLoop={onOpenLoop} onOpenPolicy={onOpenSession} workspace={workspace} connected={connected} />
     <OverviewLoops onOpenRecordedTask={onOpenRecordedTask} connected={connected} onOpenSession={onOpenSession} workspace={workspace} onOpenWork={onOpenWork} />
     {workspace && <>
