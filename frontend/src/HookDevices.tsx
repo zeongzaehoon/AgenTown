@@ -141,8 +141,31 @@ function RecordedHookAttempts({onOpenRecordedTask, device, workspace, connected}
   const [expanded, setExpanded] = useState(false);
   const matches = (workspace?.work ?? []).flatMap(work => work.attempts.flatMap(attempt =>
     attempt.hook?.hook_id === device.id ? [{work, attempt, saved: attempt.hook}] : []));
-  return <div>
-    <button type="button" aria-expanded={expanded} aria-controls={id}
+  const disclosure = useRef<HTMLButtonElement>(null);
+  const focusedControl = useRef<HTMLElement | null>(null);
+  const [historyAnnouncement, setHistoryAnnouncement] = useState('');
+  useEffect(() => {
+    function trackFocus(event: FocusEvent) {
+      if (event.target !== focusedControl.current) focusedControl.current = null;
+    }
+    document.addEventListener('focusin', trackFocus);
+    return () => document.removeEventListener('focusin', trackFocus);
+  }, []);
+  useLayoutEffect(() => {
+    const focused = focusedControl.current;
+    if (!focused || focused.isConnected) return;
+    focusedControl.current = null;
+    if (document.activeElement === document.body) {
+      disclosure.current?.focus();
+      setHistoryAnnouncement('The focused record left loaded history. Other saved history may still contain it.');
+    }
+  });
+  return <div onFocusCapture={event => {
+    focusedControl.current = event.target as HTMLElement;
+    setHistoryAnnouncement('');
+  }}>
+    <p role="status" aria-live="polite" aria-atomic="true" aria-label="Hook recorded history updates">{historyAnnouncement}</p>
+    <button ref={disclosure} type="button" aria-expanded={expanded} aria-controls={id}
       onClick={() => setExpanded(value => !value)}>
       Recorded attempts for Hook: {device.name} · Hook ID: {device.id}
     </button>
@@ -157,7 +180,7 @@ function RecordedHookAttempts({onOpenRecordedTask, device, workspace, connected}
           <p>Saved Hook: {saved.hook_name} · Hook ID: {saved.hook_id}</p>
           <p>Source Run ID: {saved.source_run_id} · Event: {saved.event} · Source outcome: {saved.source_outcome}</p>
           <RecordedAttemptAction taskId={work.id} runId={saved.source_run_id} connected={connected} onOpen={onOpenRecordedTask} />
-          <SourceAttempt sourceRunId={saved.source_run_id} source={work.attempts.find(source => source.id === saved.source_run_id)} />
+          <SourceAttempt key={saved.source_run_id} sourceRunId={saved.source_run_id} source={work.attempts.find(source => source.id === saved.source_run_id)} />
           <p>Saved employee ID: {saved.agent_id}</p>
           <p>Saved Skill: {saved.skill_name} · Skill ID: {saved.skill_id}</p>
           <p>Preview ID: {saved.preview_id} · Provenance Run ID: {saved.run_id}</p>

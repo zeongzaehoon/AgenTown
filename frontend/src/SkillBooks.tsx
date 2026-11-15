@@ -139,8 +139,31 @@ function RecordedSkillUse({onOpenRecordedTask, book, workspace, connected}: {
     const contexts = [attempt.skill, attempt.hook].filter(saved => saved?.skill_id === book.id);
     return contexts.length ? [{work, attempt, contexts}] : [];
   }));
-  return <div>
-    <button type="button" aria-expanded={expanded} aria-controls={id}
+  const disclosure = useRef<HTMLButtonElement>(null);
+  const focusedControl = useRef<HTMLElement | null>(null);
+  const [historyAnnouncement, setHistoryAnnouncement] = useState('');
+  useEffect(() => {
+    function trackFocus(event: FocusEvent) {
+      if (event.target !== focusedControl.current) focusedControl.current = null;
+    }
+    document.addEventListener('focusin', trackFocus);
+    return () => document.removeEventListener('focusin', trackFocus);
+  }, []);
+  useLayoutEffect(() => {
+    const focused = focusedControl.current;
+    if (!focused || focused.isConnected) return;
+    focusedControl.current = null;
+    if (document.activeElement === document.body) {
+      disclosure.current?.focus();
+      setHistoryAnnouncement('The focused record left loaded history. Other saved history may still contain it.');
+    }
+  });
+  return <div onFocusCapture={event => {
+    focusedControl.current = event.target as HTMLElement;
+    setHistoryAnnouncement('');
+  }}>
+    <p role="status" aria-live="polite" aria-atomic="true" aria-label="Skill recorded history updates">{historyAnnouncement}</p>
+    <button ref={disclosure} type="button" aria-expanded={expanded} aria-controls={id}
       onClick={() => setExpanded(value => !value)}>
       Recorded use for Skill: {book.name} · Skill ID: {book.id}
     </button>

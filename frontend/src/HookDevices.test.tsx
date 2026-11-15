@@ -593,3 +593,39 @@ test('recorded navigation emits persisted identities, including missing sources,
   expect(screen.queryByRole('button', {name: 'Open saved Task: task · Run: execution'})).toBeNull();
   expect(fetcher).toHaveBeenCalledTimes(before);
 });
+
+
+test.each(['removed', 'empty', 'survivor', 'outside', 'source'])('recorded history focus recovery: %s', async destination => {
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({hooks}))));
+  const saved = {run_id: 'run', preview_id: 'p', skill_id: 'one', skill_name: 'Manual', instructions: 'Saved', input: 'Saved', admitted_at: 1,
+    hook_id: 'one', hook_name: 'Manual', event: 'run_completed', agent_id: 'a', source_run_id: 'source', source_outcome: 'success'};
+  const workspace: Workspace = {employees: [], configuration: null, provider: 'test', model: null, work: ['task', 'keep'].map(id => ({
+    id, input: 'Duplicate label', status: 'completed', assignees: [], attempts: [
+      {id: 'run', state: 'finished', outcome: 'success', participants: [], skill: saved, hook: saved}]}))};
+  const open = vi.fn();
+  const view = render(<><input aria-label="Outside history" /><HookDevices workspace={workspace} onOpenRecordedTask={open} /></>);
+  const disclosure = await screen.findByRole('button', {name: 'Recorded attempts for Hook: Manual · Hook ID: one'});
+  fireEvent.click(disclosure);
+  const region = screen.getByRole('region', {name: 'Recorded Hook attempt · Task task · Run run'});
+  const action = within(region).getByRole('button', {name: 'Open saved Task: task · Run: run'});
+  const survivor = screen.getByRole('button', {name: 'Open saved Task: keep · Run: run'});
+  const source = within(region).getByRole('button', {name: /Source attempt details/});
+  const focus = destination === 'outside' ? screen.getByLabelText('Outside history')
+    : destination === 'survivor' ? survivor : destination === 'source' ? source : action;
+  focus.focus();
+  if (destination === 'source') fireEvent.click(source);
+  const next = {...workspace, work: destination === 'empty' ? [] : workspace.work.filter(work => work.id === 'keep')};
+  view.rerender(<><input aria-label="Outside history" /><HookDevices workspace={next} onOpenRecordedTask={open} /></>);
+  const recover = !['outside', 'survivor'].includes(destination);
+  expect(document.activeElement).toBe(recover ? disclosure : focus);
+  expect(disclosure.getAttribute('aria-expanded')).toBe('true');
+  const status = screen.getAllByRole('status', {name: 'Hook recorded history updates'})[0];
+  expect(status.textContent).toBe(recover ? 'The focused record left loaded history. Other saved history may still contain it.' : '');
+  expect(status.getAttribute('aria-live')).toBe('polite');
+  if (destination !== 'empty') {
+    survivor.focus(); await userEvent.keyboard('{Enter}');
+    expect(open).toHaveBeenLastCalledWith({taskId: 'keep', runId: 'run'});
+    expect(document.activeElement).toBe(survivor);
+  } else expect(screen.getAllByText(/No matching records in loaded history/).length).toBeGreaterThan(0);
+  expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1);
+});

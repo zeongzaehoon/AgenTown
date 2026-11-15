@@ -5131,3 +5131,38 @@ dismissal fixture to refresh Loop devices after connecting and wait for linked
 work to become available before opening it. The dismissal request-count and
 mutation assertions remain unchanged; the frontend regression suite above
 includes this repair.
+
+### Recorded-use focus after Company polling (C132-T1)
+
+Launch `agentown-web --database /absolute/path/to/fixture.sqlite --port 8765`
+using the deterministic C128-T1 fixture above. Open http://127.0.0.1:8765 and
+keyboard-expand a Skill's **Recorded use** or a Hook's **Recorded attempts**.
+Tab to an Open saved Task action or the Hook's Source attempt details control.
+An accepted workspace snapshot that drops that focused record returns focus to
+the same card's recorded-use disclosure, keeps it expanded, and politely announces
+“The focused record left loaded history. Other saved history may still contain
+it.” This describes the loaded view; it does not claim stored data was deleted.
+An empty list keeps its disclosure and explanatory empty-state text.
+
+For reproducible snapshot removal without editing stored history, use the
+deterministic component and App interaction tests:
+
+```sh
+cd frontend
+npx vitest run src/SkillBooks.test.tsx src/HookDevices.test.tsx src/App.test.tsx --configLoader runner -t 'recorded history'
+npx tsc --noEmit
+```
+
+These fixtures remove an attempt from the accepted workspace while retaining
+its configuration card. They exercise surviving controls, outside input focus,
+empty lists, Hook source-details removal, duplicate work labels and exact
+persisted Task/Run navigation. App fixtures first resolve an obsolete empty
+snapshot and verify that it neither removes the control nor changes focus;
+only the current polling result triggers recovery. Reads remain limited to
+workspace and configuration inspection, without execution or mutation.
+
+The runner-selected frontend profile passed all 34 test files and 1,388 tests.
+The complete Python suite passed 524 tests with 2 skipped; the Rust suite passed
+46 tests, and all 17 harness tests passed. This invocation did not run browser
+interaction or live provider calls; live LLM validation is skipped under the
+user policy.

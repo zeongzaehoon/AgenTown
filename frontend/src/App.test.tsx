@@ -1861,3 +1861,50 @@ test.each(['failed', 'malformed'] as const)('Company Loop linked work waits for 
     }
   }
 });
+
+test.each(['Skill', 'Hook'])('Company %s recorded history recovers only on accepted polling snapshots', async kind => {
+  const polls: Array<() => void> = [];
+  vi.spyOn(window, 'setInterval').mockImplementation(callback => { polls.push(callback as () => void); return 0; });
+  const saved = {run_id: 'run', preview_id: 'p', skill_id: 'one', skill_name: 'Manual', instructions: 'Saved', input: 'Saved', admitted_at: 1,
+    hook_id: 'one', hook_name: 'Manual', event: 'run_completed', agent_id: 'a', source_run_id: 'source', source_outcome: 'success'};
+  const f = fixture({...initial(), work: ['task', 'keep'].map(id => ({id, input: 'Same label', status: 'completed', assignees: [], attempts: [
+    {id: 'run', state: 'finished', outcome: 'success', participants: [], skill: saved, hook: saved}]}))});
+  const transport = globalThis.fetch;
+  vi.stubGlobal('fetch', vi.fn((path: string, options: RequestInit) => {
+    if (path === '/api/config/v1/skills') return Promise.resolve(new Response(JSON.stringify({skills: [{id: 'one', name: 'Manual', enabled: true}]})));
+    if (path === '/api/config/v1/hooks') return Promise.resolve(new Response(JSON.stringify({hooks: [{id: 'one', name: 'Manual', enabled: true, target_id: 'a', target_kind: 'agent', event: 'run_completed', skill_id: 'one'}]})));
+    return transport(path, options);
+  }));
+  render(<App />); await connected();
+  const disclosure = await screen.findByRole('button', {name: kind === 'Skill' ? 'Recorded use for Skill: Manual · Skill ID: one' : 'Recorded attempts for Hook: Manual · Hook ID: one'});
+  fireEvent.click(disclosure);
+  const regionName = kind === 'Skill' ? 'Recorded Skill use' : 'Recorded Hook attempt';
+  const region = screen.getByRole('region', {name: `${regionName} · Task task · Run run`});
+  const action = within(region).getByRole('button', {name: 'Open saved Task: task · Run: run'});
+  action.focus();
+  const currentTransport = globalThis.fetch;
+  let resolveOld!: (response: Response) => void;
+  let hold = true;
+  vi.stubGlobal('fetch', vi.fn((path: string, options: RequestInit) => path === '/api/state' && hold
+    ? new Promise<Response>(resolve => { resolveOld = resolve; }) : currentTransport(path, options)));
+  refresh(); hold = false; refresh(); await connected();
+  await act(async () => resolveOld(new Response(JSON.stringify({...f.state, work: []}))));
+  expect(document.activeElement).toBe(action);
+  expect(disclosure.getAttribute('aria-expanded')).toBe('true');
+  const status = screen.getByRole('status', {name: `${kind} recorded history updates`});
+  expect(status.textContent).toBe('');
+  f.state.work = f.state.work.filter(work => work.id === 'keep');
+  act(() => polls.forEach(poll => poll()));
+  await waitFor(() => expect(document.activeElement).toBe(disclosure));
+  expect(status.textContent).toContain('left loaded history');
+  const remaining = within(screen.getByRole('region', {name: `${regionName} · Task keep · Run run`}))
+    .getByRole('button', {name: 'Open saved Task: keep · Run: run'});
+  remaining.focus(); await userEvent.keyboard('{Enter}');
+  expect((screen.getByLabelText('Saved work') as HTMLSelectElement).value).toBe('keep');
+  const summary = document.querySelector('[data-attempt-id="run"] summary');
+  expect(summary?.textContent).toContain('Selected recorded attempt');
+  expect(document.activeElement).toBe(summary);
+  expect(f.calls.every(call => call.path === '/api/state')).toBe(true);
+  expect(vi.mocked(fetch).mock.calls.every(([path, options]) => path === '/api/state' ? options?.method === 'POST'
+    : ['/api/config/v1/skills', '/api/config/v1/hooks', '/api/config/v1/loops', '/api/loops/v1', '/api/teams'].includes(String(path)) && options?.method === 'GET')).toBe(true);
+});
