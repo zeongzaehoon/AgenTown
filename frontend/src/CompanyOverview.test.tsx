@@ -307,3 +307,49 @@ test.each([true, false])('Add employee is keyboard navigation in empty and popul
   control.focus(); await user.keyboard(' ');
   expect(add).toHaveBeenCalledTimes(2);
 });
+
+test.each(['assignment', 'absence'])('unassigned work %s recovers focused identity and keeps remaining navigation', async reason => {
+  const state = workspace();
+  const open = vi.fn();
+  const props = {connected: true, error: '', onOpenWork: open};
+  const view = render(<CompanyOverview {...props} workspace={state} />);
+  const button = screen.getByRole('button', {name: 'Open work: unassigned · ID: unassigned'});
+  button.focus();
+  const renamed = {...state, work: state.work.map(work => work.id === 'unassigned' ? {...work, input: 'Renamed request'} : work).reverse()};
+  view.rerender(<CompanyOverview {...props} workspace={renamed} />);
+  expect(document.activeElement).toBe(button);
+  view.rerender(<CompanyOverview {...props} connected={false} error="offline" workspace={renamed} />);
+  expect(document.activeElement).toBe(button);
+  expect(screen.getByRole('status', {name: 'Unassigned work updates'}).textContent).toBe('');
+  const next = {...renamed, work: reason === 'assignment'
+    ? renamed.work.map(work => work.id === 'unassigned' ? {...work, assignees: ['a']} : work)
+    : renamed.work.filter(work => work.id !== 'unassigned')};
+  view.rerender(<CompanyOverview {...props} workspace={next} />);
+  expect(document.activeElement).toBe(screen.getByRole('heading', {name: 'Work without a current employee'}));
+  const status = screen.getByRole('status', {name: 'Unassigned work updates'});
+  expect(status.textContent).toContain('Task Renamed request · ID: unassigned');
+  expect(status.textContent).toContain(reason === 'assignment' ? 'now assigned to a current employee' : 'no longer appears in the current company snapshot');
+  expect(status.textContent).not.toContain('deleted');
+  const remaining = screen.getByRole('button', {name: 'Open work: missing-employee · ID: missing-employee'});
+  remaining.focus(); await userEvent.keyboard('{Enter}');
+  expect(open.mock.calls).toEqual([['missing-employee']]);
+  remaining.focus();
+  view.rerender(<CompanyOverview {...props} workspace={{...next, work: []}} />);
+  expect(document.activeElement).toBe(screen.getByRole('heading', {name: 'Work without a current employee'}));
+  expect(screen.getByRole('status', {name: 'Unassigned work updates'}).textContent).toContain('ID: missing-employee');
+});
+
+test.each(['surviving control', 'outside draft'])('unassigned removal preserves %s focus', destination => {
+  const state = workspace();
+  const props = {connected: true, error: '', onOpenWork: vi.fn()};
+  const content = (value: Workspace) => <><CompanyOverview {...props} workspace={value} /><input aria-label="Outside work draft" defaultValue="Keep draft" /></>;
+  const view = render(content(state));
+  screen.getByRole('button', {name: 'Open work: unassigned · ID: unassigned'}).focus();
+  const target = destination === 'outside draft' ? screen.getByLabelText('Outside work draft')
+    : screen.getByRole('button', {name: 'Open work: missing-employee · ID: missing-employee'});
+  target.focus();
+  view.rerender(content({...state, work: state.work.filter(work => work.id !== 'unassigned')}));
+  expect(document.activeElement).toBe(target);
+  expect(screen.getByRole('status', {name: 'Unassigned work updates'}).textContent).toBe('');
+  expect((screen.getByLabelText('Outside work draft') as HTMLInputElement).value).toBe('Keep draft');
+});

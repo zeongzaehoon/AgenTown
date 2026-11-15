@@ -5021,3 +5021,63 @@ read-only fixtures (including POST `/api/state`). Run scoped tests with
 `cd frontend && npx vitest run src/TeamRooms.test.tsx src/App.test.tsx --configLoader runner`
 and TypeScript with `npx tsc --noEmit`. Supervisor-selected verification and
 browser validation remain pending; live provider tests are skipped, not passed.
+
+### Unassigned-work keyboard orientation (C130-T1)
+
+Launch `agentown-web --database /tmp/agentown-c130-disposable.sqlite --port 8765`
+with a new disposable database, open http://127.0.0.1:8765 and choose Company.
+No credentials or provider execution are needed. For a deterministic read-only
+exercise, paste this into the browser console after the screen loads:
+
+```js
+const c130Fetch = window.fetch.bind(window);
+window.c130 = {mode: 'unchanged', delay: 0};
+window.fetch = async (url, options) => {
+  const response = await c130Fetch(url, options);
+  if (String(url) !== '/api/state' || !response.ok) return response;
+  const {mode, delay} = window.c130;
+  if (delay) await new Promise(resolve => setTimeout(resolve, delay));
+  if (mode === 'failed') throw new TypeError('Fixture disconnected');
+  const state = await response.json();
+  const task = id => ({id, input: 'Orientation fixture', status: 'pending',
+    assignees: [], attempts: []});
+  state.employees = [{id: 'c130-employee', name: 'Fixture employee'}];
+  state.work = [task('c130-first'), task('c130-remaining')];
+  if (mode === 'assigned') state.work[0].assignees = ['c130-employee'];
+  if (mode === 'absent') state.work.shift();
+  if (mode === 'empty') state.work = [];
+  return new Response(JSON.stringify(state), {
+    headers: {'Content-Type': 'application/json'}});
+};
+```
+
+1. Wait for polling. Tab to **Open work: Orientation fixture · ID: c130-first**
+   under **Work without a current employee**. Set `c130.mode = 'assigned'`
+   in the console, then return focus to that button before the next poll. Focus
+   moves to the area's heading; **Unassigned work updates** identifies the Task
+   and says it is now assigned to a current employee. It does not claim deletion.
+2. Reset to `unchanged`, wait, focus the first button, then use `absent`.
+   The heading receives focus and the status says the Task no longer appears in
+   the current company snapshot. Focus the remaining Task, set `empty`, and
+   verify the same recovery when the last button disappears.
+3. Repeat with focus on the surviving `c130-remaining` control or an unsaved
+   employee/work draft. Focus and drafts stay there. `failed` retains the last
+   snapshot and produces no removal announcement; `unchanged` restores freshness.
+4. For supersession, set `c130.mode = 'absent'; c130.delay = 4000`, choose
+   **Refresh connection**, and focus the first button. Before the held response
+   arrives, set `c130.mode = 'unchanged'; c130.delay = 0` and refresh again.
+   Refocus the first button. The obsolete absence must not remove it or announce
+   a removal. The fixture captures mode at request start.
+5. With both Tasks present, use Enter or Space on the remaining button. Saved
+   work selects `c130-remaining` despite equal labels. Inspection must not send
+   assignment, execution or configuration mutations. POST `/api/state` is a read.
+
+Reload to remove the fixture (or restore `window.fetch = c130Fetch`). This
+fixture changes browser read responses only and does not save its Tasks.
+Component coverage is in `CompanyOverview.test.tsx`; App polling coverage is in
+`App.test.tsx`. With frontend dependencies available, run
+`cd frontend && npx vitest run src/CompanyOverview.test.tsx src/App.test.tsx --configLoader runner -t 'unassigned'`
+and `npx tsc --noEmit`. This isolated implementation workspace has no frontend
+node_modules, so these checks and the applicable consolidated supervisor profile
+remain pending. Browser validation is pending supervisor verification. Live
+provider tests are skipped, not passed.

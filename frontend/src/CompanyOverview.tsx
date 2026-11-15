@@ -41,11 +41,15 @@ export function CompanyOverview({workspace, connected, error, onOpenWork, onOpen
   onOpenSkill?: (id: string) => void; workspace: Workspace | null; connected: boolean; error: string; onOpenWork: (id: string) => void; selectedEmployee?: string; onSelectEmployee?: (id: string) => void;
 }) {
   const heading = useRef<HTMLHeadingElement>(null);
+  const unassignedHeading = useRef<HTMLHeadingElement>(null);
+  const focusedUnassigned = useRef<{id: string; input: string; element: HTMLButtonElement} | null>(null);
+  const [workRemovalAnnouncement, setWorkRemovalAnnouncement] = useState('');
   const focusedEmployee = useRef<{id: string; name: string; element: HTMLButtonElement} | null>(null);
   const [removalAnnouncement, setRemovalAnnouncement] = useState('');
   useEffect(() => {
     const trackFocus = (event: FocusEvent) => {
       if (event.target !== focusedEmployee.current?.element) focusedEmployee.current = null;
+      if (event.target !== focusedUnassigned.current?.element) focusedUnassigned.current = null;
     };
     document.addEventListener('focusin', trackFocus);
     return () => document.removeEventListener('focusin', trackFocus);
@@ -78,6 +82,22 @@ export function CompanyOverview({workspace, connected, error, onOpenWork, onOpen
   });
   const employeeIds = new Set(employees.map(employee => employee.id));
   const unassigned = workspace?.work.filter(work => !work.assignees.some(id => employeeIds.has(id))) ?? [];
+  useLayoutEffect(() => {
+    const focused = focusedUnassigned.current;
+    if (!workspace || !focused) return;
+    const work = workspace.work.find(work => work.id === focused.id);
+    if (work && !work.assignees.some(id => employeeIds.has(id))) {
+      focused.input = work.input;
+      return;
+    }
+    focusedUnassigned.current = null;
+    if (!focused.element.isConnected && document.activeElement === document.body) {
+      unassignedHeading.current?.focus();
+      setWorkRemovalAnnouncement(`Task ${work?.input ?? focused.input} · ID: ${focused.id} ${work
+        ? 'is now assigned to a current employee and left this area.'
+        : 'no longer appears in the current company snapshot.'}`);
+    }
+  }, [workspace]);
   return <section className="company-overview" aria-labelledby="company-title">
     <h2 id="company-title" ref={heading} tabIndex={-1}>Company overview</h2>
     <p aria-live="polite" aria-atomic="true">{removalAnnouncement}</p>
@@ -166,10 +186,14 @@ export function CompanyOverview({workspace, connected, error, onOpenWork, onOpen
           </li>;
         })}
       </ul>
-      <h3>Work without a current employee</h3>
+      <h3 ref={unassignedHeading} tabIndex={-1}>Work without a current employee</h3>
+      <p role="status" aria-label="Unassigned work updates" aria-live="polite" aria-atomic="true">{workRemovalAnnouncement}</p>
       <p>{unassigned.length} requests with no assignment to a current employee. Includes unassigned work and assignments to unavailable employees.</p>
       {!!unassigned.length && <ul>{unassigned.map(work => <li key={work.id}>
-        <button type="button" onClick={() => onOpenWork(work.id)}>Open work: {work.input.slice(0, 55)} · ID: {work.id}</button>
+        <button type="button" onFocus={event => {
+          focusedUnassigned.current = {id: work.id, input: work.input, element: event.currentTarget};
+          setWorkRemovalAnnouncement('');
+        }} onClick={() => onOpenWork(work.id)}>Open work: {work.input.slice(0, 55)} · ID: {work.id}</button>
         <p>{classifyWork(work).label}</p>
       </li>)}</ul>}
     </>}

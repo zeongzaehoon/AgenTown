@@ -1751,3 +1751,46 @@ test.each(['assignment', 'employee'] as const)('workspace polling recovers remov
   expect(f.calls.every(call => call.path === '/api/state')).toBe(true);
   expect(vi.mocked(fetch).mock.calls.every(([path, options]) => path === '/api/state' ? options?.method === 'POST' : ['/api/config/v1/skills', '/api/config/v1/hooks', '/api/config/v1/loops', '/api/loops/v1', '/api/teams'].includes(String(path)) && options?.method === 'GET')).toBe(true);
 });
+
+test.each(['assignment', 'absence'])('unassigned work polling accepts %s only after current reads and retains drafts', async reason => {
+  const polls: Array<() => void> = [];
+  vi.spyOn(window, 'setInterval').mockImplementation(callback => { polls.push(callback as () => void); return 0; });
+  const f = fixture({...initial(), employees: [{id: 'e', name: 'Writer'}], work: [
+    {id: 'w', input: 'Same text', status: 'pending', assignees: [], attempts: []},
+    {id: 'keep', input: 'Same text', status: 'pending', assignees: ['unavailable'], attempts: []},
+  ]});
+  render(<App />); await connected();
+  fireEvent.change(screen.getByLabelText('What would you like help with?'), {target: {value: 'Keep work draft'}});
+  fireEvent.change(screen.getByLabelText('Employee name'), {target: {value: 'Keep employee draft'}});
+  const button = screen.getByRole('button', {name: 'Open work: Same text · ID: w'});
+  button.focus();
+  f.disconnect(); act(() => polls.forEach(poll => poll()));
+  await waitFor(() => expect(document.querySelector('#connection')!.textContent).toContain('Disconnected'));
+  expect(document.activeElement).toBe(button);
+  expect(screen.getByRole('status', {name: 'Unassigned work updates'}).textContent).toBe('');
+  f.reconnect();
+  const transport = globalThis.fetch;
+  let resolveOld!: (response: Response) => void;
+  let hold = true;
+  vi.stubGlobal('fetch', vi.fn((path: string, options: RequestInit) => path === '/api/state' && hold
+    ? new Promise<Response>(resolve => { resolveOld = resolve; }) : transport(path, options)));
+  refresh(); hold = false; refresh(); await connected();
+  await act(async () => resolveOld(new Response(JSON.stringify({...f.state, work: []}))));
+  expect(document.activeElement).toBe(button);
+  expect(screen.getByRole('status', {name: 'Unassigned work updates'}).textContent).toBe('');
+  if (reason === 'assignment') f.state.work[0].assignees = ['e'];
+  else f.state.work = f.state.work.filter(work => work.id !== 'w');
+  act(() => polls.forEach(poll => poll()));
+  await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('heading', {name: 'Work without a current employee'})));
+  const status = screen.getByRole('status', {name: 'Unassigned work updates'});
+  expect(status.textContent).toContain('Task Same text · ID: w');
+  expect(status.textContent).toContain(reason === 'assignment' ? 'now assigned to a current employee' : 'no longer appears in the current company snapshot');
+  expect((screen.getByLabelText('What would you like help with?') as HTMLTextAreaElement).value).toBe('Keep work draft');
+  expect((screen.getByLabelText('Employee name') as HTMLInputElement).value).toBe('Keep employee draft');
+  const remaining = screen.getByRole('button', {name: 'Open work: Same text · ID: keep'});
+  remaining.focus(); await userEvent.keyboard(' ');
+  expect((screen.getByLabelText('Saved work') as HTMLSelectElement).value).toBe('keep');
+  expect(f.calls.every(call => call.path === '/api/state')).toBe(true);
+  expect(vi.mocked(fetch).mock.calls.every(([path, options]) => path === '/api/state' ? options?.method === 'POST'
+    : ['/api/config/v1/skills', '/api/config/v1/hooks', '/api/config/v1/loops', '/api/loops/v1', '/api/teams'].includes(String(path)) && options?.method === 'GET')).toBe(true);
+});
