@@ -5821,3 +5821,35 @@ checks, when frontend dependencies are available: `cd frontend`,
 `npx tsc --noEmit`, and `npx vitest run src/ConnectionActivity.test.tsx`.
 This implementation invocation did not perform the manual browser exercise;
 supervisor browser validation remains pending.
+
+### Readable recorded Run times (C148-T1)
+
+Launch `agentown-web --database PATH --port 8765` against an existing product
+workspace, open <http://127.0.0.1:8765>, connect the workspace, and open
+**Connections**. No credentials or live provider calls are required.
+
+1. Select a client and explicitly choose **Load recorded activity**. Each attempt
+   shows **Recorded Run start** and **Recorded Run end** in the browser's local
+   date/time format. Inspect each valid date's semantic `time` element: its
+   `datetime` attribute is ISO, and the adjacent Unix milliseconds preserve the
+   exact recorded value. Zero milliseconds is a valid date.
+2. An active attempt with no recorded end says **Not recorded**; no end date is
+   inferred. A value beyond the supported date range says **Local date
+   unavailable (outside supported date range)**, retains its milliseconds and
+   emits no `time` element. These boundary cases are covered by deterministic
+   response fixtures in `ConnectionActivity.test.tsx`; no database edits or
+   provider execution are needed.
+3. Compare the Run dates with **Entire recorded activity snapshot received by
+   this browser**. That separate time records browser receipt of the entire
+   snapshot, not when a Run started or ended. Historical-source, identity,
+   connectivity and quality disclaimers remain applicable.
+4. Change Client: the displayed attempts change without fetching or changing
+   retained dates. Explicitly refresh while the activity endpoint is unavailable
+   (or use a failed-response fixture): retained Run dates and snapshot receipt
+   stay visible with the potentially stale notice. Restore availability and
+   explicitly load again to replace the snapshot.
+
+Implementation checks: scoped interaction tests and TypeScript checks require
+frontend dependencies. Supervisor verification supplies the applicable consolidated
+profile and browser validation; this implementation invocation did not execute
+browser checks or live provider calls.

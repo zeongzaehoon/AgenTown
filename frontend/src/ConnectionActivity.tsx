@@ -23,6 +23,15 @@ export function isActivity(v: unknown): v is Activity {
     a.integration === (clients.includes(a.declared_source as string) ? a.declared_source : null)) &&
     new Set(v.attempts.map(a => a.run_id)).size === v.attempts.length;
 }
+function RecordedRunTime({value}: {value: number | null}) {
+  if (value === null) return <>Not recorded</>;
+  const date = new Date(value);
+  return <>{Number.isNaN(date.getTime())
+    ? 'Local date unavailable (outside supported date range)'
+    : <time dateTime={date.toISOString()}>{date.toLocaleString()}</time>}
+    {' '}<span>(Unix milliseconds: {value})</span></>;
+}
+
 export interface RecordedAttemptNavigation { taskId: string; runId: string }
 export interface ActivityNavigation {
   savedTaskIds?: string[];
@@ -112,7 +121,8 @@ export function ConnectionActivity({clientId, connected, savedTaskIds = [], onOp
       <p>Run: {a.run_id} · Task: {a.task_id}</p>
       <p>Recorded state: {a.state}. Recorded outcome: {a.outcome ?? 'Not recorded'}.</p>
       <p>Declared source (untrusted): {a.declared_source ?? 'Not recorded'}</p>
-      <p>Recorded timestamps (Unix milliseconds): started {a.started_at}; ended {a.ended_at ?? 'Not recorded'}.</p>
+      <p>Recorded Run start: <RecordedRunTime value={a.started_at} /></p>
+      <p>Recorded Run end: <RecordedRunTime value={a.ended_at} /></p>
       <button type="button" aria-disabled={!canOpen} onClick={() => { if (canOpen) onOpenRecordedTask?.({taskId: a.task_id, runId: a.run_id}); }}>Open saved Task: {a.task_id} · Run: {a.run_id}</button>
       {!canOpen && <p>{!connected ? 'Reconnect before opening saved work.' : 'Saved Task unavailable in the current workspace. It may have been removed; refresh the workspace to inspect again.'}</p>}
     </li>;
@@ -133,7 +143,7 @@ export function ConnectionActivity({clientId, connected, savedTaskIds = [], onOp
       {data && (stale || pending) && <p>Previous recorded activity observation — potentially stale.</p>}
       {data && !pending && !matching.length && <p>No recorded activity for this declared client in the loaded recent snapshot. This does not prove the client was never used.</p>}
     </div>
-    {snapshot && <p>Entire recorded activity snapshot received by this browser: <time dateTime={snapshot.receivedAt}>{new Date(snapshot.receivedAt).toLocaleString()}</time>. Receipt time does not verify current client connectivity, authenticated identity or result quality.</p>}
+    {snapshot && <p>Entire recorded activity snapshot received by this browser: <time dateTime={snapshot.receivedAt}>{new Date(snapshot.receivedAt).toLocaleString()}</time>. Receipt time is distinct from recorded Run start/end times and does not verify current client connectivity, authenticated identity or result quality.</p>}
     {!!matching.length && <ul aria-label="Selected client recorded attempts">{matching.map(row)}</ul>}
     {!!unclassified.length && <><h4>Unrecognized or missing declared source — not attributed to this client</h4><ul aria-label="Unclassified recorded attempts">{unclassified.map(row)}</ul></>}
   </section>;

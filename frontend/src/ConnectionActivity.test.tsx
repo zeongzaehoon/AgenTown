@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, expect, test, vi } from 'vitest';
 import { ConnectionActivity, isActivity } from './ConnectionActivity';
@@ -273,7 +273,7 @@ test.each(['cancel', 'disconnect', 'malformed', 'failure'])('snapshot receipt ti
   const fetcher = vi.fn(() => new Promise<Response>((resolve, reject) => requests.push({resolve, reject})));
   vi.stubGlobal('fetch', fetcher);
   const view = render(<ConnectionActivity clientId="codex" connected />);
-  const receipt = () => view.container.querySelector('time');
+  const receipt = () => screen.queryByText(/Entire recorded activity snapshot received by this browser/)?.querySelector('time') ?? null;
   const load = screen.getByRole('button', {name: 'Load recorded activity'});
   expect(receipt()).toBeNull();
   fireEvent.click(load);
@@ -281,8 +281,9 @@ test.each(['cancel', 'disconnect', 'malformed', 'failure'])('snapshot receipt ti
   await act(async () => requests[0].resolve(new Response(JSON.stringify(snapshot))));
   expect(receipt()?.getAttribute('datetime')).toBe(new Date(first).toISOString());
   expect(receipt()?.textContent).toBe(new Date(first).toLocaleString());
-  expect(screen.getByText(/Receipt time does not verify current client connectivity/)).toBeTruthy();
-  expect(screen.getByText(/Recorded timestamps .*started 10; ended 20/)).toBeTruthy();
+  expect(screen.getByText(/Receipt time is distinct from recorded Run start\/end times and does not verify current client connectivity/)).toBeTruthy();
+  expect(screen.getByText(/Recorded Run start:/).querySelector('time')?.getAttribute('datetime')).toBe(new Date(10).toISOString());
+  expect(screen.getByText(/Recorded Run end:/).querySelector('time')?.getAttribute('datetime')).toBe(new Date(20).toISOString());
   now.mockReturnValue(second);
   fireEvent.click(load);
   expect(receipt()?.getAttribute('datetime')).toBe(new Date(first).toISOString());
@@ -322,4 +323,50 @@ test('an initial validated empty snapshot has a browser receipt time', async () 
   fireEvent.click(screen.getByRole('button', {name: 'Load recorded activity'}));
   await screen.findByText(/No recorded activity for this declared client/);
   expect(view.container.querySelector('time')?.getAttribute('datetime')).toBe(new Date(received).toISOString());
+});
+
+
+test('recorded Run times localize completed and active attempts, preserve zero and range limits across filtering and failed refresh', async () => {
+  const records = {...snapshot, attempts: [
+    {...attempt, started_at: 0, ended_at: 20},
+    {...attempt, run_id: 'active', started_at: 1000, ended_at: null, state: 'active', outcome: null},
+    {...attempt, run_id: 'outside', started_at: Number.MAX_SAFE_INTEGER, ended_at: 8640000000000001},
+    {...attempt, run_id: 'cursor', declared_source: 'cursor', integration: 'cursor', started_at: 2000, ended_at: 3000},
+  ]};
+  const fetcher = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify(records)))
+    .mockRejectedValueOnce(new Error('refresh failed'));
+  vi.stubGlobal('fetch', fetcher);
+  const view = render(<ConnectionActivity clientId="codex" connected />);
+  const user = userEvent.setup();
+  await user.click(screen.getByRole('button', {name: 'Load recorded activity'}));
+  await screen.findByText(/^Run: run-1/);
+  const row = (id: string) => within(screen.getByText(`Run: ${id} · Task: saved`).closest('li')!);
+  const completed = row('run-1');
+  for (const [label, value] of [['start', 0], ['end', 20]] as const) {
+    const field = completed.getByText(new RegExp(`Recorded Run ${label}:`));
+    expect(field.querySelector('time')?.getAttribute('datetime')).toBe(new Date(value).toISOString());
+    expect(field.querySelector('time')?.textContent).toBe(new Date(value).toLocaleString());
+    expect(field.textContent).toContain(`Unix milliseconds: ${value}`);
+  }
+  expect(row('active').getByText(/Recorded Run end:/).textContent).toBe('Recorded Run end: Not recorded');
+  expect(row('active').getByText(/Recorded Run end:/).querySelector('time')).toBeNull();
+  expect(row('active').getByText(/Recorded Run start:/).querySelector('time')?.getAttribute('datetime')).toBe(new Date(1000).toISOString());
+  for (const label of ['start', 'end']) {
+    const field = row('outside').getByText(new RegExp(`Recorded Run ${label}:`));
+    expect(field.textContent).toContain('Local date unavailable (outside supported date range)');
+    expect(field.textContent).toContain(label === 'start' ? '9007199254740991' : '8640000000000001');
+    expect(field.querySelector('time')).toBeNull();
+  }
+  const retained = screen.getByRole('list', {name: 'Selected client recorded attempts'}).innerHTML;
+  await user.click(screen.getByRole('button', {name: 'Load recorded activity'}));
+  await screen.findByText(/Recorded activity unavailable/);
+  expect(screen.getByText(/potentially stale/)).toBeTruthy();
+  expect(screen.getByRole('list', {name: 'Selected client recorded attempts'}).innerHTML).toBe(retained);
+  view.rerender(<ConnectionActivity clientId="cursor" connected />);
+  expect(screen.queryByText(/^Run: run-1/)).toBeNull();
+  expect(row('cursor').getByText(/Recorded Run start:/).querySelector('time')?.getAttribute('datetime')).toBe(new Date(2000).toISOString());
+  view.rerender(<ConnectionActivity clientId="codex" connected />);
+  expect(screen.getByRole('list', {name: 'Selected client recorded attempts'}).innerHTML).toBe(retained);
+  expect(fetcher).toHaveBeenCalledTimes(2);
+  expect(screen.getByText(/Declared source is untrusted historical metadata/)).toBeTruthy();
 });
