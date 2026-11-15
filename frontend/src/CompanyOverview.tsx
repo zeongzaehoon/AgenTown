@@ -1,3 +1,4 @@
+import type { RecordedAttemptNavigation } from './ConnectionActivity';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { LoopDevices } from './LoopDevices';
 import type { HookNavigation } from './HookDevices';
@@ -22,7 +23,8 @@ const employeeOutcomeActions: {outcome: EmployeeOutcomeNavigation['outcome']; la
   {outcome: 'other', label: 'Other recorded work'},
 ];
 
-export function CompanyOverview({workspace, connected, error, onOpenWork, selectedEmployee = '', onSelectEmployee, onOpenHook, onOpenLoop, onOpenSkill, onOpenClient, onOpenTeam, onSelectTeamMember, onOpenSession, onOpenHookWork, onOpenSkillWork, onOpenFailedWork, onOpenEmployeeOutcome, onGiveWork, onAddEmployee, assigningWork = false}: {
+export function CompanyOverview({workspace, connected, error, onOpenWork, onOpenRecordedTask, selectedEmployee = '', onSelectEmployee, onOpenHook, onOpenLoop, onOpenSkill, onOpenClient, onOpenTeam, onSelectTeamMember, onOpenSession, onOpenHookWork, onOpenSkillWork, onOpenFailedWork, onOpenEmployeeOutcome, onGiveWork, onAddEmployee, assigningWork = false}: {
+  onOpenRecordedTask?: (request: RecordedAttemptNavigation) => void;
   onAddEmployee?: () => void;
   onGiveWork?: (employeeId: string) => void;
   assigningWork?: boolean;
@@ -95,7 +97,7 @@ export function CompanyOverview({workspace, connected, error, onOpenWork, select
     <SkillBooks onOpenSkill={onOpenSkill} onOpenWork={onOpenSkillWork} workspace={workspace} connected={connected} />
     <HookDevices onOpenHook={onOpenHook} onOpenWork={onOpenHookWork} workspace={workspace} connected={connected} />
     <LoopDevices onOpenLoop={onOpenLoop} onOpenPolicy={onOpenSession} workspace={workspace} connected={connected} />
-    <OverviewLoops connected={connected} onOpenSession={onOpenSession} workspace={workspace} onOpenWork={onOpenWork} />
+    <OverviewLoops onOpenRecordedTask={onOpenRecordedTask} connected={connected} onOpenSession={onOpenSession} workspace={workspace} onOpenWork={onOpenWork} />
     {workspace && <>
       {workspace.configuration && <p>Execution setup needed: {workspace.configuration} Employees and saved assignments are still shown.</p>}
       <p>Each request counts once per assigned employee. Shared work appears for each employee, so employee counts may exceed the number of requests.</p>

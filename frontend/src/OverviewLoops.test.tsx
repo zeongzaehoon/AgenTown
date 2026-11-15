@@ -996,3 +996,43 @@ test.each(['web', 'local'] as const)('%s rejected old-connection removal cannot 
   expect(screen.getByLabelText(local ? 'Local MCP Loop session removals' : 'Web Loop session removals').textContent).toBe('');
   expect(fetcher.mock.calls.every(([path]) => path === '/api/loops/v1' || path === '/api/connections/v1/loops/inspect-company')).toBe(true);
 });
+
+test.each(['web', 'local MCP'])('%s exact-attempt actions retain details and guard missing Tasks and disconnect', async owner => {
+  vi.useFakeTimers({toFake: ['setInterval', 'clearInterval']});
+  const user = userEvent.setup();
+  const local = owner === 'local MCP';
+  const saved = {...companySession(1), admitted: 2};
+  const attempts = [1, 2].map(n => ({session_id: saved.session_id, run_id: uid(100 + n), ordinal: n, execution: {output: `Recorded output ${n}`, error: null}}));
+  const requests: string[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (path: string) => {
+    requests.push(path);
+    if (path === '/api/loops/v1') return new Response(JSON.stringify({...initial(), sessions: local ? [] : [saved], attempts: local ? [] : attempts}));
+    if (path !== '/api/connections/v1/loops/inspect-company') return new Response(JSON.stringify({teams: [], loops: [], hooks: [], skills: []}));
+    const reply = companyReply([saved]);
+    return new Response(JSON.stringify({...reply, data: {...reply.data, attempts}}));
+  }));
+  const {CompanyOverview} = await import('./CompanyOverview');
+  const open = vi.fn();
+  const loaded = {...workspace, work: [{...workspace.work[0], id: saved.preview.task_id}]};
+  const props = {error: '', onOpenWork: vi.fn(), onOpenRecordedTask: open};
+  const view = render(<CompanyOverview {...props} workspace={loaded} connected />);
+  await act(async () => {});
+  if (local) await act(async () => {fireEvent.click(screen.getByRole('button', {name: 'Inspect company Loops through local MCP'}));});
+  await user.click(screen.getByRole('button', {name: `Attempt details for ${local ? 'local MCP ' : ''}Loop ${saved.session_id}`}));
+  const button = (n: number) => screen.getByRole('button', {name: `Open saved Task: ${saved.preview.task_id} · Run: ${uid(100 + n)}`});
+  const before = [...requests];
+  button(1).focus(); await user.keyboard('{Enter}');
+  button(2).focus(); await user.keyboard(' ');
+  await user.keyboard('{Enter}');
+  expect(open.mock.calls.map(([request]) => request)).toEqual([101, 102, 102].map(n => ({taskId: saved.preview.task_id, runId: uid(n)})));
+  view.rerender(<CompanyOverview {...props} workspace={{...loaded, work: []}} connected />);
+  expect(button(1).getAttribute('aria-disabled')).toBe('true');
+  await user.click(button(1));
+  view.rerender(<CompanyOverview {...props} workspace={loaded} connected={false} />);
+  expect(button(2).getAttribute('aria-disabled')).toBe('true');
+  await user.click(button(2));
+  expect(open).toHaveBeenCalledTimes(3);
+  expect(screen.getByText('Recorded output 1')).toBeTruthy();
+  expect(screen.getByText('Recorded output 2')).toBeTruthy();
+  expect(requests).toEqual(before);
+});

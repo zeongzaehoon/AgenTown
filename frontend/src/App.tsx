@@ -346,6 +346,12 @@ export function App() {
       await confirmExecution(await api<unknown>(`/api/work/${encodeURIComponent(work.id)}/execute`, {expected_runs: work.attempts.length}, signal), work, state!, signal);
     }, true);
   }
+  function openRecordedAttempt(request: RecordedAttemptNavigation) {
+    if (!connected || !state?.work.some(w => w.id === request.taskId)) return;
+    setRecordedRequest({...request});
+    setSkillRequest(null); setHookRequest(null); setLoopRequest(null);
+    setViewEmployee(''); setSearch(''); setOutcome('all'); setSelected(request.taskId);
+  }
   return <>
     <a className="skip" href="#main">Skip to workspace</a>
     <header><p className="eyebrow">AGENTOWN / LOCAL WORKSPACE</p><h1>Where agents come alive.</h1><p>Create an employee. Give them text to work on. Review what comes back.</p></header>
@@ -381,7 +387,7 @@ export function App() {
           historyRef.current?.focus();
         }}>I inspected execution history</button>
       </section>}
-      <CompanyOverview onAddEmployee={() => employeeNameRef.current?.focus()} assigningWork={busy.has('work') || !!replacement} onGiveWork={id => {
+      <CompanyOverview onOpenRecordedTask={openRecordedAttempt} onAddEmployee={() => employeeNameRef.current?.focus()} assigningWork={busy.has('work') || !!replacement} onGiveWork={id => {
         if (!connected || busy.has('work') || replacement || !state?.employees.some(current => current.id === id)) return;
         setEmployee(id);
         inputRef.current?.focus();
@@ -522,12 +528,7 @@ export function App() {
         </section></div>
       <footer>Responses are unverified. Read and check the full result before using it.</footer>
       <Configuration connected={connected} workspace={state} openRecord={configurationRequest} />
-      <Connections openClient={clientRequest} workspaceConnected={connected} savedTaskIds={state?.work.map(w => w.id)} onOpenRecordedTask={request => {
-        if (!connected || !state?.work.some(w => w.id === request.taskId)) return;
-        setRecordedRequest({...request});
-        setSkillRequest(null); setHookRequest(null); setLoopRequest(null);
-        setViewEmployee(''); setSearch(''); setOutcome('all'); setSelected(request.taskId);
-      }} />
+      <Connections openClient={clientRequest} workspaceConnected={connected} savedTaskIds={state?.work.map(w => w.id)} onOpenRecordedTask={openRecordedAttempt} />
     </main>
   </>;
 }

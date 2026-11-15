@@ -80,3 +80,67 @@ test('opens and refocuses an older recorded result, reports missing Runs, and gu
   expect(calls.filter(path => /execute|retry/.test(path))).toEqual([]);
   expect(calls.filter(path => path === '/api/connections/v1/activity')).toHaveLength(1);
 });
+
+test.each(['web', 'local MCP'])('Company %s Loop opens exact attempts, refocuses repeated selections and preserves drafts', async owner => {
+  const uid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+  const taskId = uid(1), agentId = uid(2), sessionId = uid(3);
+  const runs = [uid(10), uid(11), uid(12)];
+  let disconnected = false;
+  let missingTask = false;
+  const calls: string[] = [];
+  const saved = {id: taskId, input: 'Saved Loop work', assignees: [agentId], status: 'completed', attempts: runs.slice(0, 2).map(id => ({
+    id, participants: [agentId], state: 'finished', outcome: 'success', output: `Result ${id}`, error: null,
+    provider: 'test', model: 'test', started: 10, ended: 20,
+  }))};
+  const session = {schema_version: 1, session_id: sessionId, started_at: 1, expires_at: 100, state: 'complete', admitted: 3, next_at: 0, provider: 'test', model: 'test',
+    preview: {schema_version: 1, preview_id: uid(4), policy_id: uid(5), policy_name: 'Recorded Loop', task_id: taskId, agent_id: agentId,
+      input: 'Saved Loop work', max_iterations: 3, interval_seconds: 60, expected_runs: 0, policy_enabled: true, created_at: 1}};
+  const inspection = {schema_version: 1, control: {state: 'competing_owner', can_control: false, message: 'Recorded only'}, sessions: [session],
+    attempts: runs.map((run_id, i) => ({session_id: sessionId, run_id, ordinal: i + 1, execution: null})), cancellation: ''};
+  vi.stubGlobal('fetch', vi.fn(async (path: string) => {
+    calls.push(path);
+    if (disconnected) throw new TypeError('network');
+    if (path === '/api/state') return new Response(JSON.stringify({employees: [{id: agentId, name: 'Writer'}], configuration: null,
+      provider: 'test', model: 'test', work: [{id: 'other', input: 'Other work', assignees: [agentId], status: 'pending', attempts: []}, ...(missingTask ? [] : [saved])]}));
+    if (path === '/api/loops/v1') return new Response(JSON.stringify(owner === 'web' ? inspection : {...inspection, sessions: [], attempts: []}));
+    if (path === '/api/connections/v1/loops/inspect-company') return new Response(JSON.stringify({schema_version: 1, scope: 'company', status: 'confirmed', code: 'company_loops_inspected', recovery: 'Inspect explicitly', data: inspection}));
+    if (path === '/api/teams') return new Response('{"teams":[]}');
+    return new Response('{}');
+  }));
+  const user = userEvent.setup(); render(<App />);
+  await screen.findByText('Other work', {selector: 'pre'});
+  const draft = screen.getByLabelText('What would you like help with?') as HTMLTextAreaElement;
+  fireEvent.change(draft, {target: {value: 'Retain this Loop navigation draft'}});
+  if (owner === 'local MCP') await user.click(screen.getByRole('button', {name: 'Inspect company Loops through local MCP'}));
+  await user.click(await screen.findByRole('button', {name: `Attempt details for ${owner === 'local MCP' ? 'local MCP ' : ''}Loop ${sessionId}`}));
+  const action = (id: string) => screen.getByRole('button', {name: `Open saved Task: ${taskId} · Run: ${id}`});
+  const detail = (id: string) => document.querySelector<HTMLDetailsElement>(`[data-attempt-id="${id}"]`)!;
+  for (const [i, key] of [[0, '{Enter}'], [1, ' ']] as const) {
+    action(runs[i]).focus(); await user.keyboard(key);
+    await waitFor(() => expect(document.activeElement).toBe(detail(runs[i]).querySelector('summary')));
+    expect(detail(runs[i]).open).toBe(true);
+    expect(detail(runs[i]).textContent).toContain('Selected recorded attempt');
+  }
+  fireEvent.click(detail(runs[1]).querySelector('summary')!);
+  await user.click(action(runs[1]));
+  await waitFor(() => expect(document.activeElement).toBe(detail(runs[1]).querySelector('summary')));
+  expect(detail(runs[1]).open).toBe(true);
+  await user.click(action(runs[2]));
+  const unavailable = screen.getByText(/Recorded attempt unavailable in the current workspace snapshot/);
+  expect(unavailable.textContent).toContain(`Task: ${taskId}`);
+  expect(unavailable.textContent).toContain(`Run: ${runs[2]}`);
+  expect(document.activeElement).toBe(unavailable);
+  expect(screen.queryByText(/Selected recorded attempt/)).toBeNull();
+  missingTask = true;
+  await user.click(screen.getByRole('button', {name: 'Refresh connection'}));
+  await waitFor(() => expect(action(runs[0]).getAttribute('aria-disabled')).toBe('true'));
+  await user.click(action(runs[0]));
+  expect(screen.queryByText(/Selected recorded attempt/)).toBeNull();
+  missingTask = false; disconnected = true;
+  await user.click(screen.getByRole('button', {name: 'Refresh connection'}));
+  await waitFor(() => expect(screen.getByText(/Disconnected — retained Loop records/)).toBeTruthy());
+  await user.click(action(runs[0]));
+  expect(action(runs[0]).getAttribute('aria-disabled')).toBe('true');
+  expect(draft.value).toBe('Retain this Loop navigation draft');
+  expect(calls.filter(path => /preview|execute|retry|stop|acknowledge|start/.test(path))).toEqual([]);
+});

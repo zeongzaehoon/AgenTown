@@ -1,3 +1,4 @@
+import type { RecordedAttemptNavigation } from './ConnectionActivity';
 import { inspectCompanyLoops, localLoop, sameLocalSession } from './work-loop-api';
 import { canControl, controlText, sourceText, type LoopControl } from './loop-control';
 import { useEffect, useRef, useState } from 'react';
@@ -26,7 +27,7 @@ function useSessionRemoval(owner: string) {
 }
 
 /** Polling and navigation inspect only; stopping requires explicit session consent. */
-export function OverviewLoops({workspace, connected, onOpenWork, onOpenSession}: {connected: boolean; onOpenSession?: (request: LoopNavigation) => void; workspace: Workspace | null; onOpenWork: (id: string) => void}) {
+export function OverviewLoops({workspace, connected, onOpenWork, onOpenSession, onOpenRecordedTask}: {onOpenRecordedTask?: (request: RecordedAttemptNavigation) => void; connected: boolean; onOpenSession?: (request: LoopNavigation) => void; workspace: Workspace | null; onOpenWork: (id: string) => void}) {
   const removal = useSessionRemoval('Web Loop activity');
   const [inspection, setInspection] = useState<LoopInspection | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
@@ -93,7 +94,7 @@ export function OverviewLoops({workspace, connected, onOpenWork, onOpenSession}:
   }, [connected]);
   return <section aria-labelledby="overview-loops-title">
     <h3 id="overview-loops-title">Bounded Loop activity</h3>
-    <CompanyMcpLoops connected={connected} workspace={workspace} onOpenSession={onOpenSession} />
+    <CompanyMcpLoops onOpenRecordedTask={onOpenRecordedTask} connected={connected} workspace={workspace} onOpenSession={onOpenSession} />
     <p role="status">{!connected ? 'Disconnected — retained Loop records and authority are stale. Reconnect and inspect before stopping.' : status === 'loading' ? 'Loading Loop inspection…' : status === 'unavailable'
       ? inspection ? 'Loop inspection unavailable — showing stale sessions from the last successful inspection.' : 'Loop inspection unavailable. No session data loaded.'
       : !fresh ? 'Loop inspection stale. Inspect again before stopping.' : 'Showing recorded Loop sessions.'}</p>
@@ -131,6 +132,7 @@ export function OverviewLoops({workspace, connected, onOpenWork, onOpenSession}:
           {inspection.attempts.filter(a => a.session_id === session.session_id).map(a => <article key={a.run_id}>
             <p>Attempt {a.ordinal} · Run ID: {a.run_id} · {executionLabel(a.execution)}</p>
             <RecordedAttemptSettings execution={a.execution} />
+            <OpenRecordedAttempt connected={connected} available={!!work} taskId={session.preview.task_id} runId={a.run_id} onOpen={onOpenRecordedTask} />
             {a.execution?.output != null && <><p>Output</p><pre>{a.execution.output}</pre></>}
             {a.execution?.error && <><p>Error</p><p>{a.execution.error}</p></>}
           </article>)}
@@ -144,7 +146,7 @@ export function OverviewLoops({workspace, connected, onOpenWork, onOpenSession}:
 }
 
 
-function CompanyMcpLoops({workspace, connected, onOpenSession}: {connected: boolean; workspace: Workspace | null; onOpenSession?: (request: LoopNavigation) => void}) {
+function CompanyMcpLoops({workspace, connected, onOpenSession, onOpenRecordedTask}: {onOpenRecordedTask?: (request: RecordedAttemptNavigation) => void; connected: boolean; workspace: Workspace | null; onOpenSession?: (request: LoopNavigation) => void}) {
   const removal = useSessionRemoval('Local MCP Loop activity');
   const [inspection, setInspection] = useState<LoopInspection | null>(null);
   const [status, setStatus] = useState('Not inspected. Explicitly inspect recorded sessions through the retained local MCP owner.');
@@ -253,6 +255,7 @@ function CompanyMcpLoops({workspace, connected, onOpenSession}: {connected: bool
             {inspection.attempts.filter(a => a.session_id === s.session_id).map(a => <article key={a.run_id}>
               <p>Attempt {a.ordinal} · Run ID: {a.run_id} · {executionLabel(a.execution)}</p>
               <RecordedAttemptSettings execution={a.execution} />
+              <OpenRecordedAttempt connected={connected} available={!!work} taskId={s.preview.task_id} runId={a.run_id} onOpen={onOpenRecordedTask} />
               {a.execution?.output != null && <><p>Output</p><pre>{a.execution.output}</pre></>}
               {a.execution?.error && <><p>Error</p><p>{a.execution.error}</p></>}
             </article>)}
@@ -295,4 +298,19 @@ function RecordedAttemptSettings({execution}: {execution: Partial<Attempt> | nul
     <p>Recorded attempt input</p>
     {execution?.input !== undefined ? <pre>{execution.input}</pre> : <p>Attempt input not recorded. Saved session settings above do not confirm attempt settings.</p>}
   </div>;
+}
+
+function OpenRecordedAttempt({connected, available, taskId, runId, onOpen}: {
+  connected: boolean; available: boolean; taskId: string; runId: string;
+  onOpen?: (request: RecordedAttemptNavigation) => void;
+}) {
+  const canOpen = connected && available && !!onOpen;
+  return <>
+    <button type="button" aria-disabled={!canOpen} onClick={() => {
+      if (canOpen) onOpen?.({taskId, runId});
+    }}>Open saved Task: {taskId} · Run: {runId}</button>
+    {!canOpen && <p>{!connected ? 'Reconnect before opening saved work.' : !available
+      ? 'Saved Task unavailable in the current workspace. Recorded details remain available here.'
+      : 'Saved-work navigation unavailable.'}</p>}
+  </>;
 }

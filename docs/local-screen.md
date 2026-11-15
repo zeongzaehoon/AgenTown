@@ -4886,3 +4886,34 @@ coverage checks independent refresh recovery, retained drafts/history and reques
 boundaries. Supervisor-selected consolidated checks and browser validation remain
 pending for this implementation snapshot. Live provider calls are skipped under
 the current user policy.
+
+### Open an exact Loop attempt from Company overview
+
+Launch `agentown-web --database /absolute/path/product.sqlite3` with an existing
+product database, or open the desktop product using that database. This flow
+requires recorded Loop sessions and attempts and the linked saved Task; no
+provider credentials are needed. Live provider calls remain skipped.
+
+1. In Company overview → Bounded Loop activity, expand **Attempt details for
+   Loop …**. For the retained local MCP source, first choose **Inspect company
+   Loops through local MCP**, then expand **Attempt details for local MCP Loop …**.
+2. Choose **Open saved Task: … · Run: …** beside the desired recorded attempt.
+   Tab to the action and use Enter or Space for keyboard navigation. With
+   multiple attempts, choose an older Run and confirm that its saved-work
+   disclosure expands, gains focus and says **Selected recorded attempt**.
+3. Collapse that disclosure and choose the same action again: it reopens and
+   receives focus. An unsaved work or employee draft remains intact.
+4. If a recorded Run is absent from the workspace snapshot, opening it focuses
+   **Recorded attempt unavailable** with both Task and Run IDs. Another attempt
+   is not selected instead. If the Task is unavailable, or the workspace is
+   disconnected, the action is unavailable; recorded session details stay
+   readable. Refresh the connection to inspect current saved work.
+
+Opening only changes saved-work inspection. It grants no consent and sends no
+preview, execution, retry or stop request. Session-level navigation and explicit
+stop controls remain separate. Deterministic coverage lives in
+`OverviewLoops.test.tsx` and `recorded-attempt-navigation.test.tsx`; run from
+`frontend` with `npm test` for the supervisor's frontend gate, or directly
+`npx vitest run src/OverviewLoops.test.tsx src/recorded-attempt-navigation.test.tsx`
+for these interactions. Browser validation is pending supervisor verification
+under the selected check profile; these steps do not claim a live provider test.
