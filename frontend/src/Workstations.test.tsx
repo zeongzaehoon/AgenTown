@@ -61,7 +61,18 @@ test('App workstation keyboard navigation selects all clients, focuses setup and
   await user.click(screen.getByRole('button', {name: 'Load recorded activity'}));
   const recorded = await screen.findByRole('button', {name: 'Open saved Task: recorded · Run: recorded-run'});
   expect((screen.getByLabelText('Saved work') as HTMLSelectElement).value).toBe('previous');
-  recorded.focus(); await user.keyboard('{Enter}');
+  // Workstation navigation owns focus even when it filters out a focused attempt.
+  recorded.focus();
+  fireEvent.click(screen.getByRole('button', {name: 'Open Codex workstation setup'}));
+  await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('heading', {name: 'Codex setup'})));
+  expect(screen.queryByRole('button', {name: 'Open saved Task: recorded · Run: recorded-run'})).toBeNull();
+  expect(screen.queryByText(/no longer shown for the selected integration/)).toBeNull();
+  expect((screen.getByLabelText('Saved work') as HTMLSelectElement).value).toBe('previous');
+  fireEvent.click(screen.getByRole('button', {name: 'Open Cursor workstation setup'}));
+  await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('heading', {name: 'Cursor setup'})));
+  expect(fetcher.mock.calls.filter(([path]) => path === '/api/connections/v1/activity')).toHaveLength(1);
+  screen.getByRole('button', {name: 'Open saved Task: recorded · Run: recorded-run'}).focus();
+  await user.keyboard('{Enter}');
   expect((screen.getByLabelText('Saved work') as HTMLSelectElement).value).toBe('recorded');
   expect(document.activeElement).toBe(screen.getByText(/Recorded attempt unavailable in the current workspace snapshot/));
   expect(screen.getByText(/No other attempt was selected/)).toBeTruthy();

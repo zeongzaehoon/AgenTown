@@ -108,3 +108,48 @@ test('refresh removing a focused record recovers focus to activity heading', asy
   await act(async () => resolve(new Response(JSON.stringify({...snapshot, attempts: []}))));
   expect(document.activeElement).toBe(screen.getByRole('heading', {name: 'Recorded integration activity'}));
 });
+
+test('client filtering recovers only removed activity focus, retaining surviving, outside and hidden focus without requests or navigation', async () => {
+  const fetcher = vi.fn(async (_path: string) => new Response(JSON.stringify({...snapshot, attempts: [attempt,
+    {...attempt, run_id: 'unknown-run', declared_source: 'unknown', integration: null}]})));
+  vi.stubGlobal('fetch', fetcher);
+  const open = vi.fn();
+  const props = {connected: true, savedTaskIds: ['saved'], onOpenRecordedTask: open};
+  const ui = (clientId: string, hidden = false) => <><input aria-label="Outside draft" /><div hidden={hidden}>
+    <ConnectionActivity {...props} clientId={clientId} />
+  </div></>;
+  const view = render(ui('codex'));
+  await userEvent.setup().click(screen.getByRole('button', {name: 'Load recorded activity'}));
+  const removed = await screen.findByRole('button', {name: 'Open saved Task: saved · Run: run-1'});
+  removed.focus();
+  view.rerender(ui('cursor'));
+  expect(document.activeElement).toBe(screen.getByRole('heading', {name: 'Recorded integration activity'}));
+  expect(screen.getByRole('status').textContent).toContain('no longer shown for the selected integration');
+  expect(screen.queryByRole('button', {name: 'Open saved Task: saved · Run: run-1'})).toBeNull();
+  const unclassified = screen.getByRole('button', {name: 'Open saved Task: saved · Run: unknown-run'});
+  unclassified.focus();
+  view.rerender(ui('codex'));
+  expect(document.activeElement).toBe(unclassified);
+  expect(screen.queryByText(/no longer shown for the selected integration/)).toBeNull();
+  const load = screen.getByRole('button', {name: 'Load recorded activity'});
+  load.focus(); view.rerender(ui('cursor'));
+  expect(document.activeElement).toBe(load);
+  view.rerender(ui('codex'));
+  const outside = screen.getByLabelText('Outside draft');
+  outside.focus(); view.rerender(ui('cursor'));
+  expect(document.activeElement).toBe(outside);
+  expect(screen.queryByText(/no longer shown for the selected integration/)).toBeNull();
+  view.rerender(ui('codex'));
+  screen.getByRole('button', {name: 'Open saved Task: saved · Run: run-1'}).focus();
+  view.rerender(ui('cursor', true));
+  expect(document.activeElement).toBe(document.body);
+  expect(screen.queryByText(/no longer shown for the selected integration/)).toBeNull();
+  view.rerender(ui('cursor'));
+  expect(document.activeElement).toBe(document.body);
+  view.rerender(ui('codex'));
+  expect(document.activeElement).toBe(document.body);
+  expect(screen.queryByText(/no longer shown for the selected integration/)).toBeNull();
+  expect(open).not.toHaveBeenCalled();
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  expect(fetcher.mock.calls[0][0]).toBe('/api/connections/v1/activity');
+});

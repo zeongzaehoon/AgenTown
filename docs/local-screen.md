@@ -5352,3 +5352,48 @@ This invocation found no installed frontend test dependencies. Scoped interactio
 and TypeScript execution, browser validation, and the supervisor-selected
 consolidated verification profile are pending. Live LLM calls are skipped,
 not passed, under the current user policy.
+
+### Connections client-filter focus (C138-T1)
+
+Launch `agentown-web --database ABSOLUTE_DATABASE` with an absolute path to a
+product database containing the deterministic recorded-attempt fixtures described
+above. Open Connections, choose the integration with a recorded attempt, and
+explicitly choose **Load recorded activity**. Opening Connections or changing
+Client must not load recorded activity automatically.
+
+1. Focus an **Open saved Task** button. To exercise removal while retaining that
+   focus, change the Client select through the browser's React-compatible native
+   value setter and dispatch a bubbling `change` event from the console (ordinary
+   keyboard selection intentionally focuses the surviving Client selector):
+
+   ```js
+   const clientSelect = [...document.querySelectorAll('select')]
+     .find(select => select.labels?.[0]?.textContent.includes('Client'));
+   Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set
+     .call(clientSelect, 'cursor'); // choose a different integration
+   clientSelect.dispatchEvent(new Event('change', {bubbles: true}));
+   ```
+
+   If the focused attempt disappears, focus moves to **Recorded integration
+   activity**. The polite status explains that its control is no longer shown
+   for the selected integration. Tab continues into the visible activity.
+2. Repeat with focus on **Load recorded activity**, a retained unclassified
+   attempt, the Client selector, or an outside draft. That focus stays put;
+   filtering adds no recovery explanation. Unclassified attempts remain visible.
+3. Hide Connections before changing the client. Hidden activity must not receive
+   focus or announce recovery, including when Connections is opened again.
+   Reopen Connections with focus on the page body, then change Client again.
+   Focus must remain on the body without a recovery announcement from the
+   previously removed attempt.
+4. With a recorded-attempt control focused, open another Company workstation.
+   The requested client setup heading receives focus, including when that client
+   filters out the attempt. There must be no activity recovery announcement.
+5. Inspect network requests and Saved work: client filtering must not reload
+   activity, select a saved Task, navigate to an attempt, or execute work. Only
+   another explicit **Load recorded activity** refreshes its snapshot.
+
+Deterministic coverage is in `ConnectionActivity.test.tsx` and
+`Workstations.test.tsx`. Scoped interaction/TypeScript checks and supervisor
+frontend-profile browser validation are pending in this implementation snapshot;
+frontend dependencies are absent in the isolated workspace. Live provider calls
+remain skipped under the user policy, not passed.

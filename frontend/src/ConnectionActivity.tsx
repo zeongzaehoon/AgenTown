@@ -36,11 +36,22 @@ export function ConnectionActivity({clientId, connected, savedTaskIds = [], onOp
   const heading = useRef<HTMLHeadingElement | null>(null);
   const content = useRef<HTMLElement | null>(null);
   const previousFocus = useRef<HTMLElement | null>(null);
+  const activityFocus = useRef<HTMLElement | null>(null);
+  const previousClient = useRef(clientId);
+  const [focusNotice, setFocusNotice] = useState('');
   useLayoutEffect(() => {
-    const previous = previousFocus.current;
+    const clientChanged = previousClient.current !== clientId;
+    previousClient.current = clientId;
+    const previous = previousFocus.current ?? (clientChanged ? activityFocus.current : null);
     previousFocus.current = null;
-    if (previous && !previous.isConnected && document.activeElement === document.body && content.current && !content.current.closest('[hidden]')) heading.current?.focus();
-  }, [data]);
+    // Consume removed focus even when the hidden panel cannot recover it.
+    if (previous && !previous.isConnected) activityFocus.current = null;
+    if (clientChanged) setFocusNotice('');
+    if (previous && !previous.isConnected && document.activeElement === document.body && content.current && !content.current.closest('[hidden]')) {
+      heading.current?.focus();
+      if (clientChanged) setFocusNotice('The recorded attempt control you were using is no longer shown for the selected integration. Review the visible recorded activity.');
+    }
+  }, [data, clientId]);
   const request = useRef<AbortController | null>(null);
   const lock = useRef(false);
   useLayoutEffect(() => {
@@ -80,11 +91,15 @@ export function ConnectionActivity({clientId, connected, savedTaskIds = [], onOp
       {!canOpen && <p>{!connected ? 'Reconnect before opening saved work.' : 'Saved Task unavailable in the current workspace. It may have been removed; refresh the workspace to inspect again.'}</p>}
     </li>;
   }
-  return <section className="connection-activity" ref={content} aria-label="Recorded integration activity" aria-busy={pending}>
+  return <section className="connection-activity" ref={content}
+    onFocusCapture={event => { activityFocus.current = event.target; }}
+    onBlurCapture={() => { activityFocus.current = null; }}
+    aria-label="Recorded integration activity" aria-busy={pending}>
     <h3 ref={heading} tabIndex={-1}>Recorded integration activity</h3>
     <p>Persisted Run records only. Declared source is untrusted historical metadata, not authenticated client identity. Activity does not verify current connection, configuration or result quality. Copying setup and passing local checks cannot create this evidence.</p>
     <button type="button" aria-disabled={pending || !connected} onClick={() => void load()}>Load recorded activity</button>
     <div role="status" aria-live="polite" aria-atomic="true">
+      {focusNotice && <p>{focusNotice}</p>}
       {pending ? <p>Loading recorded activity…</p> : unavailable ? <p>Recorded activity unavailable. Check the workspace connection and explicitly load again.</p> : !data ? <p>Recorded activity not loaded.</p> : <p>Showing a snapshot of up to {data.limit} recent recorded attempts across all sources. Load again explicitly to refresh.</p>}
       {!connected && <p>Workspace disconnected. Activity loading and saved-work navigation unavailable; nothing is automatically replayed.</p>}
       {data && (stale || pending) && <p>Previous recorded activity observation — potentially stale.</p>}
