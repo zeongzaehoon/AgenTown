@@ -1,3 +1,4 @@
+import { StrictMode } from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, expect, test, vi } from 'vitest';
@@ -862,12 +863,13 @@ test.each(['failure', 'malformed', 'superseded'])(
     const focused = screen.getByLabelText('Configuration fragment');
     focused.focus();
     if (outcome === 'superseded') {
-      // Dispatch both refreshes within one commit, before the loading button disables.
-      // Finish this request first; then supersede a new deferred request below.
+      // Finish this request, then explicitly cancel and replace a deferred refresh.
       await act(async () => {finish(new Response(JSON.stringify(setup)));});
       const fetcher = vi.mocked(fetch);
       fetcher.mockImplementationOnce(() => new Promise<Response>(resolve => {finish = resolve;}));
-      act(() => {refresh.click(); refresh.click();});
+      fireEvent.click(refresh);
+      fireEvent.click(screen.getByRole('button', {name: 'Cancel waiting for setup'}));
+      fireEvent.click(refresh);
       await screen.findByText('Setup service available.');
       focused.focus();
     }
@@ -1078,7 +1080,9 @@ test.each(['unchanged', 'hint', 'failed', 'malformed', 'superseded'])('%s setup 
   const refresh = screen.getByRole('button', {name: 'Refresh setup'});
   if (mode === 'superseded') {
     defer = true;
-    act(() => {refresh.click(); refresh.click();});
+    fireEvent.click(refresh);
+    fireEvent.click(screen.getByRole('button', {name: 'Cancel waiting for setup'}));
+    fireEvent.click(refresh);
     await act(async () => {responses[1](new Response(JSON.stringify(setup)));});
     await act(async () => {responses[0](new Response(JSON.stringify(changed)));});
   } else await user.click(refresh);
@@ -1208,4 +1212,107 @@ test('cancelling either check leaves the other pending and independently cancell
   expect(screen.queryByText('Shared-data check passed.')).toBeNull();
   expect(screen.queryByText(/Employees:.*Saved work:/)).toBeNull();
   expect(signals).toHaveLength(2);
+});
+
+test.each(['success', 'failure'])('StrictMode setup replay admits a replacement and ignores late cleanup %s', async outcome => {
+  const requests: {resolve: (response: Response) => void; reject: (error: Error) => void; signal: AbortSignal}[] = [];
+  vi.stubGlobal('fetch', vi.fn((_path: string, init?: RequestInit) =>
+    new Promise<Response>((resolve, reject) => requests.push({resolve, reject, signal: init!.signal as AbortSignal}))));
+  render(<StrictMode><Connections workspaceConnected openClient={{id: 'codex'}} /></StrictMode>);
+  expect(requests).toHaveLength(2);
+  expect(requests[0].signal.aborted).toBe(true);
+  expect(requests[1].signal.aborted).toBe(false);
+  const refresh = screen.getByRole('button', {name: 'Refresh setup'});
+  await act(async () => {
+    if (outcome === 'failure') requests[0].reject(new Error('late cleanup failure'));
+    else requests[0].resolve(new Response(JSON.stringify({...setup, preparation: 'Obsolete setup'})));
+  });
+  expect((refresh as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.getByRole('button', {name: 'Cancel waiting for setup'})).toBeTruthy();
+  expect(screen.queryByLabelText('Setup instructions')).toBeNull();
+  expect(screen.queryByText(/Setup service disconnected/)).toBeNull();
+  fireEvent.click(refresh);
+  expect(requests).toHaveLength(2);
+  await act(async () => requests[1].resolve(new Response(JSON.stringify(setup))));
+  expect((screen.getByLabelText('Setup instructions') as HTMLTextAreaElement).value).toContain(setup.preparation);
+  expect((refresh as HTMLButtonElement).disabled).toBe(false);
+  expect(screen.queryByRole('button', {name: 'Cancel waiting for setup'})).toBeNull();
+});
+
+test.each(['initial', 'retained'])('setup %s cancellation permits immediate explicit refresh and ignores late responses', async mode => {
+  const requests: {resolve: (response: Response) => void; reject: (error: Error) => void; signal: AbortSignal}[] = [];
+  let seeded = mode === 'initial';
+  const fetcher = vi.fn((_path: string, init?: RequestInit) => {
+    if (!seeded) { seeded = true; return Promise.resolve(new Response(JSON.stringify(setup))); }
+    return new Promise<Response>((resolve, reject) => requests.push({resolve, reject, signal: init!.signal as AbortSignal}));
+  });
+  vi.stubGlobal('fetch', fetcher);
+  const user = userEvent.setup();
+  render(<Connections workspaceConnected openClient={{id: 'codex'}} />);
+  const refresh = screen.getByRole('button', {name: 'Refresh setup'});
+  let instructions: string | undefined;
+  if (mode === 'retained') {
+    await screen.findByLabelText('Client');
+    await user.selectOptions(screen.getByLabelText('Client'), 'claude-code');
+    await user.selectOptions(screen.getByLabelText('Platform'), 'windows');
+    instructions = (screen.getByLabelText('Setup instructions') as HTMLTextAreaElement).value;
+    fireEvent.click(refresh);
+  }
+  const cancel = screen.getByRole('button', {name: 'Cancel waiting for setup'});
+  for (let tabs = 0; tabs < 30 && document.activeElement !== cancel; tabs++) await user.tab();
+  expect(document.activeElement).toBe(cancel);
+  await user.keyboard('{Enter}');
+  expect(document.activeElement).toBe(refresh);
+  expect(requests[0].signal.aborted).toBe(true);
+  expect(requests).toHaveLength(1);
+  expect(screen.getByText(/Stopped waiting for setup/)).toBeTruthy();
+  if (mode === 'initial') expect(screen.queryByLabelText('Setup instructions')).toBeNull();
+  else {
+    expect(screen.getByText(/Previous setup observation/)).toBeTruthy();
+    expect((screen.getByLabelText('Client') as HTMLSelectElement).value).toBe('claude-code');
+    expect((screen.getByLabelText('Platform') as HTMLSelectElement).value).toBe('windows');
+    expect((screen.getByLabelText('Setup instructions') as HTMLTextAreaElement).value).toBe(instructions);
+  }
+  fireEvent.click(refresh);
+  fireEvent.click(screen.getByRole('button', {name: 'Cancel waiting for setup'}));
+  fireEvent.click(refresh);
+  fireEvent.click(refresh);
+  expect(requests).toHaveLength(3);
+  await act(async () => {
+    requests[0].resolve(new Response(JSON.stringify({...setup, clients: [setup.clients[0]]})));
+    requests[1].reject(new Error('late failure'));
+  });
+  expect((refresh as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.getByText('Loading setup…')).toBeTruthy();
+  expect(screen.queryByText(/Stopped waiting for setup/)).toBeNull();
+  expect(screen.queryByText(/Setup service disconnected/)).toBeNull();
+  await act(async () => requests[2].resolve(new Response(JSON.stringify(setup))));
+  expect((refresh as HTMLButtonElement).disabled).toBe(false);
+  expect(screen.queryByText(/Previous setup observation/)).toBeNull();
+  expect(fetcher.mock.calls.every(([, init]) => init?.method === 'POST' && init.body === '{}')).toBe(true);
+});
+
+test.each(['success', 'failure', 'cancel', 'outside', 'hidden'])('setup disappearance restores focus appropriately: %s', async outcome => {
+  let finish!: (response: Response) => void;
+  let fail!: (error: Error) => void;
+  vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>((resolve, reject) => {finish = resolve; fail = reject;})));
+  const user = userEvent.setup();
+  render(<><input aria-label="Outside draft" /><Connections workspaceConnected openClient={{id: 'codex'}} /></>);
+  const refresh = screen.getByRole('button', {name: 'Refresh setup'});
+  const cancel = screen.getByRole('button', {name: 'Cancel waiting for setup'});
+  cancel.focus();
+  const outside = screen.getByLabelText('Outside draft');
+  if (outcome === 'outside') outside.focus();
+  if (outcome === 'hidden') await user.click(screen.getByRole('button', {name: 'Hide connections'}));
+  const previous = document.activeElement;
+  if (outcome === 'cancel' || outcome === 'outside') fireEvent.click(cancel);
+  else await act(async () => {
+    if (outcome === 'failure') fail(new Error('offline'));
+    else finish(new Response(JSON.stringify(setup)));
+  });
+  expect(document.activeElement).toBe(['outside', 'hidden'].includes(outcome) ? previous : refresh);
+  if (outcome === 'hidden') {
+    await user.click(screen.getByRole('button', {name: 'Open connections'}));
+    expect(document.activeElement).toBe(screen.getByRole('button', {name: 'Hide connections'}));
+  }
 });

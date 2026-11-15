@@ -5513,3 +5513,54 @@ This implementation invocation could not execute these checks because its
 isolated checkout has no frontend node_modules. Supervisor change-based
 verification and applicable browser validation remain pending. Live provider
 validation is skipped, not passed, under the current user policy.
+
+### Cancel waiting for Connections setup (C141)
+
+Launch the desktop product, or run `uv run --directory python --locked
+agentown-web --database /absolute/path/product.sqlite3 --port 8765` and open
+<http://127.0.0.1:8765>. Before opening Connections, use this temporary browser
+console wrapper to make the initial setup response visibly slow:
+
+```js
+window.originalSetupCancelFetch = window.fetch;
+window.fetch = async (input, init) => {
+  if (String(input) !== '/api/connections/v1') {
+    return window.originalSetupCancelFetch(input, init);
+  }
+  const response = await window.originalSetupCancelFetch(input, {...init, signal: undefined});
+  const body = await response.text();
+  await new Promise(resolve => setTimeout(resolve, 5000));
+  return new Response(body, {status: response.status, headers: response.headers});
+};
+```
+
+1. Open **Connections**. Tab to **Cancel waiting for setup** and press Enter
+   or Space. Loading ends immediately and focus returns to **Refresh setup**.
+   No automatic refresh occurs; the notice keeps client readiness unverified.
+2. Immediately activate **Refresh setup**. The late cancelled response cannot
+   end this newer wait or replace its result. Let the explicit refresh finish.
+3. Select another client and platform, then refresh and cancel again. Loaded
+   instructions and both selections remain; retained setup observations are
+   labeled potentially stale. Copy/download feedback is not changed by cancelled
+   responses. Only another successful explicit refresh refreshes setup evidence;
+   it does not verify a client connection.
+4. Leave focus on Cancel waiting until completion or failure: focus returns to
+   Refresh setup. Move focus to another control before completion and confirm it
+   stays there. Hide Connections while waiting and confirm completion does not
+   focus the hidden panel or steal focus when reopened.
+5. Restore `window.fetch = window.originalSetupCancelFetch`.
+
+Deterministic coverage in `frontend/src/Connections.test.tsx` includes initial
+and retained-data cancellation, keyboard activation, immediate retry, duplicate
+admission, late success/failure, StrictMode initial-load effect replay and focus
+recovery. The replay regression holds the replacement request pending while the
+aborted first request succeeds or fails, then accepts only the replacement.
+With dependencies installed,
+run `cd frontend && npx tsc --noEmit && npx vitest run src/Connections.test.tsx src/Workstations.test.tsx`.
+Setup reads use the existing POST `/api/connections/v1` endpoint with an empty
+JSON body; cancellation does not change that API contract.
+This invocation did not run these checks: frontend dependencies are absent in
+its isolated checkout. Supervisor frontend-profile verification (or periodic
+full profile when due), ordinary Python checks and browser validation remain
+pending. Live provider validation is skipped, not passed; no credentials or
+provider calls are needed for these steps.

@@ -297,6 +297,31 @@ function Setup({workspaceConnected, openClient, active, ...navigation}: Activity
   const [platformId, setPlatformId] = useState('macos');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
+  const [cancelled, setCancelled] = useState(false);
+  const refreshControl = useRef<HTMLButtonElement | null>(null);
+  const cancelControl = useRef<HTMLButtonElement | null>(null);
+  const restoreCancelFocus = useRef(false);
+  const loadingLock = useRef(false);
+  useLayoutEffect(() => {
+    if (!loading && restoreCancelFocus.current) {
+      restoreCancelFocus.current = false;
+      if (active && document.activeElement === document.body) refreshControl.current?.focus();
+    }
+  }, [loading, active]);
+  function endWaiting() {
+    restoreCancelFocus.current = document.activeElement === cancelControl.current;
+    setLoading(false);
+  }
+  function cancelWaiting() {
+    const request = controller.current;
+    if (!request) return;
+    controller.current = null;
+    loadingLock.current = false;
+    request.abort();
+    freshness.finish(freshness.begin(), false);
+    setCancelled(true);
+    endWaiting();
+  }
   const [feedback, setFeedback] = useState('');
   const [copying, setCopying] = useState(false);
   const heading = useRef<HTMLHeadingElement | null>(null);
@@ -316,32 +341,52 @@ function Setup({workspaceConnected, openClient, active, ...navigation}: Activity
   useLayoutEffect(() => {
     if (openClient) { chooseClient(openClient.id); }
   }, [openClient]);
+  const focusedOpenClient = useRef<OpenClientRequest | null>(null);
   useLayoutEffect(() => {
-    if (openClient && active) heading.current?.focus();
+    if (openClient && active && focusedOpenClient.current !== openClient) {
+      focusedOpenClient.current = openClient;
+      heading.current?.focus();
+    }
   }, [openClient, active]);
   const controller = useRef<AbortController | null>(null);
   const copyingLock = useRef(false);
   async function refresh() {
+    if (loadingLock.current) return;
+    loadingLock.current = true;
     const started = freshness.begin();
-    controller.current?.abort();
+    setCancelled(false);
     const request = new AbortController(); controller.current = request;
     setLoading(true);
     try {
       const next = await api<unknown>('/api/connections/v1', {}, request.signal);
-      if (request.signal.aborted) return;
+      if (controller.current !== request || request.signal.aborted) return;
       if (!isConnectionSetup(next)) throw new Error('Unsupported setup');
       const focused = document.activeElement;
-      refreshFocus.current = focused instanceof HTMLElement && setupContent.current?.contains(focused) ? focused : null;
+      refreshFocus.current = focused instanceof HTMLElement && focused !== cancelControl.current && setupContent.current?.contains(focused) ? focused : null;
       setFocusNotice('');
       if (!data) {
         const initialClient = next.clients.find(c => c.id === clientId);
         setPlatformId(current => initialClient?.platforms.find(p => p.id === current)?.id ?? initialClient?.platforms[0]?.id ?? current);
       }
       setData(next); setError(false); freshness.finish(started, true);
-    } catch { if (!request.signal.aborted) { setError(true); freshness.finish(started, false); } }
-    finally { if (!request.signal.aborted) setLoading(false); }
+    } catch { if (controller.current === request && !request.signal.aborted) { setError(true); freshness.finish(started, false); } }
+    finally {
+      if (controller.current === request) {
+        controller.current = null;
+        loadingLock.current = false;
+        endWaiting();
+      }
+    }
   }
-  useEffect(() => { void refresh(); return () => controller.current?.abort(); }, []);
+  useEffect(() => {
+    void refresh();
+    return () => {
+      const request = controller.current;
+      controller.current = null;
+      loadingLock.current = false;
+      request?.abort();
+    };
+  }, []);
   const client = data?.clients.find(c => c.id === clientId);
   const platform = client?.platforms.find(p => p.id === platformId);
   function chooseClient(id: string) {
@@ -403,7 +448,9 @@ function Setup({workspaceConnected, openClient, active, ...navigation}: Activity
     <p role="status" aria-live="polite" aria-atomic="true">{focusNotice}</p>
     <p>Opening setup does not connect a client or execute provider work.</p>
     <p>Workspace: {workspaceConnected ? 'Connected' : 'Disconnected — loaded work may be stale'}. This does not establish an external client connection.</p>
-    <button type="button" disabled={loading} onClick={() => void refresh()}>Refresh setup</button>
+    <button ref={refreshControl} type="button" disabled={loading} onClick={() => void refresh()}>Refresh setup</button>
+    {loading && <button ref={cancelControl} type="button" onClick={cancelWaiting}>Cancel waiting for setup</button>}
+    {cancelled && <p role="status">Stopped waiting for setup. Server processing may continue. Select Refresh setup to try again explicitly. Client readiness remains unverified.</p>}
     <p role="status" aria-live="polite" aria-atomic="true">{loading ? 'Loading setup…' : error ? `Setup service disconnected or unavailable. ${data ? 'Previously loaded instructions may be stale.' : 'No setup instructions are available.'} Check the local server and refresh setup.` : freshness.stale ? 'Setup service freshness unverified. Refresh setup while connected.' : 'Setup service available.'}</p>
     {data && freshness.stale && <p role="status">Previous setup observation — instructions and installation hints may be stale. Reconnect and explicitly refresh setup to refresh this evidence.</p>}
     {data && !client && <p role="status">Selected client setup unavailable. Refresh setup to try again. Detected: Unknown. Configured: Unknown. Connected: Unverified. Exercised: Unverified.</p>}
