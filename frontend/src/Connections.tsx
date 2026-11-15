@@ -76,16 +76,18 @@ const diagnosticRecovery = {
   missing_tools: 'Repair or reinstall AgenTown, keeping your database. Restart AgenTown, then check again.',
 };
 // A response can refresh evidence only within the connected period in which
-// the user requested it. Reconnection never refreshes retained observations.
-function useEvidenceFreshness(connected: boolean) {
+// the user requested it and for the same displayed server configuration.
+// Reconnection or returning to an earlier configuration never refreshes evidence.
+function useEvidenceFreshness(connected: boolean, configuration = '') {
   const [stale, setStale] = useState(!connected);
-  const connection = useRef({connected, generation: 0});
+  const connection = useRef({connected, configuration, generation: 0});
   useLayoutEffect(() => {
-    if (connection.current.connected !== connected) {
-      connection.current = {connected, generation: connection.current.generation + 1};
+    if (connection.current.connected !== connected || connection.current.configuration !== configuration) {
+      connection.current = {connected, configuration, generation: connection.current.generation + 1};
+      setStale(true);
     }
     if (!connected) setStale(true);
-  }, [connected]);
+  }, [connected, configuration]);
   function begin() { return {...connection.current}; }
   function finish(start: {connected: boolean; generation: number}, successful: boolean) {
     setStale(!successful || !start.connected || !connection.current.connected ||
@@ -94,8 +96,8 @@ function useEvidenceFreshness(connected: boolean) {
   return {stale, begin, finish};
 }
 
-function LocalDiagnostic({workspaceConnected}: {workspaceConnected: boolean}) {
-  const freshness = useEvidenceFreshness(workspaceConnected);
+function LocalDiagnostic({workspaceConnected, configuration}: {workspaceConnected: boolean; configuration: string}) {
+  const freshness = useEvidenceFreshness(workspaceConnected, configuration);
   const [pending, setPending] = useState(false);
   const [outcome, setOutcome] = useState<keyof typeof diagnosticMessages | null>(null);
   const lock = useRef(false);
@@ -128,7 +130,7 @@ function LocalDiagnostic({workspaceConnected}: {workspaceConnected: boolean}) {
   }
   return <section aria-label="Local server diagnostic" aria-busy={pending}>
     <h3>Check local server</h3>
-    {outcome && freshness.stale && <p role="status">Previous local server diagnostic observation — potentially stale. Reconnect and explicitly check local server again to refresh this evidence.</p>}
+    {outcome && freshness.stale && <p role="status">Previous local server diagnostic observation — potentially stale. Reconnect if needed and explicitly check local server again to refresh this evidence.</p>}
     <p>Checks the installed server and selected database used by the setup artifact. Initializes MCP and discovers workflow tools without running them or calling a provider.</p>
     <button type="button" disabled={pending} onClick={() => void check()}>Check local server</button>
     <div role="status" aria-live="polite" aria-atomic="true">
@@ -157,8 +159,8 @@ const sharedMessages = {
   failed: 'Shared-data check failed.',
   malformed: 'Shared-data check returned an invalid response.',
 };
-function SharedDataCheck({workspaceConnected}: {workspaceConnected: boolean}) {
-  const freshness = useEvidenceFreshness(workspaceConnected);
+function SharedDataCheck({workspaceConnected, configuration}: {workspaceConnected: boolean; configuration: string}) {
+  const freshness = useEvidenceFreshness(workspaceConnected, configuration);
   const [pending, setPending] = useState(false);
   const [outcome, setOutcome] = useState<keyof typeof sharedMessages | null>(null);
   const [counts, setCounts] = useState<{employees: number; work: number} | null>(null);
@@ -191,7 +193,7 @@ function SharedDataCheck({workspaceConnected}: {workspaceConnected: boolean}) {
   }
   return <section aria-label="Shared employee and work access" aria-busy={pending}>
     <h3>Check shared data</h3>
-    {outcome && freshness.stale && <p role="status">Previous shared-data observation and counts — potentially stale. Reconnect and explicitly check shared data again to refresh this evidence.</p>}
+    {outcome && freshness.stale && <p role="status">Previous shared-data observation and counts — potentially stale. Reconnect if needed and explicitly check shared data again to refresh this evidence.</p>}
     <p>Use the installed local server and selected database to read employees and saved work. Only counts are shown. This separate check calls list_agents and list_tasks; it does not change data, inspect history, execute work, call a provider, or read client settings or credentials.</p>
     <button type="button" disabled={pending} onClick={() => void check()}>Check shared data</button>
     <div role="status" aria-live="polite" aria-atomic="true">
@@ -377,7 +379,7 @@ function Setup({workspaceConnected, openClient, active, ...navigation}: Activity
         <li><h4>Inspect and verify in {client.name}</h4>
           <p className="connection-guidance">{platform.inspection}</p>
           <p>Ask the client: Using AgenTown, list employees and saved work. Inspect the selected Task and its attempt history. Do not execute work.</p>
-          <LocalDiagnostic workspaceConnected={workspaceConnected} /><SharedDataCheck workspaceConnected={workspaceConnected} />
+          <LocalDiagnostic workspaceConnected={workspaceConnected} configuration={platform.configuration} /><SharedDataCheck workspaceConnected={workspaceConnected} configuration={platform.configuration} />
         </li>
         <li><h4>Recover if setup fails</h4><p className="connection-guidance">{data.recovery}</p></li>
       </ol>}

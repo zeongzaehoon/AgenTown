@@ -5305,3 +5305,50 @@ src/Workstations.test.tsx` and `npx tsc --noEmit`. This implementation invocatio
 has no installed frontend dependencies; interaction execution, TypeScript and
 the supervisor-selected verification profile remain pending. Browser validation
 is pending supervisor verification. Live LLM validation is skipped, not passed.
+
+### Configuration-scoped local connection observations (C137)
+
+Launch `agentown-web --database ABSOLUTE_DATABASE` with an absolute database
+path, open Connections, choose Codex and a platform, then explicitly run Check
+local server and Check shared data. These are independent local observations;
+external configuration remains unknown and connection/exercise unverified.
+
+For deterministic refresh reproduction without changing any client settings,
+use the browser console to wrap only the setup response:
+
+```js
+window.originalEvidenceFetch = window.fetch;
+window.fetch = async (input, init) => {
+  const response = await window.originalEvidenceFetch(input, init);
+  if (String(input) !== '/api/connections/v1') return response;
+  const setup = await response.json();
+  setup.clients = setup.clients.map(client => ({...client,
+    platforms: client.platforms.map(platform => ({...platform,
+      configuration: platform.configuration + '\n# fixture: changed command/database'
+    }))
+  }));
+  return new Response(JSON.stringify(setup), {status: 200,
+    headers: {'Content-Type': 'application/json'}});
+};
+```
+
+Refresh setup. Earlier diagnostic outcomes and shared-data counts must each be
+marked as previous observations. Client/platform choice and Refresh setup focus
+remain intact; manual copy/download use the displayed fixture text. Only a
+successful explicit rerun clears that check's previous-observation notice.
+Start a check before refreshing to the changed fixture: its late success must
+also remain a previous observation. Returning to the original configuration
+does not make that old in-flight check fresh. Restore with
+`window.fetch = window.originalEvidenceFetch` and refresh.
+
+An unchanged refresh or a fixture changing only `client.status.detected` must
+preserve applicable observations. Failed, malformed and superseded setup
+responses must leave their accepted configuration binding intact. Interaction
+fixtures cover these boundaries in `frontend/src/Connections.test.tsx`, including
+independent reruns and retained controls, focus and exact copied configuration.
+Existing manual download and platform recovery coverage remains applicable.
+
+This invocation found no installed frontend test dependencies. Scoped interaction
+and TypeScript execution, browser validation, and the supervisor-selected
+consolidated verification profile are pending. Live LLM calls are skipped,
+not passed, under the current user policy.

@@ -989,3 +989,102 @@ test('initial setup and explicit ChatGPT selection retain their default platform
   expect(screen.getByRole('region', {name: 'ChatGPT prerequisites checklist'})).toBeTruthy();
   expect((screen.getByLabelText('Platform') as HTMLSelectElement).value).toBe('macos');
 });
+
+test.each(['command', 'database'])('accepted %s changes invalidate both checks independently without replacing controls', async change => {
+  let current = structuredClone(setup);
+  let failCheck = false;
+  vi.stubGlobal('fetch', vi.fn(async (path: string) => new Response(JSON.stringify(
+    path === diagnosticPath ? diagnosticResult(failCheck ? 'failed' : 'passed') : path === sharedPath ? sharedResult() : current))));
+  const user = userEvent.setup();
+  render(<Connections workspaceConnected openClient={{id: 'codex'}} />);
+  await screen.findByLabelText('Client');
+  await user.selectOptions(screen.getByLabelText('Platform'), 'windows');
+  await user.click(screen.getByRole('button', {name: 'Check local server'}));
+  await user.click(screen.getByRole('button', {name: 'Check shared data'}));
+  await screen.findByText('Employees: 2. Saved work: 3.');
+  current.clients[0].platforms[1].configuration = `${change}=new absolute path`;
+  const refresh = screen.getByRole('button', {name: 'Refresh setup'});
+  const diagnostic = screen.getByRole('button', {name: 'Check local server'});
+  await user.click(refresh);
+  expect(await screen.findByText(/Previous local server diagnostic observation/)).toBeTruthy();
+  expect(screen.getByText(/Previous shared-data observation and counts/)).toBeTruthy();
+  expect(screen.getByRole('button', {name: 'Check local server'})).toBe(diagnostic);
+  expect(document.activeElement).toBe(refresh);
+  expect((screen.getByLabelText('Platform') as HTMLSelectElement).value).toBe('windows');
+  const clipboard = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue();
+  await user.click(screen.getByRole('button', {name: 'Copy configuration'}));
+  expect(clipboard).toHaveBeenLastCalledWith(`${change}=new absolute path`);
+  failCheck = true;
+  await user.click(diagnostic);
+  expect(screen.getByText(/Previous local server diagnostic observation/)).toBeTruthy();
+  failCheck = false;
+  await user.click(diagnostic);
+  await waitFor(() => expect(screen.queryByText(/Previous local server diagnostic observation/)).toBeNull());
+  expect(screen.getByText(/Previous shared-data observation and counts/)).toBeTruthy();
+  await user.click(screen.getByRole('button', {name: 'Check shared data'}));
+  await waitFor(() => expect(screen.queryByText(/Previous shared-data observation and counts/)).toBeNull());
+  expect(screen.getByText(/Configured: Unknown. Connected: Unverified. Exercised: Unverified./)).toBeTruthy();
+});
+
+test.each(['diagnostic', 'shared-data'])('%s begun before a changed setup cannot establish fresh evidence, even after configuration returns', async check => {
+  let current = structuredClone(setup);
+  let resolve: ((response: Response) => void) | undefined;
+  let defer = true;
+  const path = `/api/connections/v1/${check}`;
+  const result = check === 'diagnostic' ? diagnosticResult('passed') : sharedResult(7, 8);
+  vi.stubGlobal('fetch', vi.fn(async (input: string) => input === path
+    ? defer ? new Promise<Response>(done => {resolve = done;}) : new Response(JSON.stringify(result))
+    : new Response(JSON.stringify(current))));
+  const user = userEvent.setup();
+  render(<Connections workspaceConnected openClient={{id: 'codex'}} />);
+  await screen.findByLabelText('Client');
+  const button = screen.getByRole('button', {name: check === 'diagnostic' ? 'Check local server' : 'Check shared data'});
+  await user.click(button);
+  current.clients[0].platforms[0].configuration = 'new database';
+  await user.click(screen.getByRole('button', {name: 'Refresh setup'}));
+  current = structuredClone(setup);
+  await user.click(screen.getByRole('button', {name: 'Refresh setup'}));
+  await act(async () => {resolve!(new Response(JSON.stringify(result)));});
+  const previous = check === 'diagnostic' ? /Previous local server diagnostic observation/ : /Previous shared-data observation and counts/;
+  expect(await screen.findByText(previous)).toBeTruthy();
+  defer = false;
+  await user.click(button);
+  await waitFor(() => expect(screen.queryByText(previous)).toBeNull());
+});
+
+test.each(['unchanged', 'hint', 'failed', 'malformed', 'superseded'])('%s setup responses preserve applicable local observations', async mode => {
+  let current: unknown = structuredClone(setup);
+  let fail = false;
+  let defer = false;
+  const responses: ((response: Response) => void)[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (path: string) => {
+    if (path === diagnosticPath) return new Response(JSON.stringify(diagnosticResult('passed')));
+    if (path === sharedPath) return new Response(JSON.stringify(sharedResult()));
+    if (fail) throw new Error('offline');
+    if (defer) return new Promise<Response>(done => responses.push(done));
+    return new Response(JSON.stringify(current));
+  }));
+  const user = userEvent.setup();
+  render(<Connections workspaceConnected openClient={{id: 'codex'}} />);
+  await screen.findByLabelText('Client');
+  await user.click(screen.getByRole('button', {name: 'Check local server'}));
+  await user.click(screen.getByRole('button', {name: 'Check shared data'}));
+  await screen.findByText('Employees: 2. Saved work: 3.');
+  const changed = structuredClone(setup);
+  changed.clients[0].platforms[0].configuration = 'obsolete changed database';
+  if (mode === 'hint') (current as ConnectionSetup).clients[0].status = {detected: true, configured: 'unknown', connected: 'unverified', exercised: 'unverified'};
+  if (mode === 'failed') fail = true;
+  if (mode === 'malformed') current = {...changed, workflow_version: 9};
+  const refresh = screen.getByRole('button', {name: 'Refresh setup'});
+  if (mode === 'superseded') {
+    defer = true;
+    act(() => {refresh.click(); refresh.click();});
+    await act(async () => {responses[1](new Response(JSON.stringify(setup)));});
+    await act(async () => {responses[0](new Response(JSON.stringify(changed)));});
+  } else await user.click(refresh);
+  await waitFor(() => expect((refresh as HTMLButtonElement).disabled).toBe(false));
+  expect(screen.queryByText(/Previous local server diagnostic observation/)).toBeNull();
+  expect(screen.queryByText(/Previous shared-data observation and counts/)).toBeNull();
+  expect(screen.getByText('Employees: 2. Saved work: 3.')).toBeTruthy();
+  expect((screen.getByLabelText('Configuration fragment') as HTMLTextAreaElement).value).toBe(setup.clients[0].platforms[0].configuration);
+});
