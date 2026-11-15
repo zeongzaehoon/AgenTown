@@ -5260,3 +5260,48 @@ above; use two saved Tasks (`task`, `keep`), Skill `one`, and employee Hook
 Component regressions additionally cover independent card choices and surviving
 selection/outside focus. Supervisor browser validation is pending for this
 snapshot; deterministic tests do not establish live LLM validation.
+
+### Explicit platform recovery after setup refresh (C136-T1)
+
+Launch `agentown-web --database /absolute/path/product.sqlite3 --port 8765`,
+open <http://127.0.0.1:8765>, open **Connections**, choose **Codex**, then
+**Windows**. No external client, credentials or live provider call is required.
+After the initial setup loads, install this temporary browser-console fixture:
+
+```js
+window.originalPlatformFetch = window.fetch;
+window.fetch = async (input, init) => {
+  const response = await window.originalPlatformFetch(input, init);
+  if (String(input) !== '/api/connections/v1') return response;
+  const setup = await response.json();
+  setup.clients = setup.clients.map(client => client.id === 'codex'
+    ? {...client, platforms: client.platforms.filter(p => p.id !== 'windows')}
+    : client);
+  await new Promise(resolve => setTimeout(resolve, 3000));
+  return new Response(JSON.stringify(setup), {status: 200,
+    headers: {'Content-Type': 'application/json'}});
+};
+```
+
+Choose **Refresh setup**. Windows remains selected with “setup unavailable” in
+**Platform**. A status asks you to select an available platform or refresh.
+Configuration fields, setup instructions and copy/download actions disappear;
+another platform's artifacts must not appear automatically. Explicitly choose
+macOS to restore its exact guidance and artifact actions. Restore the fixture
+with `window.fetch = window.originalPlatformFetch` and refresh.
+
+For keyboard checks, focus Configuration fragment during the delay: removal
+moves focus to Codex setup, then Tab reaches Refresh setup, Client and Platform.
+Focus Platform during the delay: that selector survives and keeps focus. Focus
+an outside draft during the delay: it keeps focus. Unchanged or failed refreshes
+retain Windows guidance; a failed refresh also discloses stale instructions.
+A pending clipboard operation from Windows must not report success/failure over
+feedback for a subsequently selected platform. Initial platform defaults and an
+explicit switch to ChatGPT still show its HTTPS/OAuth prerequisite checklist.
+
+Deterministic assertions are in `frontend/src/Connections.test.tsx`. Scoped
+checks: `cd frontend`, then `npx vitest run src/Connections.test.tsx
+src/Workstations.test.tsx` and `npx tsc --noEmit`. This implementation invocation
+has no installed frontend dependencies; interaction execution, TypeScript and
+the supervisor-selected verification profile remain pending. Browser validation
+is pending supervisor verification. Live LLM validation is skipped, not passed.

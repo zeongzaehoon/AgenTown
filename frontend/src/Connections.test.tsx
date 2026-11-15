@@ -881,3 +881,111 @@ test.each(['failure', 'malformed', 'superseded'])(
     if (outcome !== 'superseded') expect(screen.getByText(/Previously loaded instructions may be stale/)).toBeTruthy();
   },
 );
+
+const withoutWindows: ConnectionSetup = {...setup, clients: setup.clients.map(client => ({
+  ...client, platforms: client.platforms.filter(platform => platform.id !== 'windows'),
+}))};
+
+test.each(['Configuration fragment', 'Setup instructions', 'Copy configuration', 'Platform', 'outside'])(
+  'platform removal requires explicit recovery and preserves orientation from %s', async location => {
+    let finish!: (response: Response) => void;
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(new Response(JSON.stringify(setup)))
+      .mockImplementationOnce(() => new Promise<Response>(resolve => {finish = resolve;})));
+    const user = userEvent.setup();
+    const copy = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue();
+    render(<><input aria-label="Outside draft" /><Connections workspaceConnected openClient={{id: 'codex'}} /></>);
+    await screen.findByLabelText('Platform');
+    await user.selectOptions(screen.getByLabelText('Platform'), 'windows');
+    await user.click(screen.getByRole('button', {name: 'Refresh setup'}));
+    const focused = location === 'outside' ? screen.getByLabelText('Outside draft')
+      : location === 'Copy configuration' ? screen.getByRole('button', {name: location}) : screen.getByLabelText(location);
+    focused.focus();
+    await act(async () => {finish(new Response(JSON.stringify(withoutWindows)));});
+    const selector = screen.getByLabelText('Platform');
+    expect((selector as HTMLSelectElement).value).toBe('windows');
+    expect(screen.getByRole('option', {name: 'windows · setup unavailable'})).toBeTruthy();
+    expect(screen.getByText(/Selected platform setup unavailable/).getAttribute('role')).toBe('status');
+    expect(screen.queryByLabelText('Configuration fragment')).toBeNull();
+    expect(screen.queryByLabelText('Setup instructions')).toBeNull();
+    expect(screen.queryByRole('button', {name: /Copy|Download/})).toBeNull();
+    expect(copy).not.toHaveBeenCalled();
+    if (location === 'outside' || location === 'Platform') {
+      expect(document.activeElement).toBe(focused);
+      expect(screen.queryByText(focusRecoveryNotice)).toBeNull();
+    } else {
+      expect(document.activeElement).toBe(screen.getByRole('heading', {name: 'Codex setup'}));
+      await user.tab();
+      expect(document.activeElement).toBe(screen.getByRole('button', {name: 'Refresh setup'}));
+      await user.tab();
+      expect(document.activeElement).toBe(screen.getByLabelText('Client'));
+      await user.tab();
+      expect(document.activeElement).toBe(selector);
+    }
+    await user.selectOptions(selector, 'macos');
+    expect(screen.queryByText(/Selected platform setup unavailable/)).toBeNull();
+    await user.click(screen.getByRole('button', {name: 'Copy configuration'}));
+    expect(copy).toHaveBeenLastCalledWith('config-codex-macos');
+    const create = vi.fn(() => 'blob:recovered');
+    vi.stubGlobal('URL', {createObjectURL: create, revokeObjectURL: vi.fn()});
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    await user.click(screen.getByRole('button', {name: 'Download setup artifact'}));
+    expect(create).toHaveBeenCalledOnce();
+    expect(create.mock.calls[0]).toEqual([expect.any(Blob)]);
+  },
+);
+
+test.each(['resolved', 'rejected'])('removed platform isolates %s pending clipboard feedback', async outcome => {
+  let finish!: () => void;
+  let fail!: (error: Error) => void;
+  let response = setup;
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(response))));
+  const user = userEvent.setup();
+  vi.spyOn(navigator.clipboard, 'writeText').mockImplementationOnce(() => new Promise<void>((resolve, reject) => {finish = resolve; fail = reject;}))
+    .mockResolvedValue();
+  render(<Connections workspaceConnected openClient={{id: 'codex'}} />);
+  await screen.findByLabelText('Platform');
+  await user.selectOptions(screen.getByLabelText('Platform'), 'windows');
+  await user.click(screen.getByRole('button', {name: 'Copy configuration'}));
+  expect(screen.getByText('Copying…')).toBeTruthy();
+  response = withoutWindows;
+  await user.click(screen.getByRole('button', {name: 'Refresh setup'}));
+  await screen.findByText(/Selected platform setup unavailable/);
+  await user.selectOptions(screen.getByLabelText('Platform'), 'macos');
+  await user.click(screen.getByRole('button', {name: 'Copy setup instructions'}));
+  await screen.findByText('Setup instructions copied. Client readiness remains unknown.');
+  await act(async () => {if (outcome === 'resolved') finish(); else fail(new Error('denied'));});
+  expect(screen.getByText('Setup instructions copied. Client readiness remains unknown.')).toBeTruthy();
+  expect(screen.queryByText(/Could not copy/)).toBeNull();
+});
+
+test.each(['unchanged', 'failed'])('%s refresh preserves selected Windows artifacts and focus', async outcome => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(new Response(JSON.stringify(setup)))
+    .mockImplementationOnce(async () => {
+      if (outcome === 'failed') throw new Error('offline');
+      return new Response(JSON.stringify(setup));
+    }));
+  const user = userEvent.setup();
+  render(<Connections workspaceConnected openClient={{id: 'codex'}} />);
+  await screen.findByLabelText('Platform');
+  await user.selectOptions(screen.getByLabelText('Platform'), 'windows');
+  await user.click(screen.getByRole('button', {name: 'Refresh setup'}));
+  await screen.findByText(outcome === 'failed' ? /Previously loaded instructions may be stale/ : 'Setup service available.');
+  expect((screen.getByLabelText('Platform') as HTMLSelectElement).value).toBe('windows');
+  expect((screen.getByLabelText('Configuration fragment') as HTMLTextAreaElement).value).toBe('config-codex-windows');
+  expect(screen.queryByText(/Selected platform setup unavailable/)).toBeNull();
+  expect(document.activeElement).toBe(screen.getByRole('button', {name: 'Refresh setup'}));
+});
+
+test('initial setup and explicit ChatGPT selection retain their default platform', async () => {
+  const response = {...recoverySetup, clients: recoverySetup.clients.map(client => ({...client,
+    platforms: client.id === 'codex' ? [client.platforms[1]] : client.platforms,
+  }))};
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(response))));
+  const user = userEvent.setup();
+  render(<Connections workspaceConnected openClient={{id: 'codex'}} />);
+  await screen.findByLabelText('Configuration fragment');
+  expect((screen.getByLabelText('Platform') as HTMLSelectElement).value).toBe('windows');
+  await user.selectOptions(screen.getByLabelText('Client'), 'chatgpt');
+  expect(screen.getByRole('region', {name: 'ChatGPT prerequisites checklist'})).toBeTruthy();
+  expect((screen.getByLabelText('Platform') as HTMLSelectElement).value).toBe('macos');
+});

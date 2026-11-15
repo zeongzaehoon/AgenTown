@@ -246,7 +246,7 @@ function Setup({workspaceConnected, openClient, active, ...navigation}: Activity
     }
   }, [data, active]);
   useLayoutEffect(() => {
-    if (openClient) { setClientId(openClient.id); setFeedback(''); }
+    if (openClient) { chooseClient(openClient.id); }
   }, [openClient]);
   useLayoutEffect(() => {
     if (openClient && active) heading.current?.focus();
@@ -265,13 +265,23 @@ function Setup({workspaceConnected, openClient, active, ...navigation}: Activity
       const focused = document.activeElement;
       refreshFocus.current = focused instanceof HTMLElement && setupContent.current?.contains(focused) ? focused : null;
       setFocusNotice('');
+      if (!data) {
+        const initialClient = next.clients.find(c => c.id === clientId);
+        setPlatformId(current => initialClient?.platforms.find(p => p.id === current)?.id ?? initialClient?.platforms[0]?.id ?? current);
+      }
       setData(next); setError(false); freshness.finish(started, true);
     } catch { if (!request.signal.aborted) { setError(true); freshness.finish(started, false); } }
     finally { if (!request.signal.aborted) setLoading(false); }
   }
   useEffect(() => { void refresh(); return () => controller.current?.abort(); }, []);
   const client = data?.clients.find(c => c.id === clientId);
-  const platform = client?.platforms.find(p => p.id === platformId) ?? client?.platforms[0];
+  const platform = client?.platforms.find(p => p.id === platformId);
+  function chooseClient(id: string) {
+    setClientId(id);
+    const nextClient = data?.clients.find(c => c.id === id);
+    setPlatformId(current => nextClient?.platforms.find(p => p.id === current)?.id ?? nextClient?.platforms[0]?.id ?? current);
+    setFeedback('');
+  }
   const instructions = data && client && platform ? [
     `${client.name} · ${platform.name} · ${client.id === 'chatgpt' ? 'Remote HTTPS prerequisites' : 'stdio workflow v1'}`,
     ...(client.id === 'chatgpt' ? [] : [data.preparation]),
@@ -280,6 +290,7 @@ function Setup({workspaceConnected, openClient, active, ...navigation}: Activity
     ...data.actions, data.consent, data.recovery, data.evidence,
   ].join('\n\n') : '';
   function download() {
+    if (!platform) return;
     let url: string | undefined;
     let anchor: HTMLAnchorElement | undefined;
     try {
@@ -305,7 +316,7 @@ function Setup({workspaceConnected, openClient, active, ...navigation}: Activity
   }, [clientId, platformId, data, openClient]);
   async function copy(fragment = false) {
     const generation = copyGeneration.current;
-    if (copyingLock.current) return;
+    if (!platform || copyingLock.current) return;
     copyingLock.current = true; setCopying(true); setFeedback('Copying…');
     try {
       if (!navigator.clipboard?.writeText) throw new Error('Unavailable');
@@ -331,14 +342,19 @@ function Setup({workspaceConnected, openClient, active, ...navigation}: Activity
     {!data && <p>Detected: Unknown. Configured: Unknown. Connected: Unverified. Exercised: Unverified.</p>}
     {data && <>
       <label htmlFor="connection-client">Client</label>
-      <select id="connection-client" value={clientId} onChange={e => {setClientId(e.target.value); setFeedback('');}}>
+      <select id="connection-client" value={clientId} onChange={e => chooseClient(e.target.value)}>
         {!client && <option value={clientId}>{clientName} · setup unavailable</option>}
         {data.clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
       </select>
     </>}
-    {data && client && platform && <>
+    {client && <>
       <label htmlFor="connection-platform">Platform</label>
-      <select id="connection-platform" value={platform.id} onChange={e => {setPlatformId(e.target.value); setFeedback('');}}>{client.platforms.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
+      <select id="connection-platform" value={platformId} onChange={e => {setPlatformId(e.target.value); setFeedback('');}}>
+        {!platform && <option value={platformId}>{platformId} · setup unavailable</option>}
+        {client.platforms.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
+      {!platform && <p role="status" aria-live="polite">Selected platform setup unavailable. Choose an available platform to view, copy or download its setup, or refresh setup to try again. Configured: Unknown. Connected: Unverified. Exercised: Unverified.</p>}
+    </>}
+    {data && client && platform && <>
       <p>Client readiness: Unknown</p>
       <p>Detected: {client.status?.detected === true ? 'Installation hint only' : client.status?.detected === false ? 'Not detected (inconclusive)' : 'Unknown'}. Configured: Unknown. Connected: Unverified. Exercised: Unverified.</p><p>{data.evidence}</p>
       <h3>Available actions</h3><ul>{data.actions.map(a => <li key={a}>{a}</li>)}</ul>
