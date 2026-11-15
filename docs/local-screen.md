@@ -5564,3 +5564,45 @@ its isolated checkout. Supervisor frontend-profile verification (or periodic
 full profile when due), ordinary Python checks and browser validation remain
 pending. Live provider validation is skipped, not passed; no credentials or
 provider calls are needed for these steps.
+
+### Stop waiting for a clipboard write (C142)
+
+Launch the packaged product or `uv run --directory python --locked agentown-web
+--database /absolute/path/product.sqlite3 --port 8765`, open
+<http://127.0.0.1:8765>, then open **Connections**. In browser developer tools,
+install a deterministic clipboard fixture (it does not write the OS clipboard):
+
+```js
+window.originalClipboardWrite = navigator.clipboard.writeText;
+navigator.clipboard.writeText = () => new Promise((resolve, reject) => {
+  window.finishClipboard = resolve;
+  window.failClipboard = reject;
+});
+```
+
+1. Choose a client/platform and press **Copy configuration** or **Copy setup
+   instructions**. While Copying is shown, Tab to **Stop waiting for clipboard**
+   and press Enter or Space. Focus moves to the selectable Setup instructions.
+   Both selections and all setup text remain. The notice explains that the
+   already requested write may still finish and stopping does not undo it.
+2. Select the Configuration fragment or Setup instructions and use native manual
+   copy. Copy buttons remain disabled while the original write is unresolved,
+   including after changing client/platform. Download remains available.
+3. Run `window.finishClipboard()` (or `window.failClipboard(new Error('denied'))`).
+   The abandoned operation must not announce copied/failed feedback. The notice
+   now says the write settled; explicitly copying is available again. Repeat
+   with a selection change or newer download feedback before settlement: late
+   completion must not replace that feedback.
+4. Repeat without stopping, leaving focus on the waiting control: completion or
+   failure restores focus to Setup instructions. Move focus outside that control
+   or hide Connections before settlement: focus must remain where you moved it,
+   including when Connections is reopened.
+5. Restore `navigator.clipboard.writeText = window.originalClipboardWrite`.
+
+Connections interaction tests cover unresolved admission, explicit abandonment,
+late success/failure, selection changes, retry after settlement, focus and
+unmount. Run with available dependencies:
+`cd frontend && npx tsc --noEmit && npx vitest run src/Connections.test.tsx`.
+This implementation checkout lacks frontend node_modules, so these checks were
+not executed here. Supervisor checks and browser validation remain pending.
+Live provider calls are skipped, not passed; this flow needs no credentials.

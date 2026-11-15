@@ -520,6 +520,8 @@ test.each(['client', 'platform', 'workstation'])('pending copy feedback cannot f
   if (change === 'client') await user.selectOptions(screen.getByLabelText('Client'), 'claude-code');
   else if (change === 'platform') await user.selectOptions(screen.getByLabelText('Platform'), 'windows');
   else view.rerender(<Connections workspaceConnected openClient={{id: 'claude-code'}} />);
+  await user.click(screen.getByRole('button', {name: 'Copy configuration'}));
+  expect(copy).toHaveBeenCalledTimes(1);
   await act(async () => {finish();});
   expect(screen.queryByText('Configuration copied. Client readiness remains unknown.')).toBeNull();
   expect(screen.queryByText('Copying…')).toBeNull();
@@ -954,8 +956,11 @@ test.each(['resolved', 'rejected'])('removed platform isolates %s pending clipbo
   await screen.findByText(/Selected platform setup unavailable/);
   await user.selectOptions(screen.getByLabelText('Platform'), 'macos');
   await user.click(screen.getByRole('button', {name: 'Copy setup instructions'}));
-  await screen.findByText('Setup instructions copied. Client readiness remains unknown.');
+  expect((screen.getByRole('button', {name: 'Copy setup instructions'}) as HTMLButtonElement).disabled).toBe(true);
   await act(async () => {if (outcome === 'resolved') finish(); else fail(new Error('denied'));});
+  expect(screen.queryByText(/copied. Client readiness/)).toBeNull();
+  await user.click(screen.getByRole('button', {name: 'Copy setup instructions'}));
+  await screen.findByText('Setup instructions copied. Client readiness remains unknown.');
   expect(screen.getByText('Setup instructions copied. Client readiness remains unknown.')).toBeTruthy();
   expect(screen.queryByText(/Could not copy/)).toBeNull();
 });
@@ -1316,3 +1321,73 @@ test.each(['success', 'failure', 'cancel', 'outside', 'hidden'])('setup disappea
     expect(document.activeElement).toBe(screen.getByRole('button', {name: 'Hide connections'}));
   }
 });
+
+test.each(['success', 'failure'])('abandoned clipboard %s retains manual access and write admission until settlement', async outcome => {
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(setup))));
+  const user = userEvent.setup();
+  let finish!: () => void;
+  let fail!: (error: Error) => void;
+  const copy = vi.spyOn(navigator.clipboard, 'writeText')
+    .mockImplementationOnce(() => new Promise<void>((resolve, reject) => {finish = resolve; fail = reject;}))
+    .mockResolvedValue();
+  render(<Connections workspaceConnected openClient={{id: 'codex'}} />);
+  const field = await screen.findByLabelText('Setup instructions') as HTMLTextAreaElement;
+  const text = field.value;
+  await user.click(screen.getByRole('button', {name: 'Copy setup instructions'}));
+  const stop = screen.getByRole('button', {name: 'Stop waiting for clipboard'});
+  stop.focus();
+  await user.keyboard('{Enter}');
+  expect(document.activeElement).toBe(field);
+  expect(screen.getByText(/stopping waiting does not undo it/)).toBeTruthy();
+  expect(field.value).toBe(text);
+  field.select();
+  expect(field.selectionEnd).toBe(text.length);
+  expect((screen.getByLabelText('Client') as HTMLSelectElement).value).toBe('codex');
+  expect((screen.getByLabelText('Platform') as HTMLSelectElement).value).toBe('macos');
+  await user.click(screen.getByRole('button', {name: 'Copy configuration'}));
+  expect(copy).toHaveBeenCalledTimes(1);
+  await user.selectOptions(screen.getByLabelText('Platform'), 'windows');
+  await user.click(screen.getByRole('button', {name: 'Copy setup instructions'}));
+  expect(copy).toHaveBeenCalledTimes(1);
+  vi.stubGlobal('URL', {createObjectURL: () => {throw new Error('unavailable');}});
+  await user.click(screen.getByRole('button', {name: 'Download setup artifact'}));
+  const newerFeedback = screen.getByText(/Could not download/).textContent;
+  await act(async () => {if (outcome === 'success') finish(); else fail(new Error('denied'));});
+  expect(screen.getByText(/Could not download/).textContent).toBe(newerFeedback);
+  expect(screen.queryByText(/copied. Client readiness/)).toBeNull();
+  expect(screen.queryByText(/Could not copy/)).toBeNull();
+  expect(screen.getByText(/previous write has settled/)).toBeTruthy();
+  await user.click(screen.getByRole('button', {name: 'Copy configuration'}));
+  expect(copy).toHaveBeenCalledTimes(2);
+  expect(copy).toHaveBeenLastCalledWith('config-codex-windows');
+  await screen.findByText('Configuration copied. Client readiness remains unknown.');
+});
+
+test.each(['success', 'failure', 'outside', 'hidden', 'unmount-success', 'unmount-failure'])(
+  'clipboard waiting control disappearance respects focus and lifetime: %s', async outcome => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(setup))));
+    const user = userEvent.setup();
+    let finish!: () => void;
+    let fail!: (error: Error) => void;
+    vi.spyOn(navigator.clipboard, 'writeText').mockImplementation(() => new Promise<void>((resolve, reject) => {finish = resolve; fail = reject;}));
+    const view = render(<><input aria-label="Outside draft" /><Connections workspaceConnected openClient={{id: 'codex'}} /></>);
+    const field = await screen.findByLabelText('Setup instructions');
+    await user.click(screen.getByRole('button', {name: 'Copy configuration'}));
+    screen.getByRole('button', {name: 'Stop waiting for clipboard'}).focus();
+    const outside = screen.getByLabelText('Outside draft');
+    if (outcome === 'outside') outside.focus();
+    if (outcome === 'hidden') await user.click(screen.getByRole('button', {name: 'Hide connections'}));
+    const previous = document.activeElement;
+    if (outcome.startsWith('unmount')) view.unmount();
+    await act(async () => {if (outcome.includes('failure')) fail(new Error('denied')); else finish();});
+    if (outcome.startsWith('unmount')) {
+      expect(screen.queryByText(/copied. Client readiness/)).toBeNull();
+      return;
+    }
+    expect(document.activeElement).toBe(['outside', 'hidden'].includes(outcome) ? previous : field);
+    if (outcome === 'hidden') {
+      await user.click(screen.getByRole('button', {name: 'Open connections'}));
+      expect(document.activeElement).toBe(screen.getByRole('button', {name: 'Hide connections'}));
+    }
+  },
+);

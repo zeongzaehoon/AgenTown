@@ -324,6 +324,33 @@ function Setup({workspaceConnected, openClient, active, ...navigation}: Activity
   }
   const [feedback, setFeedback] = useState('');
   const [copying, setCopying] = useState(false);
+  const [clipboardPending, setClipboardPending] = useState(false);
+  const [copyAbandoned, setCopyAbandoned] = useState(false);
+  const stopCopyControl = useRef<HTMLButtonElement | null>(null);
+  const restoreCopyFocus = useRef(false);
+  const copyMounted = useRef(true);
+  useLayoutEffect(() => {
+    copyMounted.current = true;
+    return () => { copyMounted.current = false; };
+  }, []);
+  useLayoutEffect(() => {
+    if (!copying && restoreCopyFocus.current) {
+      restoreCopyFocus.current = false;
+      if (active && document.activeElement === document.body) {
+        document.getElementById('connection-instructions')?.focus();
+      }
+    }
+  }, [copying, active]);
+  function endCopyWaiting() {
+    restoreCopyFocus.current = document.activeElement === stopCopyControl.current;
+    setCopying(false);
+  }
+  function stopCopyWaiting() {
+    copyGeneration.current += 1;
+    setCopyAbandoned(true);
+    setFeedback('');
+    endCopyWaiting();
+  }
   const heading = useRef<HTMLHeadingElement | null>(null);
   const setupContent = useRef<HTMLDivElement | null>(null);
   const refreshFocus = useRef<HTMLElement | null>(null);
@@ -423,14 +450,14 @@ function Setup({workspaceConnected, openClient, active, ...navigation}: Activity
   const copyGeneration = useRef(0);
   useLayoutEffect(() => {
     copyGeneration.current += 1;
-    copyingLock.current = false;
-    setCopying(false); setFeedback('');
+    if (copyingLock.current) setCopyAbandoned(true);
+    endCopyWaiting(); setFeedback('');
     return () => { copyGeneration.current += 1; };
   }, [clientId, platformId, data, openClient]);
   async function copy(fragment = false) {
     const generation = copyGeneration.current;
     if (!platform || copyingLock.current) return;
-    copyingLock.current = true; setCopying(true); setFeedback('Copying…');
+    copyingLock.current = true; setClipboardPending(true); setCopyAbandoned(false); setCopying(true); setFeedback('Copying…');
     try {
       if (!navigator.clipboard?.writeText) throw new Error('Unavailable');
       await navigator.clipboard.writeText(fragment ? platform!.configuration : instructions);
@@ -439,7 +466,12 @@ function Setup({workspaceConnected, openClient, active, ...navigation}: Activity
     } catch {
       if (generation === copyGeneration.current) setFeedback(`Could not copy. Clipboard access is unavailable or denied. Select the ${fragment ? 'Configuration fragment' : 'Setup instructions'} field and copy manually.`);
     } finally {
-      if (generation === copyGeneration.current) { copyingLock.current = false; setCopying(false); }
+      // Abandoning feedback never releases admission before the actual write settles.
+      copyingLock.current = false;
+      if (copyMounted.current) {
+        setClipboardPending(false);
+        if (generation === copyGeneration.current) endCopyWaiting();
+      }
     }
   }
   const clientName = workstationClients.find(c => c.id === clientId)?.name ?? client?.name ?? clientId;
@@ -487,7 +519,7 @@ function Setup({workspaceConnected, openClient, active, ...navigation}: Activity
           <textarea id="connection-destination" readOnly rows={2} value={platform.destination} />
           <label htmlFor="connection-configuration">Configuration fragment</label>
           <textarea id="connection-configuration" readOnly rows={10} value={platform.configuration} />
-          <button type="button" disabled={copying} onClick={() => void copy(true)}>Copy configuration</button>
+          <button type="button" disabled={clipboardPending} onClick={() => void copy(true)}>Copy configuration</button>
         </li>
         <li><h4>Inspect and verify in {client.name}</h4>
           <p className="connection-guidance">{platform.inspection}</p>
@@ -496,8 +528,10 @@ function Setup({workspaceConnected, openClient, active, ...navigation}: Activity
         </li>
         <li><h4>Recover if setup fails</h4><p className="connection-guidance">{data.recovery}</p></li>
       </ol>}
-      <button type="button" disabled={copying} onClick={() => void copy()}>Copy setup instructions</button>
+      <button type="button" disabled={clipboardPending} onClick={() => void copy()}>Copy setup instructions</button>
       <button type="button" onClick={download}>Download setup artifact</button>
+      {copying && <button ref={stopCopyControl} type="button" onClick={stopCopyWaiting}>Stop waiting for clipboard</button>}
+      {copyAbandoned && <p role="status">Stopped waiting for clipboard. An already requested clipboard write may still finish; stopping waiting does not undo it. Select the setup text below and copy manually. {clipboardPending ? 'Copy buttons remain unavailable until that write settles.' : 'The previous write has settled. You can explicitly copy again.'}</p>}
       <p role="status" aria-live="polite">{feedback}</p>
       <label htmlFor="connection-instructions">Setup instructions</label>
       <textarea id="connection-instructions" readOnly rows={16} value={instructions} />
