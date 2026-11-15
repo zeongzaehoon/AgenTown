@@ -1630,3 +1630,103 @@ test.each(['diagnostic', 'shared-data'].flatMap(kind =>
     expect((other as HTMLButtonElement).disabled).toBe(false);
   },
 );
+
+test.each([
+  ['initial', 'success'], ['initial', 'failure'],
+  ['retained', 'success'], ['retained', 'failure'],
+])('setup disconnect releases %s waiting and isolates late %s from retry', async (mode, late) => {
+  const requests: {resolve: (response: Response) => void; reject: (error: Error) => void; signal: AbortSignal}[] = [];
+  let seeded = mode === 'initial';
+  const fetcher = vi.fn((_path: string, init?: RequestInit) => {
+    if (!seeded) { seeded = true; return Promise.resolve(new Response(JSON.stringify(setup))); }
+    return new Promise<Response>((resolve, reject) => requests.push({resolve, reject, signal: init!.signal as AbortSignal}));
+  });
+  vi.stubGlobal('fetch', fetcher);
+  const user = userEvent.setup();
+  const view = render(<Connections workspaceConnected openClient={{id: 'codex'}} />);
+  const refresh = screen.getByRole('button', {name: 'Refresh setup'});
+  let instructions: string | undefined;
+  if (mode === 'retained') {
+    await screen.findByLabelText('Client');
+    await user.selectOptions(screen.getByLabelText('Client'), 'claude-code');
+    await user.selectOptions(screen.getByLabelText('Platform'), 'windows');
+    instructions = (screen.getByLabelText('Setup instructions') as HTMLTextAreaElement).value;
+    fireEvent.click(refresh);
+  }
+  const retained = () => {
+    if (mode === 'initial') expect(screen.queryByLabelText('Setup instructions')).toBeNull();
+    else {
+      expect((screen.getByLabelText('Setup instructions') as HTMLTextAreaElement).value).toBe(instructions);
+      expect((screen.getByLabelText('Client') as HTMLSelectElement).value).toBe('claude-code');
+      expect((screen.getByLabelText('Platform') as HTMLSelectElement).value).toBe('windows');
+      expect(screen.getByText(/Previous setup observation/)).toBeTruthy();
+    }
+  };
+  const cancel = screen.getByRole('button', {name: 'Cancel waiting for setup'});
+  for (let tabs = 0; tabs < 30 && document.activeElement !== cancel; tabs++) await user.tab();
+  expect(document.activeElement).toBe(cancel);
+  view.rerender(<Connections workspaceConnected={false} />);
+  expect(requests[0].signal.aborted).toBe(true);
+  expect((refresh as HTMLButtonElement).disabled).toBe(false);
+  expect(document.activeElement).toBe(refresh);
+  expect(screen.queryByRole('button', {name: 'Cancel waiting for setup'})).toBeNull();
+  expect(screen.queryByText('Loading setup…')).toBeNull();
+  expect(screen.getByText(/Stopped waiting for setup/).textContent).toContain('Server processing may continue');
+  retained();
+  view.rerender(<Connections workspaceConnected />);
+  expect(requests).toHaveLength(1);
+  retained();
+  fireEvent.click(refresh);
+  fireEvent.click(refresh);
+  expect(requests).toHaveLength(2);
+  await act(async () => {
+    if (late === 'failure') requests[0].reject(new Error('obsolete transport failure'));
+    else requests[0].resolve(new Response(JSON.stringify({...setup, preparation: 'Obsolete instructions', clients: [setup.clients[0]]})));
+  });
+  retained();
+  expect(screen.queryByText(/Setup service disconnected/)).toBeNull();
+  expect(screen.queryByText(/Stopped waiting for setup/)).toBeNull();
+  expect(screen.getByText('Loading setup…')).toBeTruthy();
+  expect((refresh as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(refresh);
+  expect(requests).toHaveLength(2);
+  await act(async () => requests[1].resolve(new Response(JSON.stringify(setup))));
+  expect((refresh as HTMLButtonElement).disabled).toBe(false);
+  expect(screen.queryByText(/Previous setup observation/)).toBeNull();
+  if (mode === 'retained') {
+    expect((screen.getByLabelText('Client') as HTMLSelectElement).value).toBe('claude-code');
+    expect((screen.getByLabelText('Platform') as HTMLSelectElement).value).toBe('windows');
+  }
+  expect(fetcher.mock.calls.every(([, init]) => init?.method === 'POST' && init.body === '{}')).toBe(true);
+});
+
+test('StrictMode setup disconnect preserves outside focus and admits a disconnected explicit retry', async () => {
+  const requests: {resolve: (response: Response) => void; reject: (error: Error) => void; signal: AbortSignal}[] = [];
+  vi.stubGlobal('fetch', vi.fn((_path: string, init?: RequestInit) =>
+    new Promise<Response>((resolve, reject) => requests.push({resolve, reject, signal: init!.signal as AbortSignal}))));
+  const openClient = {id: 'codex'} as const;
+  const content = (connected: boolean) => <StrictMode><input aria-label="Outside draft" /><Connections workspaceConnected={connected} openClient={openClient} /></StrictMode>;
+  const view = render(content(true));
+  expect(requests).toHaveLength(2);
+  const outside = screen.getByLabelText('Outside draft');
+  outside.focus();
+  view.rerender(content(false));
+  expect(document.activeElement).toBe(outside);
+  expect(requests.every(request => request.signal.aborted)).toBe(true);
+  const refresh = screen.getByRole('button', {name: 'Refresh setup'});
+  fireEvent.click(refresh);
+  expect(requests).toHaveLength(3);
+  await act(async () => {
+    requests[0].resolve(new Response(JSON.stringify({...setup, preparation: 'Replay obsolete'})));
+    requests[1].reject(new Error('Disconnected obsolete'));
+  });
+  expect((refresh as HTMLButtonElement).disabled).toBe(true);
+  expect(document.activeElement).toBe(outside);
+  expect(screen.queryByText(/Setup service disconnected/)).toBeNull();
+  await act(async () => requests[2].resolve(new Response(JSON.stringify(setup))));
+  expect(screen.getByText(/Previous setup observation/)).toBeTruthy();
+  view.rerender(content(true));
+  expect(requests).toHaveLength(3);
+  expect(screen.getByText(/Previous setup observation/)).toBeTruthy();
+  expect(document.activeElement).toBe(outside);
+});

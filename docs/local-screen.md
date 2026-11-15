@@ -5728,3 +5728,58 @@ Launch `agentown-web`, open **Connections**, and select Codex. Use the temporary
 Scoped interaction coverage: `cd frontend && npx vitest run src/Connections.test.tsx`.
 Supervisor frontend/build, ordinary Python and browser validation remain pending
 for this snapshot. Live provider calls remain skipped, not passed.
+
+### Disconnect recovery for pending setup refresh (C146-T1)
+
+Launch `agentown-web --database /absolute/path/product.sqlite3 --port 8765`,
+open <http://127.0.0.1:8765>, connect the workspace, and open **Connections**.
+No credentials or live provider calls are required. To defer setup responses,
+install this temporary browser-console fixture before opening Connections for
+an initial request, or after loading instructions for a subsequent refresh:
+
+```js
+window.setupRecoveryFetch = window.fetch;
+window.setupRecoveryRequests = [];
+window.setupWorkspaceOffline = false;
+window.fetch = (input, init) => {
+  const path = String(input);
+  if (path === '/api/state' && window.setupWorkspaceOffline)
+    return Promise.reject(new Error('Simulated workspace disconnect'));
+  if (path === '/api/connections/v1')
+    return new Promise((resolve, reject) => {
+      window.setupRecoveryRequests.push({input, init, resolve, reject});
+    });
+  return window.setupRecoveryFetch(input, init);
+};
+```
+
+1. Open Connections or select **Refresh setup**. For the retained-data case,
+   first select another client/platform and note its instructions. Tab to
+   **Cancel waiting for setup**, set `window.setupWorkspaceOffline = true`, and
+   let the next workspace state poll fail. Waiting must end immediately when
+   Disconnected appears; Refresh setup becomes available and receives focus
+   from the removed cancel control. The status says server processing may
+   continue. Retained instructions and selection stay visible, potentially stale;
+   the initial-request case must not invent instructions.
+2. Repeat with focus in another control: disconnect must preserve that focus.
+   Set `window.setupWorkspaceOffline = false` and select **Refresh connection**.
+   Reconnection must not add setup requests or establish freshness.
+3. Explicitly select **Refresh setup**. While this retry waits, reject the old
+   request with `window.setupRecoveryRequests[0].reject(new Error('Late failure'))`.
+   The retry must remain pending, with no new error or change to instructions or
+   selection. Repeat with late success by resolving the old request with a valid
+   setup response; deterministic tests provide altered instructions and removed
+   selections to prove those responses are ignored. Repeated Refresh activation
+   cannot admit another request while the retry owns waiting.
+4. Restore `window.fetch = window.setupRecoveryFetch`, cancel the pending retry,
+   then explicitly refresh. Only this accepted response can refresh instructions
+   and freshness while connected. An explicit retry is also available while
+   disconnected; its accepted data remains potentially stale after reconnecting.
+
+Deferred-response interaction tests cover initial/subsequent disconnects, late
+success/failure and cleanup, retry admission, retained selection/instructions,
+passive reconnection, focus and StrictMode replay. Scoped commands are
+`cd frontend && npx tsc --noEmit && npx vitest run src/Connections.test.tsx`.
+This isolated implementation workspace has no frontend dependencies installed;
+scoped execution, supervisor verification and browser exercise are pending.
+Live provider calls are skipped, not passed.

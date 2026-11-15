@@ -414,6 +414,13 @@ function Setup({workspaceConnected, openClient, active, ...navigation}: Activity
     }
   }, [openClient, active]);
   const controller = useRef<AbortController | null>(null);
+  const previousWorkspaceConnected = useRef(workspaceConnected);
+  useLayoutEffect(() => {
+    // Abandon ownership before paint, so an explicit retry can start even if
+    // the old transport ignores abort. Reconnection never starts a request.
+    if (previousWorkspaceConnected.current && !workspaceConnected) cancelWaiting();
+    previousWorkspaceConnected.current = workspaceConnected;
+  }, [workspaceConnected]);
   const copyingLock = useRef(false);
   async function refresh() {
     if (loadingLock.current) return;
