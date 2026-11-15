@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, expect, test, vi } from 'vitest';
 import { REQUEST_DEADLINE_MS } from './api';
@@ -1087,4 +1087,125 @@ test.each(['unchanged', 'hint', 'failed', 'malformed', 'superseded'])('%s setup 
   expect(screen.queryByText(/Previous shared-data observation and counts/)).toBeNull();
   expect(screen.getByText('Employees: 2. Saved work: 3.')).toBeTruthy();
   expect((screen.getByLabelText('Configuration fragment') as HTMLTextAreaElement).value).toBe(setup.clients[0].platforms[0].configuration);
+});
+
+
+test.each([
+  ['diagnostic', 'resolve'], ['diagnostic', 'reject'],
+  ['shared-data', 'resolve'], ['shared-data', 'reject'],
+])('%s cancellation retains evidence and owns immediate retry after late %s', async (kind, late) => {
+  const path = kind === 'diagnostic' ? diagnosticPath : sharedPath;
+  const label = kind === 'diagnostic' ? 'Check local server' : 'Check shared data';
+  const otherLabel = kind === 'diagnostic' ? 'Check shared data' : 'Check local server';
+  const region = kind === 'diagnostic' ? 'Local server diagnostic' : 'Shared employee and work access';
+  const previous = kind === 'diagnostic' ? /Previous local server diagnostic observation/ : /Previous shared-data observation and counts/;
+  const passed = kind === 'diagnostic' ? 'Local server diagnostic passed' : 'Shared-data check passed.';
+  const result = kind === 'diagnostic' ? diagnosticResult('passed') : sharedResult(7, 8);
+  const requests: {resolve: (response: Response) => void; reject: (error: Error) => void; signal: AbortSignal}[] = [];
+  let seed = true;
+  const fetcher = vi.fn((input: string, init?: RequestInit) => {
+    if (input === path && !seed) return new Promise<Response>((resolve, reject) => {
+      requests.push({resolve, reject, signal: init!.signal as AbortSignal});
+    });
+    return Promise.resolve(new Response(JSON.stringify(input === path ? result : setup)));
+  });
+  vi.stubGlobal('fetch', fetcher);
+  const user = await openDiagnostic();
+  const section = within(screen.getByRole('region', {name: region}));
+  const button = section.getByRole('button', {name: label});
+  await user.click(button);
+  await screen.findByText(passed);
+  seed = false;
+  button.focus();
+  await user.keyboard('{Enter}');
+  const cancel = section.getByRole('button', {name: /Cancel waiting/});
+  // Disabling the focused check can reset the tab starting point. Follow
+  // keyboard navigation from that point rather than assuming one Tab suffices.
+  for (let tabs = 0; tabs < 20 && document.activeElement !== cancel; tabs++) {
+    await user.tab();
+  }
+  expect(document.activeElement).toBe(cancel);
+  await user.keyboard('{Enter}');
+  expect(document.activeElement).toBe(button);
+  expect((button as HTMLButtonElement).disabled).toBe(false);
+  expect(requests[0].signal.aborted).toBe(true);
+  expect(section.queryByRole('button', {name: /Cancel waiting/})).toBeNull();
+  expect(section.getByText(/Stopped waiting.*does not confirm that the server process stopped/)).toBeTruthy();
+  expect(section.getByText(previous)).toBeTruthy();
+  expect(section.getByText(passed)).toBeTruthy();
+  if (kind === 'shared-data') expect(section.getByText('Employees: 7. Saved work: 8.')).toBeTruthy();
+  expect(requests).toHaveLength(1); // no automatic retry
+  // Start the retry in the same event turn as another cancellation, before
+  // the aborted API promise's catch/finally can run.
+  fireEvent.click(button);
+  const second = section.getByRole('button', {name: /Cancel waiting/});
+  fireEvent.click(second);
+  fireEvent.click(button);
+  fireEvent.click(button); // duplicate admission remains guarded
+  expect(requests).toHaveLength(3);
+  await act(async () => {
+    for (const request of requests.slice(0, 2)) {
+      if (late === 'reject') request.reject(new Error('late transport error'));
+      else request.resolve(new Response(JSON.stringify(kind === 'diagnostic' ? diagnosticResult('failed') : sharedResult(99, 99))));
+    }
+  });
+  expect((button as HTMLButtonElement).disabled).toBe(true);
+  expect(section.getByText(/Checking .*…/)).toBeTruthy();
+  expect(section.getByText(previous)).toBeTruthy();
+  fireEvent.click(button);
+  expect(requests).toHaveLength(3);
+  expect((screen.getByRole('button', {name: otherLabel}) as HTMLButtonElement).disabled).toBe(false);
+  await act(async () => requests[2].resolve(new Response(JSON.stringify(result))));
+  expect((button as HTMLButtonElement).disabled).toBe(false);
+  expect(section.queryByText(previous)).toBeNull();
+  expect(section.queryByText(/Stopped waiting/)).toBeNull();
+  expect(section.getByText(passed)).toBeTruthy();
+  expect(fetcher.mock.calls.every(([input]) => ['/api/connections/v1', path].includes(input))).toBe(true);
+});
+
+test.each(['diagnostic', 'shared-data'])('%s completion preserves cancel focus or an outside control', async kind => {
+  const path = kind === 'diagnostic' ? diagnosticPath : sharedPath;
+  const label = kind === 'diagnostic' ? 'Check local server' : 'Check shared data';
+  let finish!: (response: Response) => void;
+  vi.stubGlobal('fetch', vi.fn((input: string) => input === path
+    ? new Promise<Response>(resolve => { finish = resolve; })
+    : Promise.resolve(new Response(JSON.stringify(setup)))));
+  const user = await openDiagnostic();
+  const button = screen.getByRole('button', {name: label});
+  const result = kind === 'diagnostic' ? diagnosticResult('passed') : sharedResult();
+  await user.click(button);
+  screen.getByRole('button', {name: /Cancel waiting/}).focus();
+  await act(async () => finish(new Response(JSON.stringify(result))));
+  expect(document.activeElement).toBe(button);
+  await user.click(button);
+  const outside = screen.getByLabelText('Client');
+  outside.focus();
+  // Programmatic cancellation models activation without moving focus to it.
+  fireEvent.click(screen.getByRole('button', {name: /Cancel waiting/}));
+  expect(document.activeElement).toBe(outside);
+  await act(async () => finish(new Response(JSON.stringify(result))));
+  expect(document.activeElement).toBe(outside);
+});
+
+test('cancelling either check leaves the other pending and independently cancellable', async () => {
+  const signals: AbortSignal[] = [];
+  vi.stubGlobal('fetch', vi.fn((input: string, init?: RequestInit) => input === diagnosticPath || input === sharedPath
+    ? new Promise<Response>(() => { signals.push(init!.signal as AbortSignal); })
+    : Promise.resolve(new Response(JSON.stringify(setup)))));
+  const user = await openDiagnostic();
+  await user.click(screen.getByRole('button', {name: 'Check local server'}));
+  await user.click(screen.getByRole('button', {name: 'Check shared data'}));
+  await user.click(screen.getByRole('button', {name: 'Cancel waiting for local server'}));
+  expect(signals[0].aborted).toBe(true);
+  expect(signals[1].aborted).toBe(false);
+  expect(screen.getByText(/Checking shared data…/)).toBeTruthy();
+  await user.click(screen.getByRole('button', {name: 'Cancel waiting for shared data'}));
+  expect(signals[1].aborted).toBe(true);
+  expect((screen.getByRole('button', {name: 'Check local server'}) as HTMLButtonElement).disabled).toBe(false);
+  expect((screen.getByRole('button', {name: 'Check shared data'}) as HTMLButtonElement).disabled).toBe(false);
+  expect(screen.getAllByText(/Stopped waiting.*retry explicitly/)).toHaveLength(2);
+  expect(screen.queryByText('Local server diagnostic passed')).toBeNull();
+  expect(screen.queryByText('Shared-data check passed.')).toBeNull();
+  expect(screen.queryByText(/Employees:.*Saved work:/)).toBeNull();
+  expect(signals).toHaveLength(2);
 });

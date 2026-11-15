@@ -5397,3 +5397,60 @@ Deterministic coverage is in `ConnectionActivity.test.tsx` and
 frontend-profile browser validation are pending in this implementation snapshot;
 frontend dependencies are absent in the isolated workspace. Live provider calls
 remain skipped under the user policy, not passed.
+
+### Cancel waiting for local connection checks (C139-T1)
+
+Launch `agentown-web --database ABSOLUTE_DATABASE` using an absolute product
+database path, open Connections, and select Codex (or another local client).
+No credentials or external client configuration are required. Run **Check local
+server** and **Check shared data** once to establish previous observations.
+
+To make the waiting controls easy to exercise, paste this temporary wrapper into
+the browser console. It delays only the existing local-check responses and
+intentionally ignores their browser abort signal so late responses can be tested.
+It still uses the real local endpoints; it does not call a provider.
+
+```js
+window.originalCancelCheckFetch = window.fetch;
+window.fetch = async (input, init) => {
+  if (!['/api/connections/v1/diagnostic', '/api/connections/v1/shared-data']
+      .includes(String(input))) return window.originalCancelCheckFetch(input, init);
+  const response = await window.originalCancelCheckFetch(input, {...init, signal: undefined});
+  const body = await response.text();
+  await new Promise(resolve => setTimeout(resolve, 5000));
+  return new Response(body, {status: response.status, headers: response.headers});
+};
+```
+
+1. Start **Check local server**, then Tab to **Cancel waiting for local server**
+   and press Enter or Space. Waiting ends promptly, focus returns to **Check local
+   server**, and the polite notice explains that this does not confirm server
+   process termination. The previous outcome is retained as potentially stale.
+2. Immediately select **Check local server** again. The previous cancelled
+   response must not remove the new waiting control, replace the retry's outcome,
+   refresh its evidence, or admit another duplicate check. No retry occurs until
+   explicitly requested. A real server may report busy if its earlier check has
+   not finished; use the displayed recovery and retry explicitly.
+3. Repeat for **Check shared data**. Its previous counts remain unchanged after
+   cancellation and are marked potentially stale until a successful explicit
+   rerun for the current setup. Repeat without first establishing evidence: the
+   cancellation notice still offers explicit retry without inventing an outcome.
+4. Start both checks, cancel one, and confirm the other remains pending. Cancel
+   the other independently. Neither action calls a provider or changes data.
+5. Leave keyboard focus on Cancel waiting until a check completes: focus returns
+   to its corresponding enabled check button. Repeat with focus moved to Client
+   before completion: focus stays on Client. Cancellation must likewise leave
+   focus elsewhere alone if triggered without focusing its control.
+6. Restore `window.fetch = window.originalCancelCheckFetch` after the exercise.
+
+Deterministic interaction coverage in `frontend/src/Connections.test.tsx` covers
+both checks, keyboard cancellation and focus recovery, retained evidence/counts,
+immediate retry before cancelled cleanup, duplicate admission, late resolution
+and rejection, and independent checks. Integration validation passed TypeScript
+checking (`tsc --noEmit`) and the seven targeted interaction cases
+(`vitest run src/Connections.test.tsx -t 'cancellation|completion preserves cancel focus|cancelling either'`).
+The keyboard test follows Tab navigation to Cancel waiting even when disabling
+the focused Check button resets the tab starting point. Consolidated tests/build
+and applicable browser validation remain pending under the supervisor-selected
+verification profile. Live LLM calls remain skipped, not passed, under the current
+user policy.

@@ -99,40 +99,73 @@ function useEvidenceFreshness(connected: boolean, configuration = '') {
 function LocalDiagnostic({workspaceConnected, configuration}: {workspaceConnected: boolean; configuration: string}) {
   const freshness = useEvidenceFreshness(workspaceConnected, configuration);
   const [pending, setPending] = useState(false);
+  const [cancelled, setCancelled] = useState(false);
+  const checkControl = useRef<HTMLButtonElement | null>(null);
+  const cancelControl = useRef<HTMLButtonElement | null>(null);
+  const restoreFocus = useRef(false);
+  useLayoutEffect(() => {
+    if (!pending && restoreFocus.current) {
+      restoreFocus.current = false;
+      checkControl.current?.focus();
+    }
+  }, [pending]);
+  function endWaiting() {
+    restoreFocus.current = document.activeElement === cancelControl.current;
+    setPending(false);
+  }
   const [outcome, setOutcome] = useState<keyof typeof diagnosticMessages | null>(null);
   const lock = useRef(false);
   const request = useRef<AbortController | null>(null);
   useEffect(() => () => request.current?.abort(), []);
+  function cancel() {
+    const controller = request.current;
+    if (!controller) return;
+    request.current = null;
+    lock.current = false;
+    controller.abort();
+    freshness.finish(freshness.begin(), false);
+    setCancelled(true);
+    endWaiting();
+  }
   async function check() {
     if (lock.current) return;
     lock.current = true;
     const started = freshness.begin();
     const controller = new AbortController();
     request.current = controller;
+    setCancelled(false);
     setPending(true);
     try {
       const result = await api<unknown>('/api/connections/v1/diagnostic', {}, controller.signal);
       if (!isDiagnostic(result)) throw new Error('Unsupported diagnostic response');
-      if (!controller.signal.aborted) {
+      if (request.current === controller && !controller.signal.aborted) {
         setOutcome(result.status === 'failed' && result.code === 'missing_tools' ? 'missing_tools' : result.status);
         freshness.finish(started, result.status === 'passed');
       }
     } catch (error) {
       // Do not expose transport errors or subprocess output in the interface.
-      if (!controller.signal.aborted) {
+      if (request.current === controller && !controller.signal.aborted) {
         setOutcome(error instanceof RequestTimeoutError ? 'timeout' : 'failed');
         freshness.finish(started, false);
       }
     } finally {
-      lock.current = false;
-      if (!controller.signal.aborted) setPending(false);
+      // A cancelled request must never release a newer retry's lock.
+      if (request.current === controller) {
+        request.current = null;
+        lock.current = false;
+        if (!controller.signal.aborted) endWaiting();
+      }
     }
   }
   return <section aria-label="Local server diagnostic" aria-busy={pending}>
     <h3>Check local server</h3>
     {outcome && freshness.stale && <p role="status">Previous local server diagnostic observation — potentially stale. Reconnect if needed and explicitly check local server again to refresh this evidence.</p>}
     <p>Checks the installed server and selected database used by the setup artifact. Initializes MCP and discovers workflow tools without running them or calling a provider.</p>
-    <button type="button" disabled={pending} onClick={() => void check()}>Check local server</button>
+    <button ref={checkControl} type="button" disabled={pending} onClick={() => void check()}>Check local server</button>
+    {pending && <button ref={cancelControl} type="button" onClick={cancel}>Cancel waiting for local server</button>}
+    <div role="status" aria-live="polite" aria-atomic="true">
+      {cancelled && <p>Stopped waiting for local server. This does not confirm that the server process stopped. Select Check local server to retry explicitly.</p>}
+    </div>
     <div role="status" aria-live="polite" aria-atomic="true">
       {pending ? <p>Checking local server… Waiting for initialization and workflow tool discovery.</p> : outcome && <>
         <p>{diagnosticMessages[outcome]}</p><p>{diagnosticRecovery[outcome]}</p>
@@ -162,40 +195,73 @@ const sharedMessages = {
 function SharedDataCheck({workspaceConnected, configuration}: {workspaceConnected: boolean; configuration: string}) {
   const freshness = useEvidenceFreshness(workspaceConnected, configuration);
   const [pending, setPending] = useState(false);
+  const [cancelled, setCancelled] = useState(false);
+  const checkControl = useRef<HTMLButtonElement | null>(null);
+  const cancelControl = useRef<HTMLButtonElement | null>(null);
+  const restoreFocus = useRef(false);
+  useLayoutEffect(() => {
+    if (!pending && restoreFocus.current) {
+      restoreFocus.current = false;
+      checkControl.current?.focus();
+    }
+  }, [pending]);
+  function endWaiting() {
+    restoreFocus.current = document.activeElement === cancelControl.current;
+    setPending(false);
+  }
   const [outcome, setOutcome] = useState<keyof typeof sharedMessages | null>(null);
   const [counts, setCounts] = useState<{employees: number; work: number} | null>(null);
   const lock = useRef(false);
   const request = useRef<AbortController | null>(null);
   useEffect(() => () => request.current?.abort(), []);
+  function cancel() {
+    const controller = request.current;
+    if (!controller) return;
+    request.current = null;
+    lock.current = false;
+    controller.abort();
+    freshness.finish(freshness.begin(), false);
+    setCancelled(true);
+    endWaiting();
+  }
   async function check() {
     if (lock.current) return;
     lock.current = true;
     const started = freshness.begin();
     const controller = new AbortController();
     request.current = controller;
+    setCancelled(false);
     setPending(true);
     try {
       const result = await api<unknown>('/api/connections/v1/shared-data', {}, controller.signal);
-      if (controller.signal.aborted) return;
+      if (request.current !== controller || controller.signal.aborted) return;
       if (!isSharedData(result)) { setOutcome('malformed'); freshness.finish(started, false); return; }
       setOutcome(result.status);
       freshness.finish(started, result.status === 'passed');
       if (result.status === 'passed') setCounts({employees: result.employee_count, work: result.work_count});
     } catch (error) {
-      if (!controller.signal.aborted) {
+      if (request.current === controller && !controller.signal.aborted) {
         setOutcome(error instanceof RequestTimeoutError ? 'timeout' : 'failed');
         freshness.finish(started, false);
       }
     } finally {
-      lock.current = false;
-      if (!controller.signal.aborted) setPending(false);
+      // A cancelled request must never release a newer retry's lock.
+      if (request.current === controller) {
+        request.current = null;
+        lock.current = false;
+        if (!controller.signal.aborted) endWaiting();
+      }
     }
   }
   return <section aria-label="Shared employee and work access" aria-busy={pending}>
     <h3>Check shared data</h3>
     {outcome && freshness.stale && <p role="status">Previous shared-data observation and counts — potentially stale. Reconnect if needed and explicitly check shared data again to refresh this evidence.</p>}
     <p>Use the installed local server and selected database to read employees and saved work. Only counts are shown. This separate check calls list_agents and list_tasks; it does not change data, inspect history, execute work, call a provider, or read client settings or credentials.</p>
-    <button type="button" disabled={pending} onClick={() => void check()}>Check shared data</button>
+    <button ref={checkControl} type="button" disabled={pending} onClick={() => void check()}>Check shared data</button>
+    {pending && <button ref={cancelControl} type="button" onClick={cancel}>Cancel waiting for shared data</button>}
+    <div role="status" aria-live="polite" aria-atomic="true">
+      {cancelled && <p>Stopped waiting for shared data. This does not confirm that the server process stopped. Select Check shared data to retry explicitly.</p>}
+    </div>
     <div role="status" aria-live="polite" aria-atomic="true">
       {pending ? <p>Checking shared data… Waiting for employee and work counts.</p> : outcome && <>
         <p>{sharedMessages[outcome]}</p>
