@@ -3591,9 +3591,9 @@ connection restored with potentially stale configuration, and retained cards kee
 their textual warning. Reconnection alone does not refresh the device snapshot;
 other panels may independently read Loop configuration.
 Configuration navigation remains available, with the same policy IDs and drafts;
-linked-work navigation keeps its existing connection, loading, failure and
-missing-work guards. The freshness warning adds no navigation restriction or
-execution consent.
+linked-work navigation also requires a successful snapshot on the current
+connection, as described in C131 below, alongside its connection, loading,
+failure and missing-work guards. Navigation grants no execution consent.
 
 Choose **Refresh Loop devices** explicitly. Loading remains visible alongside the
 freshness disclosure. A failed refresh retains the previous cards or empty
@@ -5081,3 +5081,53 @@ and `npx tsc --noEmit`. This isolated implementation workspace has no frontend
 node_modules, so these checks and the applicable consolidated supervisor profile
 remain pending. Browser validation is pending supervisor verification. Live
 provider tests are skipped, not passed.
+
+### C131: Refresh Loop policies before opening linked work after reconnection
+
+Launch `agentown-web` and open Company overview with an existing saved Loop and
+its linked Task in saved work. No provider credentials are required. In browser
+developer tools, observe requests while exercising this read-only flow:
+
+1. Tab to the Loop's **Open linked work · local MCP** action. Disconnect the
+   product connection and choose **Refresh connection**. When the linked action
+   becomes unavailable, focus moves to that same Loop's **Open Configuration**
+   card. The card stays readable and opens Configuration while disconnected.
+2. Restore the connection and choose **Refresh connection**. Linked work remains
+   disabled with “Loop devices are stale. Refresh successfully before opening
+   linked work.” Opening the retained Configuration card is still available.
+   Enter/Space on the disabled linked-work action must not change selected work
+   or open a Requested Loop inspection.
+3. Choose **Refresh Loop devices**. A failed or malformed response retains the
+   cards and keeps linked work unavailable. A request spanning a disconnect and
+   reconnect must not unlock work, even if its late response succeeds. An older
+   aborted response must not replace a newer accepted snapshot.
+4. Refresh successfully on the current connection. If the saved policy now
+   targets another existing Task, the card and linked action show that Task ID.
+   Enter or Space opens that exact Task's Requested Loop inspection. Work and
+   Configuration drafts remain intact. Focus on other cards or drafts stays put
+   when linked-work availability changes.
+5. Confirm refresh and navigation send only the known reads: GET configuration,
+   teams and Loop inspection endpoints, and POST `/api/state` (a read). There
+   must be no preview, start, stop, execution or provider/configuration mutation.
+
+Deterministic component evidence in `LoopDevices.test.tsx` covers retained
+freshness, failed/malformed snapshots, aborted connection-spanning responses in
+both settlement orders, retargeting, and keyboard focus recovery. App evidence
+in `App.test.tsx` covers reconnect → blocked navigation → failed/malformed
+refresh → successful retargeted navigation, preserved drafts and a strict
+request allowlist. Run `cd frontend` then
+`./node_modules/.bin/vitest run src/LoopDevices.test.tsx src/App.test.tsx` and
+`./node_modules/.bin/tsc --noEmit` when dependencies are available.
+Integration corrected both App fixtures to explicitly refresh Loop devices after
+the initial connection; the mount-time request begins disconnected and cannot
+authorize linked work. The runner-selected frontend profile passed all 34 test
+files and 1,376 tests. The complete Python suite passed 524 tests with 2 skipped;
+the Rust suite passed 46 tests, and all 17 harness tests passed. Live LLM calls
+were skipped, not passed. The isolated runner did not perform installed-browser
+validation for this task.
+
+The subsequent integration repair also updates the existing Company Loop preview
+dismissal fixture to refresh Loop devices after connecting and wait for linked
+work to become available before opening it. The dismissal request-count and
+mutation assertions remain unchanged; the frontend regression suite above
+includes this repair.

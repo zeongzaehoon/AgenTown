@@ -85,6 +85,9 @@ test('App opens exact IDs repeatedly, retains configuration and work drafts and 
   fireEvent.click(screen.getByRole('button', {name: 'Open Loop device: Manual · ID: two'}));
   await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('Saved record')));
   const linked = screen.getByRole('button', {name: 'Open linked work for Loop: Manual · Policy ID: one · Task ID: w'});
+  // App first connects after mounting; validate configuration on that connection.
+  fireEvent.click(screen.getByRole('button', {name: 'Refresh Loop devices'}));
+  await waitFor(() => expect((linked as HTMLButtonElement).disabled).toBe(false));
   linked.focus(); await userEvent.keyboard('{Enter}');
   expect(document.activeElement).toBe(screen.getByRole('region', {name: 'Requested Loop inspection'}));
   expect(screen.getByText(/Requested Task: w · Policy: one/)).toBeTruthy();
@@ -181,7 +184,7 @@ test.each(['failed', 'malformed'])('linked work requires a successful current sn
   expect(document.getElementById(linked().getAttribute('aria-describedby')!)!.textContent).toContain('Disconnected');
   view.rerender(<LoopDevices workspace={{...workspace, work: []}} onOpenPolicy={open} />);
   expect(linked().disabled).toBe(true);
-  expect(document.getElementById(linked().getAttribute('aria-describedby')!)!.textContent).toContain('Linked work unavailable');
+  expect(document.getElementById(linked().getAttribute('aria-describedby')!)!.textContent).toContain('stale');
   fireEvent.click(linked());
   expect(open).toHaveBeenCalledTimes(1);
   expect(fetcher.mock.calls.map(call => call[0])).toEqual(Array(3).fill('/api/config/v1/loops'));
@@ -216,8 +219,8 @@ test.each([true, false])('retained freshness survives reconnection and failure (
   if (card) {
     expect(screen.getByRole('button', {name: 'Open Loop device: Manual · ID: one'})).toBe(card);
     expect(document.activeElement).toBe(card);
-    // Freshness disclosure adds no new linked-work guard after reconnecting.
-    expect((screen.getByRole('button', {name: /Open linked work/}) as HTMLButtonElement).disabled).toBe(false);
+    // Reconnection alone cannot validate the retained policy.
+    expect((screen.getByRole('button', {name: /Open linked work/}) as HTMLButtonElement).disabled).toBe(true);
   }
   fetcher.mockRejectedValueOnce(new Error('Refresh failed'));
   fireEvent.click(screen.getByRole('button', {name: 'Refresh Loop devices'}));
@@ -337,4 +340,58 @@ test.each([true, false])('failed and old-connection responses cannot override a 
   expect(document.activeElement).toBe(current);
   expect(screen.getByRole('button', {name: 'Open Loop device: Current · ID: one'})).toBe(current);
   expect(screen.getByLabelText('Loop devices removals').textContent).toContain('1 record removed');
+});
+
+test.each(['disconnect', 'native focus loss', 'refresh', 'missing work'] as const)('focused linked work recovers to its Configuration card on %s without moving outside focus', async change => {
+  const fetcher = vi.fn().mockImplementation(async () => new Response(JSON.stringify({loops: [loops[0]]})));
+  vi.stubGlobal('fetch', fetcher);
+  const workspace: Workspace = {employees: [], work: [{id: 'w', input: 'Saved', status: 'pending', assignees: [], attempts: []}], configuration: null, provider: 'test', model: 'test'};
+  const props = {workspace, onOpenLoop: vi.fn(), onOpenPolicy: vi.fn()};
+  const view = render(<><input aria-label="Outside draft" /><LoopDevices {...props} /></>);
+  const linked = await screen.findByRole('button', {name: /Open linked work for Loop/});
+  const card = screen.getByRole('button', {name: 'Open Loop device: Manual · ID: one'});
+  linked.focus();
+  // Simulate browser focus loss before React disables the native button.
+  if (change === 'native focus loss') linked.blur();
+  if (change === 'disconnect' || change === 'native focus loss') view.rerender(<><input aria-label="Outside draft" /><LoopDevices {...props} connected={false} /></>);
+  else if (change === 'missing work') view.rerender(<><input aria-label="Outside draft" /><LoopDevices {...props} workspace={{...workspace, work: []}} /></>);
+  else fireEvent.click(screen.getByRole('button', {name: 'Refresh Loop devices'}));
+  expect(document.activeElement).toBe(card);
+  expect(props.onOpenPolicy).not.toHaveBeenCalled();
+  await waitFor(() => expect((screen.getByRole('button', {name: 'Refresh Loop devices'}) as HTMLButtonElement).disabled).toBe(false));
+  const outside = screen.getByLabelText('Outside draft'); outside.focus();
+  view.rerender(<><input aria-label="Outside draft" /><LoopDevices {...props} connected={false} /></>);
+  expect(document.activeElement).toBe(outside);
+});
+
+test.each([true, false])('aborted old connection cannot unlock linked work around a newer snapshot (old first: %s)', async oldFirst => {
+  const pending: {resolve: (response: Response) => void; signal: AbortSignal}[] = [];
+  const fetcher = vi.fn((_path: string, options: RequestInit) => new Promise<Response>(resolve => pending.push({resolve, signal: options.signal as AbortSignal})));
+  vi.stubGlobal('fetch', fetcher);
+  const workspace: Workspace = {employees: [], work: ['w', 'other'].map(id => ({id, input: id, status: 'pending', assignees: [], attempts: []})), configuration: null, provider: 'test', model: 'test'};
+  const open = vi.fn(); const props = {workspace, onOpenLoop: vi.fn(), onOpenPolicy: open};
+  const view = render(<LoopDevices {...props} />);
+  const respond = async (index: number, task = 'w') => act(async () => { pending[index].resolve(new Response(JSON.stringify({loops: [{...loops[0], task_id: task}]}))); });
+  await respond(0);
+  const linked = () => screen.getByRole('button', {name: /Open linked work for Loop/}) as HTMLButtonElement;
+  fireEvent.click(screen.getByRole('button', {name: 'Refresh Loop devices'}));
+  view.rerender(<LoopDevices {...props} connected={false} />);
+  view.rerender(<LoopDevices {...props} connected />);
+  expect(pending[1].signal.aborted).toBe(true);
+  expect(linked().disabled).toBe(true); fireEvent.click(linked());
+  expect(open).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', {name: 'Refresh Loop devices'}));
+  if (oldFirst) {
+    await respond(1);
+    expect(linked().disabled).toBe(true); fireEvent.click(linked());
+    expect(open).not.toHaveBeenCalled();
+  }
+  await respond(2, 'other');
+  if (!oldFirst) await respond(1);
+  expect(linked().disabled).toBe(false);
+  linked().focus(); await userEvent.keyboard('{Enter}');
+  expect(open.mock.calls).toEqual([[{taskId: 'other', policyId: 'one'}]]);
+  for (const [path, options] of fetcher.mock.calls) {
+    expect(path).toBe('/api/config/v1/loops'); expect(options.method).toBe('GET'); expect(options.body).toBeUndefined();
+  }
 });

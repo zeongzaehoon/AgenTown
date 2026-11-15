@@ -1240,7 +1240,12 @@ test.each(['Skill', 'Hook', 'Loop'] as const)('Company %s preview dismissal pres
   fireEvent.change(draftInput(), {target: {value: 'Keep work draft'}});
   fireEvent.change(screen.getByLabelText('Employee name'), {target: {value: 'Keep employee draft'}});
   if (kind === 'Loop') {
-    await userEvent.click(await screen.findByRole('button', {name: /^Open linked work for Loop: Repeater/}));
+    const refreshDevice = screen.getByRole('button', {name: 'Refresh Loop devices'});
+    await waitFor(() => expect((refreshDevice as HTMLButtonElement).disabled).toBe(false));
+    await userEvent.click(refreshDevice);
+    const linked = await screen.findByRole('button', {name: /^Open linked work for Loop: Repeater/});
+    await waitFor(() => expect((linked as HTMLButtonElement).disabled).toBe(false));
+    await userEvent.click(linked);
   } else {
     const refreshDevice = screen.getByRole('button', {name: kind === 'Skill' ? 'Refresh Skill books' : 'Refresh Hook devices'});
     await waitFor(() => expect((refreshDevice as HTMLButtonElement).disabled).toBe(false));
@@ -1793,4 +1798,66 @@ test.each(['assignment', 'absence'])('unassigned work polling accepts %s only af
   expect(f.calls.every(call => call.path === '/api/state')).toBe(true);
   expect(vi.mocked(fetch).mock.calls.every(([path, options]) => path === '/api/state' ? options?.method === 'POST'
     : ['/api/config/v1/skills', '/api/config/v1/hooks', '/api/config/v1/loops', '/api/loops/v1', '/api/teams'].includes(String(path)) && options?.method === 'GET')).toBe(true);
+});
+
+test.each(['failed', 'malformed'] as const)('Company Loop linked work waits for a successful reconnect snapshot after %s refresh', async failure => {
+  vi.spyOn(window, 'setInterval').mockImplementation(() => 0);
+  const f = fixture({...initial(), work: ['w', 'other'].map(id => ({id, input: `Saved ${id}`, assignees: [], status: 'pending', attempts: []}))});
+  const fallback = globalThis.fetch;
+  const requests: {path: string; method: string; body: unknown}[] = [];
+  let mode: 'valid' | 'failed' | 'malformed' = 'valid';
+  let taskId = 'w';
+  vi.stubGlobal('fetch', async (path: string, options: RequestInit) => {
+    requests.push({path, method: options?.method ?? 'GET', body: options?.body});
+    if (path === '/api/config/v1/loops') {
+      if (mode === 'failed') throw new Error('Loop refresh failed');
+      return new Response(JSON.stringify({loops: mode === 'malformed' ? [{}] : [{id: 'policy', name: 'Repeater', task_id: taskId, max_iterations: 2, interval_seconds: 60, enabled: true}]}));
+    }
+    return fallback(path, options);
+  });
+  render(<App />); await connected();
+  const linked = () => screen.getByRole('button', {name: /^Open linked work for Loop: Repeater/}) as HTMLButtonElement;
+  await waitFor(() => expect((screen.getByRole('button', {name: 'Refresh Loop devices'}) as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.click(screen.getByRole('button', {name: 'Refresh Loop devices'}));
+  await waitFor(() => expect(linked().disabled).toBe(false));
+  const before = JSON.stringify(f.state);
+  fireEvent.change(draftInput(), {target: {value: 'Keep Loop work draft'}});
+  linked().focus();
+  f.disconnect(); refresh();
+  await waitFor(() => expect(document.querySelector('#connection')!.textContent).toContain('Disconnected'));
+  const card = screen.getByRole('button', {name: 'Open Loop device: Repeater · ID: policy'});
+  expect(document.activeElement).toBe(card);
+  f.reconnect(); refresh(); await connected();
+  expect(linked().disabled).toBe(true);
+  expect(document.getElementById(linked().getAttribute('aria-describedby')!)!.textContent).toContain('Refresh successfully');
+  fireEvent.click(linked());
+  expect(screen.queryByRole('region', {name: 'Requested Loop inspection'})).toBeNull();
+  expect((document.getElementById('history') as HTMLSelectElement).value).toBe('w');
+  // The retained card remains a Configuration entry point while work is stale.
+  await userEvent.click(card);
+  await screen.findByText('Saved values · ID: policy');
+  fireEvent.change(screen.getByLabelText('Name'), {target: {value: 'Keep Loop configuration draft'}});
+  mode = failure;
+  fireEvent.click(screen.getByRole('button', {name: 'Refresh Loop devices'}));
+  await waitFor(() => expect((screen.getByRole('button', {name: 'Refresh Loop devices'}) as HTMLButtonElement).disabled).toBe(false));
+  expect(linked().disabled).toBe(true); fireEvent.click(linked());
+  expect(screen.queryByRole('region', {name: 'Requested Loop inspection'})).toBeNull();
+  expect((document.getElementById('history') as HTMLSelectElement).value).toBe('w');
+  mode = 'valid'; taskId = 'other';
+  fireEvent.click(screen.getByRole('button', {name: 'Refresh Loop devices'}));
+  await waitFor(() => expect(linked().disabled).toBe(false));
+  expect(linked().getAttribute('aria-label')).toContain('Task ID: other');
+  linked().focus(); await userEvent.keyboard(' ');
+  expect(document.activeElement).toBe(screen.getByRole('region', {name: 'Requested Loop inspection'}));
+  expect((document.getElementById('history') as HTMLSelectElement).value).toBe('other');
+  expect(draftInput().value).toBe('Keep Loop work draft');
+  expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('Keep Loop configuration draft');
+  expect(JSON.stringify(f.state)).toBe(before);
+  for (const request of requests) {
+    if (request.path === '/api/state') expect(request.method).toBe('POST');
+    else {
+      expect(['/api/teams', '/api/config/v1/loops', '/api/config/v1/skills', '/api/config/v1/hooks', '/api/loops/v1']).toContain(request.path);
+      expect(request.method).toBe('GET'); expect(request.body).toBeUndefined();
+    }
+  }
 });

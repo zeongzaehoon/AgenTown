@@ -12,6 +12,22 @@ export function LoopDevices({onOpenLoop, onOpenPolicy, workspace, connected = tr
   const grid = useRef<HTMLDivElement>(null);
   const refreshButton = useRef<HTMLButtonElement>(null);
   const recoverFocus = useRef(false);
+  const focusedLinkedWork = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    const trackFocus = (event: FocusEvent) => {
+      if (event.target !== focusedLinkedWork.current) focusedLinkedWork.current = null;
+    };
+    document.addEventListener('focusin', trackFocus);
+    return () => document.removeEventListener('focusin', trackFocus);
+  }, []);
+  useLayoutEffect(() => {
+    const linked = focusedLinkedWork.current;
+    if (linked?.disabled && (document.activeElement === linked || document.activeElement === document.body)) {
+      const configuration = linked.closest('article')?.querySelector<HTMLButtonElement>('.loop-policy-device');
+      if (configuration && !configuration.disabled) configuration.focus();
+      else if (!busy) refreshButton.current?.focus();
+    }
+  });
   useLayoutEffect(() => {
     if (!busy && recoverFocus.current) {
       recoverFocus.current = false;
@@ -74,7 +90,7 @@ export function LoopDevices({onOpenLoop, onOpenPolicy, workspace, connected = tr
     <div ref={grid} className="loop-policy-device-grid">{devices?.map((device, index) => {
       const unavailable = !connected ? 'Disconnected. Reconnect before opening linked work.'
         : busy ? 'Refreshing Loop devices. Wait for a successful snapshot before opening linked work.'
-        : error ? 'Loop devices are stale. Refresh successfully before opening linked work.'
+        : error || disconnectedSnapshot ? 'Loop devices are stale. Refresh successfully before opening linked work.'
         : !workspace?.work.some(w => w.id === device.task_id) ? 'Linked work unavailable in loaded saved work. Refresh saved history before opening.'
         : !onOpenPolicy ? 'Linked work navigation unavailable.' : '';
       const explanationId = `loop-linked-work-unavailable-${index}`;
@@ -87,7 +103,7 @@ export function LoopDevices({onOpenLoop, onOpenPolicy, workspace, connected = tr
       {(!connected || disconnectedSnapshot) && <span>{!connected ? 'Disconnected — potentially stale configuration snapshot' : 'Potentially stale configuration snapshot — refresh to check'}</span>}
       {(busy || error) && <span>{busy ? 'Refreshing snapshot' : 'Stale snapshot'}</span>}
     </button>
-      <button type="button" aria-controls="selected-work-inspection" disabled={Boolean(unavailable)} aria-describedby={unavailable ? explanationId : undefined}
+      <button type="button" onFocus={event => { focusedLinkedWork.current = event.currentTarget; }} aria-controls="selected-work-inspection" disabled={Boolean(unavailable)} aria-describedby={unavailable ? explanationId : undefined}
         aria-label={`Open linked work for Loop: ${device.name} · Policy ID: ${device.id} · Task ID: ${device.task_id}`}
         onClick={() => { if (!unavailable) onOpenPolicy?.({taskId: device.task_id, policyId: device.id}); }}>Open linked work · local MCP</button>
       {unavailable && <p id={explanationId}>{unavailable}</p>}
