@@ -5606,3 +5606,32 @@ unmount. Run with available dependencies:
 This implementation checkout lacks frontend node_modules, so these checks were
 not executed here. Supervisor checks and browser validation remain pending.
 Live provider calls are skipped, not passed; this flow needs no credentials.
+
+### Local check observation times (C143-T1)
+
+Launch `agentown-web --database /absolute/path/to/product.sqlite3`, open
+<http://127.0.0.1:8765>, connect the workspace, and open **Connections → Codex**.
+Use an existing product database; no credentials or provider calls are needed.
+Explicitly run **Check local server** and **Check shared data**. Each validated
+response shows its status and the local date/time when AgenTown received it.
+The readable time uses the browser's locale/time zone; the HTML `time` element
+also contains the precise ISO instant. Receipt time does not establish an
+external client connection, configuration, or exercise.
+
+Run each check again: while waiting, the previous observation keeps its time and
+is labelled potentially stale. Cancel waiting and retry; late cancelled responses
+must not replace the observation. A validated failed, busy, or timeout response
+gets its own receipt time. Invalid responses and transport failures do not get a
+new response time. Shared-data counts retain the time of their own passed response
+when a later check fails; they are labelled previous and potentially stale.
+Disconnect and reconnect the workspace, or refresh setup after changing its server
+command/database configuration: retained times must stay unchanged and evidence
+must remain stale until an explicit successful check for the current configuration.
+To exercise waiting/cancellation locally, use the deferred-fetch browser steps in
+“Cancel waiting for local connection checks” above. Deterministic interaction tests additionally
+cover superseded responses and unmounting without relying on wall-clock delays.
+
+Scoped checks: `cd frontend`, then `npx tsc --noEmit` and
+`npx vitest run src/Connections.test.tsx`. The supervisor runs the applicable
+frontend verification profile after implementation handoff; live provider calls
+remain skipped.

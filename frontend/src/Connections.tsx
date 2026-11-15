@@ -96,6 +96,12 @@ function useEvidenceFreshness(connected: boolean, configuration = '') {
   return {stale, begin, finish};
 }
 
+// Browser receipt time belongs to the validated response, never to a retry.
+interface LocalObservation { receivedAt: string; status: DiagnosticResponse['status'] }
+function ObservationTime({observation}: {observation: LocalObservation}) {
+  return <p>Local response ({observation.status}) received by AgenTown at <time dateTime={observation.receivedAt}>{new Date(observation.receivedAt).toLocaleString()}</time>. This is browser receipt time, not proof of an external client connection.</p>;
+}
+
 function LocalDiagnostic({workspaceConnected, configuration}: {workspaceConnected: boolean; configuration: string}) {
   const freshness = useEvidenceFreshness(workspaceConnected, configuration);
   const [pending, setPending] = useState(false);
@@ -114,9 +120,14 @@ function LocalDiagnostic({workspaceConnected, configuration}: {workspaceConnecte
     setPending(false);
   }
   const [outcome, setOutcome] = useState<keyof typeof diagnosticMessages | null>(null);
+  const [observation, setObservation] = useState<LocalObservation | null>(null);
   const lock = useRef(false);
   const request = useRef<AbortController | null>(null);
-  useEffect(() => () => request.current?.abort(), []);
+  useEffect(() => () => {
+    const controller = request.current;
+    request.current = null;
+    controller?.abort();
+  }, []);
   function cancel() {
     const controller = request.current;
     if (!controller) return;
@@ -139,6 +150,7 @@ function LocalDiagnostic({workspaceConnected, configuration}: {workspaceConnecte
       const result = await api<unknown>('/api/connections/v1/diagnostic', {}, controller.signal);
       if (!isDiagnostic(result)) throw new Error('Unsupported diagnostic response');
       if (request.current === controller && !controller.signal.aborted) {
+        setObservation({receivedAt: new Date().toISOString(), status: result.status});
         setOutcome(result.status === 'failed' && result.code === 'missing_tools' ? 'missing_tools' : result.status);
         freshness.finish(started, result.status === 'passed');
       }
@@ -159,7 +171,7 @@ function LocalDiagnostic({workspaceConnected, configuration}: {workspaceConnecte
   }
   return <section aria-label="Local server diagnostic" aria-busy={pending}>
     <h3>Check local server</h3>
-    {outcome && freshness.stale && <p role="status">Previous local server diagnostic observation — potentially stale. Reconnect if needed and explicitly check local server again to refresh this evidence.</p>}
+    {outcome && (freshness.stale || pending) && <p role="status">Previous local server diagnostic observation — potentially stale. Reconnect if needed and explicitly check local server again to refresh this evidence.</p>}
     <p>Checks the installed server and selected database used by the setup artifact. Initializes MCP and discovers workflow tools without running them or calling a provider.</p>
     <button ref={checkControl} type="button" disabled={pending} onClick={() => void check()}>Check local server</button>
     {pending && <button ref={cancelControl} type="button" onClick={cancel}>Cancel waiting for local server</button>}
@@ -171,6 +183,7 @@ function LocalDiagnostic({workspaceConnected, configuration}: {workspaceConnecte
         <p>{diagnosticMessages[outcome]}</p><p>{diagnosticRecovery[outcome]}</p>
       </>}
     </div>
+    {observation && <ObservationTime observation={observation} />}
     <p>This check does not read client settings. External client configuration remains unknown; external connection and exercise remain unverified.</p>
   </section>;
 }
@@ -210,10 +223,15 @@ function SharedDataCheck({workspaceConnected, configuration}: {workspaceConnecte
     setPending(false);
   }
   const [outcome, setOutcome] = useState<keyof typeof sharedMessages | null>(null);
-  const [counts, setCounts] = useState<{employees: number; work: number} | null>(null);
+  const [observation, setObservation] = useState<LocalObservation | null>(null);
+  const [counts, setCounts] = useState<{employees: number; work: number; receivedAt: string} | null>(null);
   const lock = useRef(false);
   const request = useRef<AbortController | null>(null);
-  useEffect(() => () => request.current?.abort(), []);
+  useEffect(() => () => {
+    const controller = request.current;
+    request.current = null;
+    controller?.abort();
+  }, []);
   function cancel() {
     const controller = request.current;
     if (!controller) return;
@@ -236,9 +254,11 @@ function SharedDataCheck({workspaceConnected, configuration}: {workspaceConnecte
       const result = await api<unknown>('/api/connections/v1/shared-data', {}, controller.signal);
       if (request.current !== controller || controller.signal.aborted) return;
       if (!isSharedData(result)) { setOutcome('malformed'); freshness.finish(started, false); return; }
+      const receivedAt = new Date().toISOString();
+      setObservation({receivedAt, status: result.status});
       setOutcome(result.status);
       freshness.finish(started, result.status === 'passed');
-      if (result.status === 'passed') setCounts({employees: result.employee_count, work: result.work_count});
+      if (result.status === 'passed') setCounts({employees: result.employee_count, work: result.work_count, receivedAt});
     } catch (error) {
       if (request.current === controller && !controller.signal.aborted) {
         setOutcome(error instanceof RequestTimeoutError ? 'timeout' : 'failed');
@@ -255,7 +275,7 @@ function SharedDataCheck({workspaceConnected, configuration}: {workspaceConnecte
   }
   return <section aria-label="Shared employee and work access" aria-busy={pending}>
     <h3>Check shared data</h3>
-    {outcome && freshness.stale && <p role="status">Previous shared-data observation and counts — potentially stale. Reconnect if needed and explicitly check shared data again to refresh this evidence.</p>}
+    {outcome && (freshness.stale || pending) && <p role="status">Previous shared-data observation and counts — potentially stale. Reconnect if needed and explicitly check shared data again to refresh this evidence.</p>}
     <p>Use the installed local server and selected database to read employees and saved work. Only counts are shown. This separate check calls list_agents and list_tasks; it does not change data, inspect history, execute work, call a provider, or read client settings or credentials.</p>
     <button ref={checkControl} type="button" disabled={pending} onClick={() => void check()}>Check shared data</button>
     {pending && <button ref={cancelControl} type="button" onClick={cancel}>Cancel waiting for shared data</button>}
@@ -273,6 +293,8 @@ function SharedDataCheck({workspaceConnected, configuration}: {workspaceConnecte
           : 'Check that the installed AgenTown server and selected database are available, restart AgenTown, then try again.'}</p>
       </>}
     </div>
+    {observation && <ObservationTime observation={observation} />}
+    {counts && <p>Counts received by AgenTown at <time dateTime={counts.receivedAt}>{new Date(counts.receivedAt).toLocaleString()}</time>. {freshness.stale || pending || outcome !== 'passed' ? 'Previous counts — potentially stale.' : 'Counts from the passed local response.'}</p>}
     <p>External client configuration remains unknown; external connection and exercise remain unverified. This local check does not validate ChatGPT.</p>
   </section>;
 }

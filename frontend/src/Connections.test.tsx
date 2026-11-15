@@ -1391,3 +1391,77 @@ test.each(['success', 'failure', 'outside', 'hidden', 'unmount-success', 'unmoun
     }
   },
 );
+
+test.each(['diagnostic', 'shared-data'])('%s observation times belong only to accepted responses and retained counts', async kind => {
+  const NativeDate = Date;
+  let now = '2026-11-15T01:02:03.000Z';
+  class ReceiptDate extends NativeDate {
+    constructor(value?: string | number) { super(value ?? now); }
+    static now() { return new NativeDate(now).getTime(); }
+  }
+  vi.stubGlobal('Date', ReceiptDate);
+  const path = kind === 'diagnostic' ? diagnosticPath : sharedPath;
+  const label = kind === 'diagnostic' ? 'Check local server' : 'Check shared data';
+  const region = kind === 'diagnostic' ? 'Local server diagnostic' : 'Shared employee and work access';
+  const passed = kind === 'diagnostic' ? diagnosticResult('passed') : sharedResult(7, 8);
+  let current = structuredClone(setup);
+  let transportFailure = false;
+  const requests: ((response: Response) => void)[] = [];
+  vi.stubGlobal('fetch', vi.fn((input: string) => input === path && transportFailure
+    ? Promise.reject(new Error('unavailable')) : input === path
+    ? new Promise<Response>(resolve => requests.push(resolve))
+    : Promise.resolve(new Response(JSON.stringify(current)))));
+  const view = render(<Connections workspaceConnected openClient={{id: 'codex'}} />);
+  await screen.findByLabelText('Client');
+  const section = screen.getByRole('region', {name: region});
+  const scope = within(section);
+  const button = scope.getByRole('button', {name: label});
+  const times = () => Array.from(section.querySelectorAll('time')).map(time => time.dateTime);
+  const settle = async (index: number, value: unknown) => {
+    await act(async () => requests[index](new Response(JSON.stringify(value))));
+  };
+  fireEvent.click(button);
+  expect(times()).toEqual([]);
+  await settle(0, passed);
+  const original = now;
+  expect(times()).toEqual(kind === 'diagnostic' ? [original] : [original, original]);
+  expect(scope.getByText(/browser receipt time, not proof of an external client connection/)).toBeTruthy();
+  now = '2026-11-15T02:03:04.000Z';
+  fireEvent.click(button);
+  expect(scope.getAllByText(/Previous .*potentially stale/).length).toBeGreaterThan(0);
+  fireEvent.click(scope.getByRole('button', {name: /Cancel waiting/}));
+  fireEvent.click(button);
+  await settle(1, passed); // cancelled and superseded response must not relabel evidence
+  expect(times().every(time => time === original)).toBe(true);
+  await settle(2, diagnosticResult('failed'));
+  expect(times()).toEqual(kind === 'diagnostic' ? [now] : [now, original]);
+  expect(scope.getByText(/Local response \(failed\)/)).toBeTruthy();
+  if (kind === 'shared-data') expect(scope.getByText(/Previous counts — potentially stale/)).toBeTruthy();
+  now = '2026-11-15T03:04:05.000Z';
+  fireEvent.click(button);
+  await settle(3, {schema_version: 999});
+  expect(times()[0]).toBe('2026-11-15T02:03:04.000Z');
+  transportFailure = true;
+  fireEvent.click(button);
+  await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
+  expect(times()[0]).toBe('2026-11-15T02:03:04.000Z');
+  transportFailure = false;
+  fireEvent.click(button);
+  await settle(4, passed);
+  expect(times().every(time => time === now)).toBe(true);
+  const retained = times();
+  view.rerender(<Connections workspaceConnected={false} openClient={{id: 'codex'}} />);
+  expect(times()).toEqual(retained);
+  view.rerender(<Connections workspaceConnected openClient={{id: 'codex'}} />);
+  current.clients[0].platforms[0].configuration = 'changed database';
+  fireEvent.click(screen.getByRole('button', {name: 'Refresh setup'}));
+  await screen.findByDisplayValue('changed database');
+  expect(times()).toEqual(retained);
+  expect(scope.getAllByText(/Previous .*potentially stale/).length).toBeGreaterThan(0);
+  fireEvent.click(button);
+  view.unmount();
+  now = '2026-11-15T04:05:06.000Z';
+  await settle(5, passed);
+  // Detached observation nodes retain the last accepted time after unmount.
+  expect(times()).toEqual(retained);
+});
