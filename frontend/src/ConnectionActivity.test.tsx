@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, expect, test, vi } from 'vitest';
 import { ConnectionActivity, isActivity } from './ConnectionActivity';
 
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 const attempt = {task_id: 'saved', run_id: 'run-1', started_at: 10, ended_at: 20, state: 'finished', outcome: 'reported_success', declared_source: 'codex', integration: 'codex'};
 const snapshot = {schema_version: 1, limit: 50, attempts: [attempt], evidence: {
   read_only: true, source: 'persisted_run_records', source_labels: 'untrusted_historical_metadata',
@@ -262,4 +262,64 @@ test.each(['cancel', 'success', 'failure', 'disconnect'])('%s recovers disappear
   expect(document.activeElement).not.toBe(load);
   view.rerender(ui());
   expect(document.activeElement).not.toBe(load);
+});
+
+
+test.each(['cancel', 'disconnect', 'malformed', 'failure'])('snapshot receipt time and records survive %s and update together only on explicit success', async ending => {
+  const first = Date.parse('2026-01-01T12:00:00Z');
+  const second = Date.parse('2026-01-01T13:00:00Z');
+  const now = vi.spyOn(Date, 'now').mockReturnValue(first);
+  const requests: {resolve: (response: Response) => void; reject: (reason: Error) => void}[] = [];
+  const fetcher = vi.fn(() => new Promise<Response>((resolve, reject) => requests.push({resolve, reject})));
+  vi.stubGlobal('fetch', fetcher);
+  const view = render(<ConnectionActivity clientId="codex" connected />);
+  const receipt = () => view.container.querySelector('time');
+  const load = screen.getByRole('button', {name: 'Load recorded activity'});
+  expect(receipt()).toBeNull();
+  fireEvent.click(load);
+  expect(receipt()).toBeNull();
+  await act(async () => requests[0].resolve(new Response(JSON.stringify(snapshot))));
+  expect(receipt()?.getAttribute('datetime')).toBe(new Date(first).toISOString());
+  expect(receipt()?.textContent).toBe(new Date(first).toLocaleString());
+  expect(screen.getByText(/Receipt time does not verify current client connectivity/)).toBeTruthy();
+  expect(screen.getByText(/Recorded timestamps .*started 10; ended 20/)).toBeTruthy();
+  now.mockReturnValue(second);
+  fireEvent.click(load);
+  expect(receipt()?.getAttribute('datetime')).toBe(new Date(first).toISOString());
+  expect(screen.getByText(/^Run: run-1/)).toBeTruthy();
+  expect(screen.getByText(/potentially stale/)).toBeTruthy();
+  if (ending === 'cancel') fireEvent.click(screen.getByRole('button', {name: /Cancel waiting/}));
+  else if (ending === 'disconnect') view.rerender(<ConnectionActivity clientId="codex" connected={false} />);
+  else await act(async () => {
+    if (ending === 'malformed') requests[1].resolve(new Response('{}'));
+    else requests[1].reject(new Error('unavailable'));
+  });
+  expect(receipt()?.getAttribute('datetime')).toBe(new Date(first).toISOString());
+  expect(screen.getByText(/^Run: run-1/)).toBeTruthy();
+  expect(screen.getByText(/potentially stale/)).toBeTruthy();
+  view.rerender(<ConnectionActivity clientId="codex" connected />);
+  expect(fetcher).toHaveBeenCalledTimes(2);
+  fireEvent.click(load);
+  if (ending === 'cancel' || ending === 'disconnect') {
+    await act(async () => requests[1].resolve(new Response(JSON.stringify({...snapshot, attempts: []}))));
+    expect(screen.getByText('Loading recorded activity…')).toBeTruthy();
+    expect(receipt()?.getAttribute('datetime')).toBe(new Date(first).toISOString());
+    expect(screen.getByText(/^Run: run-1/)).toBeTruthy();
+  }
+  await act(async () => requests[2].resolve(new Response(JSON.stringify({...snapshot, attempts: []}))));
+  expect(receipt()?.getAttribute('datetime')).toBe(new Date(second).toISOString());
+  expect(screen.queryByText(/^Run: run-1/)).toBeNull();
+  expect(screen.getByText(/No recorded activity for this declared client/)).toBeTruthy();
+  expect(screen.queryByText(/potentially stale/)).toBeNull();
+  expect(fetcher).toHaveBeenCalledTimes(3);
+});
+
+test('an initial validated empty snapshot has a browser receipt time', async () => {
+  const received = Date.parse('2026-02-01T12:00:00Z');
+  vi.spyOn(Date, 'now').mockReturnValue(received);
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({...snapshot, attempts: []}))));
+  const view = render(<ConnectionActivity clientId="codex" connected />);
+  fireEvent.click(screen.getByRole('button', {name: 'Load recorded activity'}));
+  await screen.findByText(/No recorded activity for this declared client/);
+  expect(view.container.querySelector('time')?.getAttribute('datetime')).toBe(new Date(received).toISOString());
 });

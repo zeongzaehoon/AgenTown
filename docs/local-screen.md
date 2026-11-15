@@ -5783,3 +5783,41 @@ passive reconnection, focus and StrictMode replay. Scoped commands are
 This isolated implementation workspace has no frontend dependencies installed;
 scoped execution, supervisor verification and browser exercise are pending.
 Live provider calls are skipped, not passed.
+
+### Recorded activity snapshot receipt time (C147-T1)
+
+Launch `agentown-web --database /absolute/path/to/existing-product.sqlite3 --port 8765`,
+open <http://127.0.0.1:8765>, connect the workspace, then open **Connections**.
+No credentials or live provider calls are required; this uses the existing
+read-only recorded activity endpoint.
+
+1. Before choosing **Load recorded activity**, there is no snapshot receipt time.
+   Load explicitly. A validated response shows **Entire recorded activity snapshot
+   received by this browser** with a localized semantic `time` element and an ISO
+   `datetime` attribute, even if the snapshot contains no attempts. This is separate
+   from each Run's recorded start/end timestamps and covers all sources, regardless
+   of the selected client filter.
+2. Delay the activity request using browser developer tools and load again. The
+   prior records and receipt time remain visible with potentially stale messaging.
+   Choose **Cancel waiting for recorded activity** or disconnect the workspace:
+   both remain retained and stale. Reconnect without an automatic activity reload.
+3. Using a temporary response override for `/api/connections/v1/activity`, return
+   malformed JSON/schema or simulate a failed request. The previous receipt time
+   and records remain stale. Remove the override and explicitly load again: only
+   a validated successful response replaces records and receipt time together.
+4. With a delayed response, cancel and immediately load again. An abandoned response
+   must not change either the retained records or receipt time, or finish the new
+   loading state. The successful explicit reload replaces both, including when its
+   validated snapshot is empty.
+
+Receipt time is the browser's local clock observation after validation, not a
+server freshness guarantee. It proves neither current client connectivity,
+authenticated identity nor result quality. Changing the client filter does not
+refresh it.
+
+Deterministic interaction cases in `frontend/src/ConnectionActivity.test.tsx` use
+controlled browser times and deferred responses for these boundaries. Scoped
+checks, when frontend dependencies are available: `cd frontend`,
+`npx tsc --noEmit`, and `npx vitest run src/ConnectionActivity.test.tsx`.
+This implementation invocation did not perform the manual browser exercise;
+supervisor browser validation remains pending.

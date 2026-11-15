@@ -29,7 +29,8 @@ export interface ActivityNavigation {
   onOpenRecordedTask?: (request: RecordedAttemptNavigation) => void;
 }
 export function ConnectionActivity({clientId, connected, savedTaskIds = [], onOpenRecordedTask}: ActivityNavigation & {clientId: string; connected: boolean}) {
-  const [data, setData] = useState<Activity | null>(null);
+  const [snapshot, setSnapshot] = useState<{activity: Activity; receivedAt: string} | null>(null);
+  const data = snapshot?.activity;
   const [pending, setPending] = useState(false);
   const [unavailable, setUnavailable] = useState(false);
   const [stale, setStale] = useState(false);
@@ -95,7 +96,7 @@ export function ConnectionActivity({clientId, connected, savedTaskIds = [], onOp
       if (!isActivity(next)) throw new Error('Invalid recorded activity');
       const focused = document.activeElement;
       previousFocus.current = focused instanceof HTMLElement && content.current?.contains(focused) ? focused : null;
-      setData(next); setStale(false);
+      setSnapshot({activity: next, receivedAt: new Date(Date.now()).toISOString()}); setStale(false);
     } catch {
       if (request.current === controller && !controller.signal.aborted) { setUnavailable(true); setStale(true); }
     } finally {
@@ -132,6 +133,7 @@ export function ConnectionActivity({clientId, connected, savedTaskIds = [], onOp
       {data && (stale || pending) && <p>Previous recorded activity observation — potentially stale.</p>}
       {data && !pending && !matching.length && <p>No recorded activity for this declared client in the loaded recent snapshot. This does not prove the client was never used.</p>}
     </div>
+    {snapshot && <p>Entire recorded activity snapshot received by this browser: <time dateTime={snapshot.receivedAt}>{new Date(snapshot.receivedAt).toLocaleString()}</time>. Receipt time does not verify current client connectivity, authenticated identity or result quality.</p>}
     {!!matching.length && <ul aria-label="Selected client recorded attempts">{matching.map(row)}</ul>}
     {!!unclassified.length && <><h4>Unrecognized or missing declared source — not attributed to this client</h4><ul aria-label="Unclassified recorded attempts">{unclassified.map(row)}</ul></>}
   </section>;
