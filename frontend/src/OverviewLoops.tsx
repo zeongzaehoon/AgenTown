@@ -14,14 +14,24 @@ function useSessionRemoval(owner: string) {
   const list = useRef<HTMLUListElement>(null);
   const destination = useRef<HTMLButtonElement>(null);
   const [announcement, setAnnouncement] = useState('');
-  function accept(sessions: LoopSession[]) {
+  function accept({sessions, attempts}: LoopInspection) {
     const surviving = new Set(sessions.map(session => session.session_id));
     const removed = Array.from(list.current?.children ?? []).filter(row =>
       !surviving.has((row as HTMLElement).dataset.sessionId ?? ''));
-    if (removed.some(row => row.contains(document.activeElement))) destination.current?.focus();
-    setAnnouncement(removed.length
-      ? `${owner}: ${removed.length} recorded Loop session${removed.length === 1 ? '' : 's'} removed from this inspection. ${sessions.length ? 'Remaining sessions are available below.' : 'No recorded sessions remain.'}`
-      : '');
+    const focused = document.activeElement;
+    const attempt = focused instanceof HTMLElement ? focused.closest<HTMLButtonElement>('button[data-run-id]') : null;
+    const row = attempt?.closest<HTMLElement>('li[data-session-id]');
+    const sessionId = row?.dataset.sessionId;
+    const runId = attempt?.dataset.runId;
+    const removedAttempt = !!row && list.current?.contains(row) && surviving.has(sessionId ?? '')
+      && !!runId && !attempts.some(value => value.session_id === sessionId && value.run_id === runId);
+    if (removed.some(row => row.contains(focused))) destination.current?.focus();
+    else if (removedAttempt) row?.querySelector<HTMLButtonElement>('button[data-attempt-disclosure]')?.focus();
+    const sessionNotice = removed.length
+      ? `${owner}: ${removed.length} recorded Loop session${removed.length === 1 ? '' : 's'} removed from this inspection. ${sessions.length ? 'Remaining sessions are available below.' : 'No recorded sessions remain.'}` : '';
+    const attemptNotice = removedAttempt
+      ? `${owner}: recorded Run ${runId} removed from Loop ${sessionId}. Focus returned to its expanded attempt details control.` : '';
+    setAnnouncement([sessionNotice, attemptNotice].filter(Boolean).join(' '));
   }
   return {list, destination, announcement, accept};
 }
@@ -83,7 +93,7 @@ export function OverviewLoops({workspace, connected, onOpenWork, onOpenSession, 
       const generation = epoch.current;
       try {
         const value = loopInspection(await api<unknown>('/api/loops/v1', {}, controller.signal, 'GET'));
-        if (live && generation === epoch.current) { removal.accept(value.sessions); inspectedAt.current = Date.now(); setNow(Date.now()); setInspection(value); setControl(value.control ?? null); setStatus('ready'); }
+        if (live && generation === epoch.current) { removal.accept(value); inspectedAt.current = Date.now(); setNow(Date.now()); setInspection(value); setControl(value.control ?? null); setStatus('ready'); }
       } catch (error) { if (live && generation === epoch.current) { setStatus('unavailable'); setControl(error instanceof ApiError ? error.control ?? null : null); } }
       finally { pending = false; }
     }
@@ -118,7 +128,7 @@ export function OverviewLoops({workspace, connected, onOpenWork, onOpenSession, 
           : busy ? 'A stop request is pending. Wait, then inspect again.'
           : !fresh ? 'Fresh inspection required. Inspect Loop sessions again or wait for a successful refresh.'
           : !canControl(control) ? controlText(control) : 'Available by explicit action only. The server checks ownership again.'}</p>
-        <button type="button" aria-expanded={expanded.has(session.session_id)} aria-controls={`overview-attempts-${session.session_id}`}
+        <button data-attempt-disclosure type="button" aria-expanded={expanded.has(session.session_id)} aria-controls={`overview-attempts-${session.session_id}`}
           onClick={() => setExpanded(previous => {
             const next = new Set(previous);
             if (next.has(session.session_id)) next.delete(session.session_id); else next.add(session.session_id);
@@ -181,7 +191,7 @@ function CompanyMcpLoops({workspace, connected, onOpenSession, onOpenRecordedTas
       const result = await inspectCompanyLoops(controller.signal);
       if (generation !== revision.current) return;
       if (!result.inspection) {setStatus('Retained local MCP inspection unavailable. Previous records, if any, are stale. Inspect again.'); return;}
-      removal.accept(result.inspection.sessions);
+      removal.accept(result.inspection);
       setInspection(result.inspection); setFresh(true); inspectedAt.current = Date.now();
       setStatus(result.inspection.sessions.length ? 'Recorded local MCP sessions loaded.' : 'No recorded local MCP sessions.');
       expiry.current = setTimeout(() => { if (generation === revision.current) {setFresh(false); setStatus('Local MCP inspection stale. Inspect again for current persisted state and authority.');} }, 2400);
@@ -241,7 +251,7 @@ function CompanyMcpLoops({workspace, connected, onOpenSession, onOpenRecordedTas
             : !canControl(inspection.control) ? controlText(inspection.control) : 'Stop this exact session by explicit action. Ownership is checked again by the server.'}</p>
           <p>{sourceText(s.declared_source)}</p>
           <p>{loopLabel(s, inspection.attempts)} · Admitted: {s.admitted} / {s.preview.max_iterations}</p>
-          <button type="button" aria-expanded={expanded.has(s.session_id)} aria-controls={`mcp-attempts-${s.session_id}`}
+          <button data-attempt-disclosure type="button" aria-expanded={expanded.has(s.session_id)} aria-controls={`mcp-attempts-${s.session_id}`}
             onClick={() => setExpanded(previous => {
               const next = new Set(previous);
               if (next.has(s.session_id)) next.delete(s.session_id); else next.add(s.session_id);
@@ -306,7 +316,7 @@ function OpenRecordedAttempt({connected, available, taskId, runId, onOpen}: {
 }) {
   const canOpen = connected && available && !!onOpen;
   return <>
-    <button type="button" aria-disabled={!canOpen} onClick={() => {
+    <button data-run-id={runId} type="button" aria-disabled={!canOpen} onClick={() => {
       if (canOpen) onOpen?.({taskId, runId});
     }}>Open saved Task: {taskId} · Run: {runId}</button>
     {!canOpen && <p>{!connected ? 'Reconnect before opening saved work.' : !available

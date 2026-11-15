@@ -1036,3 +1036,76 @@ test.each(['web', 'local MCP'])('%s exact-attempt actions retain details and gua
   expect(screen.getByText('Recorded output 2')).toBeTruthy();
   expect(requests).toEqual(before);
 });
+
+test.each(['web', 'local'] as const)('%s accepted attempt removal recovers within the surviving expanded Company session only', async owner => {
+  vi.useFakeTimers({toFake: ['setInterval', 'clearInterval']});
+  const local = owner === 'local';
+  const saved = {...companySession(1), admitted: 2};
+  const original = [1, 2].map(n => ({session_id: saved.session_id, run_id: uid(100 + n), ordinal: n, execution: {output: `Output ${n}`, error: null}}));
+  let attempts = original;
+  let mode = 'valid';
+  let resolveOld!: (response: Response) => void;
+  const response = () => local
+    ? {...companyReply([saved]), data: {...companyReply([saved]).data, attempts}}
+    : {...initial(), sessions: [saved], attempts};
+  const fetcher = vi.fn(async (path: string, init?: RequestInit) => {
+    if (local && path === '/api/loops/v1') return new Response(JSON.stringify({...initial(), sessions: [], attempts: []}));
+    if (path !== '/api/loops/v1' && path !== '/api/connections/v1/loops/inspect-company') return new Response(JSON.stringify({teams: [], loops: [], hooks: [], skills: []}));
+    expect(path).toBe(local ? '/api/connections/v1/loops/inspect-company' : '/api/loops/v1');
+    expect(init?.method).toBe(local ? 'POST' : 'GET');
+    if (mode === 'held') return new Promise<Response>(resolve => {resolveOld = resolve;});
+    if (mode === 'failed') throw new Error('offline');
+    return new Response(JSON.stringify(mode === 'malformed' ? {schema_version: 1, sessions: [saved], attempts: 'invalid'} : response()));
+  });
+  vi.stubGlobal('fetch', fetcher);
+  const {CompanyOverview} = await import('./CompanyOverview');
+  const open = vi.fn();
+  const props = {error: '', workspace: {...workspace, work: [{...workspace.work[0], id: saved.preview.task_id}]}, onOpenWork: open, onOpenRecordedTask: open};
+  const view = render(<><button>Outside Company</button><CompanyOverview {...props} connected /></>);
+  await act(async () => {});
+  const inspect = screen.getByRole('button', {name: local ? 'Inspect company Loops through local MCP' : 'Inspect Loop sessions again'});
+  const refresh = async () => {await act(async () => {fireEvent.click(inspect);});};
+  if (local) await refresh();
+  const disclosure = screen.getByRole('button', {name: `Attempt details for ${local ? 'local MCP ' : ''}Loop ${saved.session_id}`});
+  fireEvent.click(disclosure);
+  const action = (n: number) => screen.getByRole('button', {name: `Open saved Task: ${saved.preview.task_id} · Run: ${uid(100 + n)}`});
+  const notice = screen.getByLabelText(local ? 'Local MCP Loop session removals' : 'Web Loop session removals');
+  // Invalid inspections retain the focused attempt and do not report removal.
+  for (const failure of ['failed', 'malformed']) {
+    action(1).focus(); const focused = document.activeElement;
+    mode = failure; await refresh();
+    expect(document.activeElement).toBe(focused);
+    expect(notice.textContent).toBe('');
+  }
+  // An old connection's valid removal is rejected before focus handling.
+  mode = 'held'; action(1).focus(); const focused = document.activeElement;
+  await refresh();
+  view.rerender(<><button>Outside Company</button><CompanyOverview {...props} connected={false} /></>);
+  mode = 'valid';
+  view.rerender(<><button>Outside Company</button><CompanyOverview {...props} connected /></>);
+  await act(async () => {});
+  if (local) await refresh();
+  attempts = [];
+  await act(async () => {resolveOld(new Response(JSON.stringify(response())));});
+  expect(document.activeElement).toBe(focused);
+  expect(notice.textContent).toBe('');
+  // Keep focus on a surviving attempt and an outside control during removal.
+  for (const target of ['surviving', 'outside', 'removed', 'last']) {
+    attempts = original; await refresh();
+    const focus = target === 'outside' ? screen.getByRole('button', {name: 'Outside Company'}) : action(target === 'surviving' ? 2 : 1);
+    focus.focus();
+    attempts = target === 'last' ? [] : [original[1]];
+    if (!local && target === 'removed') await act(async () => {await vi.advanceTimersByTimeAsync(800);});
+    else await refresh();
+    const recovered = target === 'removed' || target === 'last';
+    expect(document.activeElement).toBe(recovered ? disclosure : focus);
+    expect(disclosure.getAttribute('aria-expanded')).toBe('true');
+    expect(screen.getByRole('region', {name: `Attempts for ${local ? 'local MCP ' : ''}Loop ${saved.session_id}`})).toBeTruthy();
+    expect(notice.textContent).toBe(recovered ? `${local ? 'Local MCP' : 'Web'} Loop activity: recorded Run ${uid(101)} removed from Loop ${saved.session_id}. Focus returned to its expanded attempt details control.` : '');
+    if (target === 'last') expect(screen.getByText('No recorded attempts for this session. Provider completion unknown.')).toBeTruthy();
+  }
+  expect(open).not.toHaveBeenCalled();
+  expect(fetcher.mock.calls.every(([path, init]) => path === '/api/loops/v1' ? init?.method === 'GET'
+    : path === '/api/connections/v1/loops/inspect-company' ? init?.method === 'POST'
+    : ['/api/teams', '/api/config/v1/loops', '/api/config/v1/hooks', '/api/config/v1/skills'].includes(path) && init?.method === 'GET')).toBe(true);
+});

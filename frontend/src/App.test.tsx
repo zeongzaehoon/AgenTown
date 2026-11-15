@@ -1908,3 +1908,29 @@ test.each(['Skill', 'Hook'])('Company %s recorded history recovers only on accep
   expect(vi.mocked(fetch).mock.calls.every(([path, options]) => path === '/api/state' ? options?.method === 'POST'
     : ['/api/config/v1/skills', '/api/config/v1/hooks', '/api/config/v1/loops', '/api/loops/v1', '/api/teams'].includes(String(path)) && options?.method === 'GET')).toBe(true);
 });
+
+test('Company Loop polling returns a removed exact-Run control to its expanded session without dispatching work', async () => {
+  const polls: Array<() => void> = [];
+  vi.spyOn(window, 'setInterval').mockImplementation(callback => {polls.push(callback as () => void); return 0;});
+  const f = fixture({...initial(), work: [{id: 'task', input: 'Saved Loop work', status: 'pending', assignees: [], attempts: []}]});
+  const session = {session_id: 'session', state: 'active', admitted: 1, next_at: 0, provider: 'test', model: 'test',
+    preview: {schema_version: 1, preview_id: 'preview', policy_id: 'policy', policy_name: 'Saved policy', task_id: 'task', agent_id: 'employee', input: 'Saved Loop work', max_iterations: 2, interval_seconds: 60, expected_runs: 0, policy_enabled: true}};
+  let removed = false;
+  const transport = globalThis.fetch;
+  vi.stubGlobal('fetch', vi.fn((path: string, options: RequestInit) => path === '/api/loops/v1'
+    ? Promise.resolve(new Response(JSON.stringify({schema_version: 1, sessions: [session], attempts: removed ? [] : [{session_id: 'session', run_id: 'removed-run', ordinal: 1, execution: {output: 'Recorded output', error: null}}], control: {state: 'available', can_control: true, message: ''}, cancellation: ''})))
+    : transport(path, options)));
+  render(<App />); await connected();
+  const disclosure = await screen.findByRole('button', {name: 'Attempt details for Loop session'});
+  fireEvent.click(disclosure);
+  const action = screen.getByRole('button', {name: 'Open saved Task: task · Run: removed-run'});
+  action.focus(); removed = true;
+  act(() => polls.forEach(poll => poll()));
+  await waitFor(() => expect(document.activeElement).toBe(disclosure));
+  expect(disclosure.getAttribute('aria-expanded')).toBe('true');
+  expect(screen.getByRole('status', {name: 'Web Loop session removals'}).textContent).toContain('recorded Run removed-run removed from Loop session');
+  expect(screen.getByText('No recorded attempts for this session. Provider completion unknown.')).toBeTruthy();
+  expect(f.calls.every(call => call.path === '/api/state')).toBe(true);
+  expect(vi.mocked(fetch).mock.calls.every(([path, options]) => path === '/api/state' ? options?.method === 'POST'
+    : ['/api/config/v1/skills', '/api/config/v1/hooks', '/api/config/v1/loops', '/api/loops/v1', '/api/teams'].includes(String(path)) && options?.method === 'GET')).toBe(true);
+});

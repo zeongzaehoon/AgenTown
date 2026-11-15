@@ -5166,3 +5166,36 @@ The complete Python suite passed 524 tests with 2 skipped; the Rust suite passed
 46 tests, and all 17 harness tests passed. This invocation did not run browser
 interaction or live provider calls; live LLM validation is skipped under the
 user policy.
+
+### Recorded Loop attempt removal focus (C133-T1)
+
+Launch `agentown-web` and open **Company overview → Bounded Loop activity**
+with recorded web or retained local MCP sessions. For local MCP, first choose
+**Inspect company Loops through local MCP**. Live provider calls remain skipped.
+
+1. Expand **Attempt details for Loop …** (or **Attempt details for local MCP
+   Loop …**) and Tab to an attempt's **Open saved Task: … · Run: …** control.
+2. With an inspection fixture that removes that Run but retains its session,
+   allow the web inspection poll or request another retained local MCP company
+   inspection. Focus returns to that session's attempt disclosure. Its details
+   stay expanded, and the removal status announces the removed Run and Loop IDs.
+3. Repeat for the last attempt. The expanded session now shows **No recorded
+   attempts for this session. Provider completion unknown.** Saved session
+   settings remain inspectable.
+4. Repeat while focus is on a surviving attempt or an outside control. Focus
+   stays there. Failed, malformed, and old-connection inspection responses retain
+   the recorded attempts and neither announce removal nor recover focus.
+5. Check requests: inspection and focus recovery must never preview, execute,
+   retry, start, advance, or stop work. Opening saved work still requires an
+   explicit action and follows its exact Task/Run.
+
+The full supervisor profile passed 34 frontend test files with 1,391 tests,
+527 Python tests with 2 skipped, 46 Rust tests, 17 harness tests, and 38 Chromium
+browser interaction steps. Live LLM calls were skipped, not passed.
+
+Deterministic interaction coverage in `OverviewLoops.test.tsx` exercises both
+inspection owners through `CompanyOverview`, including accepted empty-attempt
+snapshots, surviving/outside focus, failed/malformed responses, and obsolete
+connection responses. Run `./node_modules/.bin/vitest run
+src/OverviewLoops.test.tsx src/App.test.tsx` from `frontend/` with dependencies
+available to repeat the focused interaction coverage.
