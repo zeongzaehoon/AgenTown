@@ -5695,3 +5695,36 @@ node_modules or local TypeScript/Vitest binaries, so scoped execution is pending
 `cd frontend && npx tsc --noEmit && npx vitest run src/Connections.test.tsx`.
 Supervisor verification and browser validation remain pending. Live provider
 calls are skipped, not passed.
+
+### Configuration changes while local checks are pending (C145)
+
+Launch `agentown-web`, open **Connections**, and select Codex. Use the temporary
+`localCheckRequests` fetch fixture in the disconnect exercise above, keeping
+`workspaceOffline = false`. These checks need no credentials or provider calls.
+
+1. Before installing the fixture, run both local checks once and note their
+   outcomes, counts and receipt times. After installing it, start both checks.
+   **Refresh setup** with an unchanged server configuration: both must stay
+   pending, with no additional local-check request.
+2. Switch **Platform**, then repeat with **Client**. Each change must end both
+   waits, enable their independent check buttons, and retain previous evidence
+   as potentially stale. Focus stays on the selected control. No check starts
+   automatically. Returning to the original selection must not revive a wait.
+3. Explicitly start a check for the displayed selection, change back, and start
+   another check. Resolve or reject an abandoned request using the fixture as
+   described above while the newest request is pending. It must not replace
+   outcomes, counts or receipt times, end the new wait, or allow duplicate
+   requests. Repeat for both checks and both late success and failure.
+4. Repeat by refreshing setup after a server configuration change (for example,
+   a different selected database in a separate test launch). A changed displayed
+   fragment ends waiting; refreshing the same fragment preserves waiting.
+   Deterministic interaction tests supply changed setup responses and changes
+   back without modifying your real settings.
+5. Restore `window.fetch = window.disconnectRecoveryFetch`, cancel outstanding
+   waits, and explicitly run each check again. Only accepted responses update
+   observations. Stopping waiting does not confirm server processing stopped;
+   an immediate real retry may report busy.
+
+Scoped interaction coverage: `cd frontend && npx vitest run src/Connections.test.tsx`.
+Supervisor frontend/build, ordinary Python and browser validation remain pending
+for this snapshot. Live provider calls remain skipped, not passed.

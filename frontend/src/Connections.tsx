@@ -138,12 +138,14 @@ function LocalDiagnostic({workspaceConnected, configuration}: {workspaceConnecte
     setCancelled(true);
     endWaiting();
   }
-  // Release ownership and admission during the disconnect commit, before an
-  // abandoned response can settle or an explicit retry can be admitted.
-  // Depend only on connection transitions: checks remain usable disconnected.
+  // Release ownership and admission in the configuration/disconnect commit.
+  // Returning to an earlier configuration cannot revive an abandoned request.
+  // An identical setup refresh leaves the current request alone.
+  const previousConfiguration = useRef(configuration);
   useLayoutEffect(() => {
-    if (!workspaceConnected) cancel();
-  }, [workspaceConnected]);
+    if (!workspaceConnected || previousConfiguration.current !== configuration) cancel();
+    previousConfiguration.current = configuration;
+  }, [workspaceConnected, configuration]);
   async function check() {
     if (lock.current) return;
     lock.current = true;
@@ -248,12 +250,14 @@ function SharedDataCheck({workspaceConnected, configuration}: {workspaceConnecte
     setCancelled(true);
     endWaiting();
   }
-  // Release ownership and admission during the disconnect commit, before an
-  // abandoned response can settle or an explicit retry can be admitted.
-  // Depend only on connection transitions: checks remain usable disconnected.
+  // Release ownership and admission in the configuration/disconnect commit.
+  // Returning to an earlier configuration cannot revive an abandoned request.
+  // An identical setup refresh leaves the current request alone.
+  const previousConfiguration = useRef(configuration);
   useLayoutEffect(() => {
-    if (!workspaceConnected) cancel();
-  }, [workspaceConnected]);
+    if (!workspaceConnected || previousConfiguration.current !== configuration) cancel();
+    previousConfiguration.current = configuration;
+  }, [workspaceConnected, configuration]);
   async function check() {
     if (lock.current) return;
     lock.current = true;
@@ -558,7 +562,7 @@ function Setup({workspaceConnected, openClient, active, ...navigation}: Activity
         <li><h4>Inspect and verify in {client.name}</h4>
           <p className="connection-guidance">{platform.inspection}</p>
           <p>Ask the client: Using AgenTown, list employees and saved work. Inspect the selected Task and its attempt history. Do not execute work.</p>
-          <LocalDiagnostic workspaceConnected={workspaceConnected} configuration={platform.configuration} /><SharedDataCheck workspaceConnected={workspaceConnected} configuration={platform.configuration} />
+          <LocalDiagnostic workspaceConnected={workspaceConnected} configuration={JSON.stringify([client.id, platform.id, platform.configuration])} /><SharedDataCheck workspaceConnected={workspaceConnected} configuration={JSON.stringify([client.id, platform.id, platform.configuration])} />
         </li>
         <li><h4>Recover if setup fails</h4><p className="connection-guidance">{data.recovery}</p></li>
       </ol>}

@@ -1049,6 +1049,8 @@ test.each(['diagnostic', 'shared-data'])('%s begun before a changed setup cannot
   await screen.findByLabelText('Client');
   const button = screen.getByRole('button', {name: check === 'diagnostic' ? 'Check local server' : 'Check shared data'});
   await user.click(button);
+  await act(async () => {resolve!(new Response(JSON.stringify(result)));});
+  await user.click(button);
   current.clients[0].platforms[0].configuration = 'new database';
   await user.click(screen.getByRole('button', {name: 'Refresh setup'}));
   current = structuredClone(setup);
@@ -1541,3 +1543,90 @@ test.each([
   expect(document.activeElement).toBe(outside);
   expect(requests[4].signal.aborted).toBe(true);
 });
+
+test.each(['diagnostic', 'shared-data'].flatMap(kind =>
+  ['platform', 'client', 'refresh'].flatMap(change =>
+    ['success', 'failure'].map(late => ({kind, change, late})))))(
+  '$kind releases on $change and changes back, isolating late $late during replacement',
+  async ({kind, change, late}) => {
+    const path = kind === 'diagnostic' ? diagnosticPath : sharedPath;
+    const label = kind === 'diagnostic' ? 'Check local server' : 'Check shared data';
+    const region = kind === 'diagnostic' ? 'Local server diagnostic' : 'Shared employee and work access';
+    const result = kind === 'diagnostic' ? diagnosticResult('passed') : sharedResult(7, 8);
+    const passed = kind === 'diagnostic' ? 'Local server diagnostic passed' : 'Shared-data check passed.';
+    const current = structuredClone(setup);
+    // Client/platform identity matters even when their fragments are identical.
+    for (const client of current.clients) for (const platform of client.platforms) platform.configuration = 'same server';
+    const requests: {resolve: (value: Response) => void; reject: (error: Error) => void; signal: AbortSignal}[] = [];
+    vi.stubGlobal('fetch', vi.fn((input: string, init?: RequestInit) => input === path
+      ? new Promise<Response>((resolve, reject) => requests.push({resolve, reject, signal: init!.signal as AbortSignal}))
+      : Promise.resolve(new Response(JSON.stringify(current)))));
+    const user = userEvent.setup();
+    render(<Connections workspaceConnected openClient={{id: 'codex'}} />);
+    await screen.findByLabelText('Client');
+    const section = screen.getByRole('region', {name: region});
+    const scope = within(section);
+    const button = scope.getByRole('button', {name: label});
+    const other = screen.getByRole('button', {name: kind === 'diagnostic' ? 'Check shared data' : 'Check local server'});
+    const times = () => Array.from(section.querySelectorAll('time')).map(time => time.dateTime);
+    fireEvent.click(button);
+    await act(async () => requests[0].resolve(new Response(JSON.stringify(result))));
+    const retained = times();
+    expect(retained).toHaveLength(kind === 'diagnostic' ? 1 : 2);
+    fireEvent.click(button);
+    // Identical refresh must preserve ownership, pending UI and admission.
+    await user.click(screen.getByRole('button', {name: 'Refresh setup'}));
+    await waitFor(() => expect((screen.getByRole('button', {name: 'Refresh setup'}) as HTMLButtonElement).disabled).toBe(false));
+    expect(requests[1].signal.aborted).toBe(false);
+    expect(section.getAttribute('aria-busy')).toBe('true');
+    fireEvent.click(button);
+    expect(requests).toHaveLength(2);
+    const changeConfiguration = async (back: boolean) => {
+      if (change === 'refresh') {
+        current.clients[0].platforms[0].configuration = back ? 'same server' : 'changed database';
+        await user.click(screen.getByRole('button', {name: 'Refresh setup'}));
+        await screen.findByDisplayValue(back ? 'same server' : 'changed database');
+      } else {
+        const control = screen.getByLabelText(change === 'client' ? 'Client' : 'Platform');
+        control.focus();
+        await user.selectOptions(control, change === 'client' ? back ? 'codex' : 'claude-code' : back ? 'macos' : 'windows');
+        expect(document.activeElement).toBe(control);
+      }
+    };
+    await changeConfiguration(false);
+    expect(requests[1].signal.aborted).toBe(true);
+    expect(section.getAttribute('aria-busy')).toBe('false');
+    expect((button as HTMLButtonElement).disabled).toBe(false);
+    expect((other as HTMLButtonElement).disabled).toBe(false);
+    expect(scope.getByText(/This does not confirm that the server process stopped/)).toBeTruthy();
+    expect(scope.getByText(passed)).toBeTruthy();
+    expect(times()).toEqual(retained);
+    expect(scope.getAllByText(/Previous .*potentially stale/).length).toBeGreaterThan(0);
+    expect(requests).toHaveLength(2); // No automatic retry.
+    // Explicit check of the displayed replacement configuration is immediately admitted.
+    fireEvent.click(button);
+    fireEvent.click(button);
+    expect(requests).toHaveLength(3);
+    await changeConfiguration(true);
+    expect(requests[2].signal.aborted).toBe(true);
+    expect(requests).toHaveLength(3);
+    expect(times()).toEqual(retained);
+    fireEvent.click(button);
+    expect(requests).toHaveLength(4);
+    await act(async () => {
+      if (late === 'failure') requests[1].reject(new Error('abandoned transport failure'));
+      else requests[1].resolve(new Response(JSON.stringify(kind === 'diagnostic' ? diagnosticResult('failed') : sharedResult(99, 99))));
+      requests[2].resolve(new Response(JSON.stringify(result)));
+    });
+    expect(section.getAttribute('aria-busy')).toBe('true');
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+    expect(times()).toEqual(retained);
+    fireEvent.click(button);
+    expect(requests).toHaveLength(4); // Abandoned finally blocks cannot unlock the replacement.
+    await act(async () => requests[3].resolve(new Response(JSON.stringify(result))));
+    expect(scope.getByText(passed)).toBeTruthy();
+    expect(scope.queryByText(/Previous .*potentially stale/)).toBeNull();
+    if (kind === 'shared-data') expect(scope.getByText('Employees: 7. Saved work: 8.')).toBeTruthy();
+    expect((other as HTMLButtonElement).disabled).toBe(false);
+  },
+);
