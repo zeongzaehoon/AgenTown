@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, expect, test, vi } from 'vitest';
 import { ConnectionActivity, isActivity } from './ConnectionActivity';
@@ -152,4 +152,114 @@ test('client filtering recovers only removed activity focus, retaining surviving
   expect(open).not.toHaveBeenCalled();
   expect(fetcher).toHaveBeenCalledTimes(1);
   expect(fetcher.mock.calls[0][0]).toBe('/api/connections/v1/activity');
+});
+
+
+test.each(['success', 'failure'])('keyboard cancellation releases initial loading and isolates immediate reload from late %s', async late => {
+  let resolve!: (response: Response) => void;
+  let reject!: (reason: Error) => void;
+  let resolveReload!: (response: Response) => void;
+  const fetcher = vi.fn().mockImplementationOnce(() => new Promise<Response>((yes, no) => {resolve = yes; reject = no;}))
+    .mockImplementationOnce(() => new Promise<Response>(yes => {resolveReload = yes;}));
+  vi.stubGlobal('fetch', fetcher);
+  const user = userEvent.setup();
+  render(<ConnectionActivity clientId="codex" connected />);
+  const load = screen.getByRole('button', {name: 'Load recorded activity'});
+  await user.click(load);
+  await user.tab();
+  expect(document.activeElement).toBe(screen.getByRole('button', {name: /Cancel waiting/}));
+  await user.keyboard('{Enter}');
+  expect(document.activeElement).toBe(load);
+  expect(screen.getByRole('status').textContent).toContain('Stopped waiting for recorded activity');
+  expect(screen.getByRole('status').textContent).toContain('does not confirm that the server stopped');
+  expect(screen.getByText('Recorded activity not loaded.')).toBeTruthy();
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  expect(fetcher.mock.calls[0][1].signal.aborted).toBe(true);
+  fireEvent.click(load);
+  await act(async () => {
+    if (late === 'success') resolve(new Response(JSON.stringify(snapshot)));
+    else reject(new Error('late failure'));
+  });
+  expect(screen.getByText('Loading recorded activity…')).toBeTruthy();
+  fireEvent.click(load);
+  expect(fetcher).toHaveBeenCalledTimes(2);
+  await act(async () => resolveReload(new Response(JSON.stringify(snapshot))));
+  expect(screen.getByText(/^Run: run-1/)).toBeTruthy();
+  expect(screen.queryByText(/potentially stale/)).toBeNull();
+
+});
+
+test.each(['success', 'failure'])('retained cancellation protects a pending reload against late %s and disconnect', async late => {
+  let resolve!: (response: Response) => void;
+  let reject!: (reason: Error) => void;
+  let finish!: (response: Response) => void;
+  const fetcher = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify(snapshot)))
+    .mockImplementationOnce(() => new Promise<Response>((yes, no) => {resolve = yes; reject = no;}))
+    .mockImplementationOnce(() => new Promise<Response>(yes => {finish = yes;}));
+  vi.stubGlobal('fetch', fetcher);
+  const view = render(<ConnectionActivity clientId="codex" connected />);
+  const load = screen.getByRole('button', {name: 'Load recorded activity'});
+  await userEvent.setup().click(load);
+  await screen.findByText(/^Run: run-1/);
+  fireEvent.click(load);
+  act(() => {
+    fireEvent.click(screen.getByRole('button', {name: /Cancel waiting/}));
+    expect(fetcher.mock.calls[1][1].signal.aborted).toBe(true);
+    fireEvent.click(load);
+  });
+  expect(screen.getByText(/potentially stale/)).toBeTruthy();
+  await act(async () => {
+    if (late === 'success') resolve(new Response(JSON.stringify({...snapshot, attempts: []})));
+    else reject(new Error('late failure'));
+  });
+  expect(screen.getByText('Loading recorded activity…')).toBeTruthy();
+  expect(screen.queryByText(/Recorded activity unavailable/)).toBeNull();
+  expect(screen.getByText(/^Run: run-1/)).toBeTruthy();
+  fireEvent.click(load);
+  expect(fetcher).toHaveBeenCalledTimes(3);
+  screen.getByRole('button', {name: /Cancel waiting/}).focus();
+  view.rerender(<ConnectionActivity clientId="codex" connected={false} />);
+  expect(document.activeElement).toBe(load);
+  expect(screen.queryByRole('button', {name: /Cancel waiting/})).toBeNull();
+  await act(async () => finish(new Response(JSON.stringify({...snapshot, attempts: []}))));
+  view.rerender(<ConnectionActivity clientId="codex" connected />);
+  expect(screen.getByText(/^Run: run-1/)).toBeTruthy();
+  expect(screen.getByText(/potentially stale/)).toBeTruthy();
+  expect(fetcher).toHaveBeenCalledTimes(3);
+});
+
+test.each(['cancel', 'success', 'failure', 'disconnect'])('%s recovers disappearing cancel focus only while visible and still owned', async ending => {
+  const requests: {resolve: (response: Response) => void; reject: (reason: Error) => void}[] = [];
+  vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>((resolve, reject) => requests.push({resolve, reject}))));
+  const ui = (hidden = false, connected = true) => <><input aria-label="Outside" /><div hidden={hidden}>
+    <ConnectionActivity clientId="codex" connected={connected} />
+  </div></>;
+  const view = render(ui());
+  async function end(hidden = false) {
+    if (ending === 'cancel') fireEvent.click(screen.getByRole('button', {name: /Cancel waiting/, hidden}));
+    else if (ending === 'disconnect') view.rerender(ui(hidden, false));
+    else await act(async () => {
+      const request = requests[requests.length - 1];
+      if (ending === 'success') request.resolve(new Response(JSON.stringify(snapshot)));
+      else request.reject(new Error('failure'));
+    });
+  }
+  const load = screen.getByRole('button', {name: 'Load recorded activity'});
+  fireEvent.click(load);
+  screen.getByRole('button', {name: /Cancel waiting/}).focus();
+  await end();
+  expect(document.activeElement).toBe(load);
+  view.rerender(ui());
+  fireEvent.click(load);
+  const outside = screen.getByLabelText('Outside'); outside.focus();
+  await end();
+  expect(document.activeElement).toBe(outside);
+  view.rerender(ui());
+  fireEvent.click(load);
+  screen.getByRole('button', {name: /Cancel waiting/}).focus();
+  view.rerender(ui(true));
+  await end(true);
+  expect(document.activeElement).not.toBe(load);
+  view.rerender(ui());
+  expect(document.activeElement).not.toBe(load);
 });

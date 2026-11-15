@@ -5454,3 +5454,62 @@ the focused Check button resets the tab starting point. Consolidated tests/build
 and applicable browser validation remain pending under the supervisor-selected
 verification profile. Live LLM calls remain skipped, not passed, under the current
 user policy.
+
+### Cancel waiting for recorded integration activity (C140-T1)
+
+Launch `agentown-web --database /absolute/path/product.sqlite3 --port 8765`
+(or `uv run --directory python --locked agentown-web --database
+/absolute/path/product.sqlite3 --port 8765` from the checkout). Open
+<http://127.0.0.1:8765>, connect the workspace if needed, and open **Connections**.
+No credentials, external client setup, or live provider calls are needed.
+Use an existing activity fixture from the recorded-activity steps above to
+exercise retained records; an empty local database also supports cancellation.
+
+For a visible waiting interval, paste this temporary wrapper into the browser
+console. It delays only the activity response, preserving the real read-only
+endpoint and deliberately ignoring abort so a late response can be observed.
+
+```js
+window.originalActivityCancelFetch = window.fetch;
+window.fetch = async (input, init) => {
+  if (String(input) !== '/api/connections/v1/activity') {
+    return window.originalActivityCancelFetch(input, init);
+  }
+  const response = await window.originalActivityCancelFetch(input, {...init, signal: undefined});
+  const body = await response.text();
+  await new Promise(resolve => setTimeout(resolve, 5000));
+  return new Response(body, {status: response.status, headers: response.headers});
+};
+```
+
+1. Choose **Load recorded activity**, Tab to **Cancel waiting for recorded
+   activity**, and press Enter or Space. Waiting ends immediately; focus returns
+   to Load recorded activity. The polite notice explains that server processing
+   may continue and that reloading requires an explicit action. No connection
+   readiness changes and no automatic reload occurs. Without an earlier snapshot,
+   activity remains not loaded.
+2. Immediately choose **Load recorded activity** again. The cancelled response
+   must not replace evidence, end the newer wait, or admit duplicate loads.
+   Let the new request finish. Repeat cancellation after a successful load:
+   previous records remain visible and labeled potentially stale until another
+   explicit load succeeds. Late failure must likewise leave the newer wait alone
+   (covered with controlled rejections in the deterministic tests).
+3. Leave focus on Cancel waiting until success or failure: focus returns to Load
+   recorded activity. Move focus to Client before completion and confirm it stays
+   there. Switch away from Connections while pending: completion must not focus
+   its hidden panel or steal focus when Connections is shown again.
+4. Disconnect while loading. Waiting ends and previous records stay potentially
+   stale. Reconnect explicitly: no activity reload is replayed. Loading remains
+   unavailable while disconnected; recorded activity never establishes client
+   readiness.
+5. Restore `window.fetch = window.originalActivityCancelFetch` after the exercise.
+
+`frontend/src/ConnectionActivity.test.tsx` adds deterministic interaction cases
+for initial and retained cancellation, keyboard activation, synchronous reload,
+duplicate admission, late success/failure, disconnect, completion focus, outside
+focus and hidden-panel behavior. Run with installed frontend dependencies:
+`cd frontend && npx tsc --noEmit && npx vitest run src/ConnectionActivity.test.tsx`.
+This implementation invocation could not execute these checks because its
+isolated checkout has no frontend node_modules. Supervisor change-based
+verification and applicable browser validation remain pending. Live provider
+validation is skipped, not passed, under the current user policy.

@@ -33,6 +33,20 @@ export function ConnectionActivity({clientId, connected, savedTaskIds = [], onOp
   const [pending, setPending] = useState(false);
   const [unavailable, setUnavailable] = useState(false);
   const [stale, setStale] = useState(false);
+  const [cancelled, setCancelled] = useState(false);
+  const loadControl = useRef<HTMLButtonElement | null>(null);
+  const cancelControl = useRef<HTMLButtonElement | null>(null);
+  const restoreLoadFocus = useRef(false);
+  useLayoutEffect(() => {
+    if (!pending && restoreLoadFocus.current) {
+      restoreLoadFocus.current = false;
+      if (!loadControl.current?.closest('[hidden]') && document.activeElement === document.body) loadControl.current?.focus();
+    }
+  }, [pending]);
+  function endWaiting() {
+    restoreLoadFocus.current = document.activeElement === cancelControl.current;
+    setPending(false);
+  }
   const heading = useRef<HTMLHeadingElement | null>(null);
   const content = useRef<HTMLElement | null>(null);
   const previousFocus = useRef<HTMLElement | null>(null);
@@ -56,26 +70,37 @@ export function ConnectionActivity({clientId, connected, savedTaskIds = [], onOp
   const lock = useRef(false);
   useLayoutEffect(() => {
     if (!connected) {
-      request.current?.abort(); lock.current = false; setPending(false); setStale(true);
+      const controller = request.current; request.current = null;
+      controller?.abort(); lock.current = false; endWaiting(); setStale(true);
     }
-    return () => { request.current?.abort(); lock.current = false; };
+    return () => { const controller = request.current; request.current = null; controller?.abort(); lock.current = false; };
   }, [connected]);
+  function cancel() {
+    const controller = request.current;
+    if (!controller) return;
+    request.current = null;
+    lock.current = false;
+    controller.abort();
+    setCancelled(true); setStale(true);
+    endWaiting();
+  }
   async function load() {
     if (!connected || lock.current) return;
     lock.current = true;
     const controller = new AbortController(); request.current = controller;
-    setPending(true); setUnavailable(false);
+    setPending(true); setUnavailable(false); setCancelled(false);
     try {
       const next = await api<unknown>('/api/connections/v1/activity', {limit: 50}, controller.signal);
-      if (controller.signal.aborted) return;
+      if (request.current !== controller || controller.signal.aborted) return;
       if (!isActivity(next)) throw new Error('Invalid recorded activity');
       const focused = document.activeElement;
       previousFocus.current = focused instanceof HTMLElement && content.current?.contains(focused) ? focused : null;
       setData(next); setStale(false);
     } catch {
-      if (!controller.signal.aborted) { setUnavailable(true); setStale(true); }
+      if (request.current === controller && !controller.signal.aborted) { setUnavailable(true); setStale(true); }
     } finally {
-      if (!controller.signal.aborted) { lock.current = false; setPending(false); }
+      // Only this request may release admission or recover its disappearing control's focus.
+      if (request.current === controller) { request.current = null; lock.current = false; endWaiting(); }
     }
   }
   const matching = data?.attempts.filter(a => a.integration === clientId) ?? [];
@@ -97,8 +122,10 @@ export function ConnectionActivity({clientId, connected, savedTaskIds = [], onOp
     aria-label="Recorded integration activity" aria-busy={pending}>
     <h3 ref={heading} tabIndex={-1}>Recorded integration activity</h3>
     <p>Persisted Run records only. Declared source is untrusted historical metadata, not authenticated client identity. Activity does not verify current connection, configuration or result quality. Copying setup and passing local checks cannot create this evidence.</p>
-    <button type="button" aria-disabled={pending || !connected} onClick={() => void load()}>Load recorded activity</button>
+    <button ref={loadControl} type="button" aria-disabled={pending || !connected} onClick={() => void load()}>Load recorded activity</button>
+    {pending && <button ref={cancelControl} type="button" onClick={cancel}>Cancel waiting for recorded activity</button>}
     <div role="status" aria-live="polite" aria-atomic="true">
+      {cancelled && <p>Stopped waiting for recorded activity. This does not confirm that the server stopped processing the request. Select Load recorded activity to reload explicitly.</p>}
       {focusNotice && <p>{focusNotice}</p>}
       {pending ? <p>Loading recorded activity…</p> : unavailable ? <p>Recorded activity unavailable. Check the workspace connection and explicitly load again.</p> : !data ? <p>Recorded activity not loaded.</p> : <p>Showing a snapshot of up to {data.limit} recent recorded attempts across all sources. Load again explicitly to refresh.</p>}
       {!connected && <p>Workspace disconnected. Activity loading and saved-work navigation unavailable; nothing is automatically replayed.</p>}
